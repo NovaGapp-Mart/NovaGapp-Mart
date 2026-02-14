@@ -7,6 +7,37 @@ window.USER_COUNTRY = localStorage.getItem("country") || "";
 window.USER_COUNTRY_CODE = localStorage.getItem("country_code") || "";
 
 /* =====================================
+   API BASE SAFETY (NON-LOCAL)
+===================================== */
+(function(){
+  const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
+  const isLocal = String(location.protocol || "") === "file:";
+  const isLoopback = (value) => /^http:\/\//i.test(String(value || "").trim());
+
+  if(!isLocal){
+    const clearLoopback = (store, keys) => {
+      if(!store) return;
+      keys.forEach((key) => {
+        try{
+          const raw = String(store.getItem(key) || "").trim();
+          if(isLoopback(raw)){
+            store.removeItem(key);
+          }
+        }catch(_){ }
+      });
+    };
+    clearLoopback(window.localStorage, ["api_base", "contest_api_base", "tryonApiBase"]);
+    clearLoopback(window.sessionStorage, ["api_base", "contest_api_base", "tryonApiBase"]);
+  }
+
+  const globalBase = String(window.CONTEST_API_BASE || window.API_BASE || "").trim();
+  if(!globalBase || (!isLocal && isLoopback(globalBase))){
+    window.CONTEST_API_BASE = DEFAULT_REMOTE_API_BASE;
+    window.API_BASE = DEFAULT_REMOTE_API_BASE;
+  }
+})();
+
+/* =====================================
    TRANSLATIONS
 ===================================== */
 window.TEXT = {

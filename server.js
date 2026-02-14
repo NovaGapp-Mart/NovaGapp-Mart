@@ -1963,6 +1963,10 @@ app.post("/api/contest/order/verify", async (req, res) => {
     const paymentCurrency = String(paymentSnapshot?.currency || "").trim().toUpperCase();
     const paymentAmountPaise = Math.round(safeNumber(paymentSnapshot?.amount));
     const paymentCaptured = Boolean(paymentSnapshot?.captured) || paymentStatus === "captured";
+    const noteContestId = sanitizeToken(paymentSnapshot?.notes?.contest_id, 40).toLowerCase();
+    const noteSideId = sanitizeToken(paymentSnapshot?.notes?.side_id, 40).toLowerCase();
+    const notePackId = sanitizeToken(paymentSnapshot?.notes?.pack_id, 40).toLowerCase();
+    const noteUserId = sanitizeUserId(paymentSnapshot?.notes?.user_id || userId);
 
     if(!paymentStatus || !isRazorpayPaymentStatusAcceptable(paymentStatus) || !paymentCaptured){
       return res.status(409).json({
@@ -1987,9 +1991,33 @@ app.post("/api/contest/order/verify", async (req, res) => {
     }
 
     const result = await mutateContestState(state => {
-      const order = state.orders[orderId];
+      let order = state.orders[orderId];
       if(!order){
-        return { error:"order_not_found" };
+        const fallbackContest = getContestById(noteContestId);
+        const fallbackPack = getContestPackById(notePackId);
+        const fallbackSide = fallbackContest?.sides?.find(item => item.id === noteSideId) || null;
+        const fallbackUserId = sanitizeUserId(noteUserId || userId);
+        if(!fallbackContest || !fallbackPack || !fallbackSide || !canContestUserPay(fallbackUserId)){
+          return { error:"order_not_found" };
+        }
+        const nowIso = new Date().toISOString();
+        order = {
+          razorpay_order_id: orderId,
+          receipt: String(paymentSnapshot?.notes?.app_order_id || "").trim(),
+          status: "created",
+          user_id: fallbackUserId,
+          contest_id: fallbackContest.id,
+          side_id: fallbackSide.id,
+          pack_id: fallbackPack.id,
+          votes: fallbackPack.votes,
+          amount_usd: fallbackPack.usd,
+          amount_inr_paise: paymentAmountPaise,
+          usd_inr_rate: 0,
+          currency: "INR",
+          created_at: nowIso,
+          updated_at: nowIso
+        };
+        state.orders[orderId] = order;
       }
       const expectedCurrency = String(order.currency || "INR").trim().toUpperCase() || "INR";
       if(paymentCurrency && expectedCurrency && paymentCurrency !== expectedCurrency){
@@ -2008,7 +2036,7 @@ app.post("/api/contest/order/verify", async (req, res) => {
         };
       }
 
-      const payerId = sanitizeUserId(order.user_id || userId);
+      const payerId = sanitizeUserId(order.user_id || noteUserId || userId);
       if(!canContestUserPay(payerId)){
         return { error:"order_user_invalid" };
       }

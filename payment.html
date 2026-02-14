@@ -115,13 +115,12 @@ function normalizeBase(base){
 }
 
 function isLoopbackBase(base){
-  return /^http:\/\/(127\.0\.0\.1|localhost):/i.test(String(base || "").trim());
+  return /^http:\/\//i.test(String(base || "").trim());
 }
 
 function resolveApiBase(){
   const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
-  const host = String(location.hostname || "").toLowerCase();
-  const allowLoopback = host === "127.0.0.1" || host === "localhost" || location.protocol === "file:";
+  const allowLoopback = location.protocol === "file:";
   const q = new URLSearchParams(location.search);
   const fromQuery = normalizeBase(q.get("api_base"));
   if(fromQuery){
@@ -152,8 +151,8 @@ function resolveApiBase(){
   const fromGlobal = normalizeBase(window.API_BASE || window.CONTEST_API_BASE || "");
   if(fromGlobal && !(isLoopbackBase(fromGlobal) && !allowLoopback)) return fromGlobal;
 
-  if(location.protocol === "file:" || host === "localhost" || host === "127.0.0.1"){
-    return "http://127.0.0.1:3000";
+  if(location.protocol === "file:"){
+    return "https://novagapp-mart.onrender.com";
   }
   return DEFAULT_REMOTE_API_BASE;
 }

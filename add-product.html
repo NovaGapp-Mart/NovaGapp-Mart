@@ -89,17 +89,16 @@ let SELLER_PROFILE = null;
 let SELECTED_IMAGES = [];
 const FILE_KEYS = new Set();
 function resolveTryonApiBase(){
-  const host = String(location.hostname || "").toLowerCase();
-  const allowLoopback = host === "127.0.0.1" || host === "localhost" || location.protocol === "file:";
+  const allowLoopback = location.protocol === "file:";
   const stored = String(localStorage.getItem("tryonApiBase") || "").trim().replace(/\/+$/g, "");
   if(stored){
-    const isLoopback = /^http:\/\/(127\.0\.0\.1|localhost):/i.test(stored);
+    const isLoopback = /^http:\/\//i.test(stored);
     if(!isLoopback || allowLoopback){
       return stored;
     }
     try{ localStorage.removeItem("tryonApiBase"); }catch(_){ }
   }
-  return allowLoopback ? "http://127.0.0.1:3000" : "https://novagapp-mart.onrender.com";
+  return allowLoopback ? "https://novagapp-mart.onrender.com" : "https://novagapp-mart.onrender.com";
 }
 const API_BASE = resolveTryonApiBase();
 

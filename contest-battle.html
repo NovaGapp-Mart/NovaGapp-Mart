@@ -7,20 +7,19 @@
 <script>
 (() => {
   const src = new URLSearchParams(location.search);
-  const host = String(location.hostname || "").toLowerCase();
-  const isLocalHost = host === "127.0.0.1" || host === "localhost";
+  const isFileRuntime = location.protocol === "file:";
   const onLiveServer = String(location.port || "") === "5500";
   const explicitBase = String(src.get("api_base") || "").trim().replace(/\/+$/g, "");
   if(!explicitBase){
-    if(isLocalHost && onLiveServer){
-      window.CONTEST_API_BASE = "http://127.0.0.1:3000";
+    if(isFileRuntime && onLiveServer){
+      window.CONTEST_API_BASE = "https://novagapp-mart.onrender.com";
     }
     return;
   }
   let loopback = false;
   try{
-    const host = String(new URL(explicitBase).hostname || "").toLowerCase();
-    loopback = host === "127.0.0.1" || host === "localhost";
+    const parsed = new URL(explicitBase);
+    loopback = String(parsed.protocol || "").toLowerCase() === "http:";
   }catch(_){
     return;
   }
@@ -32,7 +31,7 @@
   ).trim().toLowerCase();
   const allowLocal = rawFlag === "1" || rawFlag === "true" || rawFlag === "yes";
   const canUseRelative = String(location.port || "") === "3000";
-  if(loopback && !(allowLocal || canUseRelative || isLocalHost)){
+  if(loopback && !(allowLocal || canUseRelative || isFileRuntime)){
     return;
   }
   window.CONTEST_API_BASE = explicitBase;
@@ -58,7 +57,7 @@
   --black:#050505;
 }
 *{box-sizing:border-box}
-html,body{margin:0;padding:0}
+html,body{margin:0;padding:0;max-width:100%;overflow-x:hidden}
 body{
   font-family:"Manrope",system-ui,sans-serif;
   color:var(--ink);
@@ -1218,8 +1217,8 @@ function isLoopbackBase(base){
   const normalized = normalizeBase(base);
   if(!normalized) return false;
   try{
-    const host = String(new URL(normalized).hostname || "").toLowerCase();
-    return host === "127.0.0.1" || host === "localhost";
+    const parsed = new URL(normalized);
+    return String(parsed.protocol || "").toLowerCase() === "http:";
   }catch(_){
     return false;
   }
@@ -1258,8 +1257,7 @@ function canUseRelativeApiPath(){
 
 function allowLoopbackApiBase(){
   if(canUseRelativeApiPath()) return true;
-  const host = String(location.hostname || "").toLowerCase();
-  if(location.protocol === "file:" || host === "localhost" || host === "127.0.0.1"){
+  if(location.protocol === "file:"){
     return true;
   }
   const params = new URLSearchParams(location.search);
@@ -1273,10 +1271,7 @@ function allowLoopbackApiBase(){
 }
 
 function isLocalRuntime(){
-  const host = String(location.hostname || "").toLowerCase();
-  return location.protocol === "file:"
-    || host === "localhost"
-    || host === "127.0.0.1";
+  return location.protocol === "file:";
 }
 
 function isLikelySupabaseUserId(value){
@@ -2227,3 +2222,4 @@ if(!window.__contestBattleInitPromise){
 </script>
 </body>
 </html>
+

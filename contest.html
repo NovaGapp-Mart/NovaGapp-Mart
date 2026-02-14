@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -18,7 +18,7 @@
   --orange-dark:#bf4300;
 }
 *{box-sizing:border-box}
-html,body{margin:0;padding:0}
+html,body{margin:0;padding:0;max-width:100%;overflow-x:hidden}
 body{font-family:Arial,sans-serif;background:var(--bg);color:var(--ink)}
 .top-strip{background:var(--orange-dark);color:#fff;padding:10px 0}
 .top-inner{
@@ -572,8 +572,8 @@ function isLoopbackBase(raw){
   const normalized = normalizeApiBase(raw);
   if(!normalized) return false;
   try{
-    const host = String(new URL(normalized).hostname || "").toLowerCase();
-    return host === "127.0.0.1" || host === "localhost";
+    const parsed = new URL(normalized);
+    return String(parsed.protocol || "").toLowerCase() === "http:";
   }catch(_){
     return false;
   }
@@ -592,8 +592,7 @@ function canUseRelativeApiPath(){
 
 function allowLoopbackApiBase(){
   if(canUseRelativeApiPath()) return true;
-  const host = String(window.location.hostname || "").toLowerCase();
-  if(window.location.protocol === "file:" || host === "localhost" || host === "127.0.0.1"){
+  if(window.location.protocol === "file:"){
     return true;
   }
   const params = new URLSearchParams(window.location.search);
@@ -639,11 +638,7 @@ function resolveApiBase(){
   if(fromGlobal && !(isLoopbackBase(fromGlobal) && !allowLoopback)){
     return fromGlobal;
   }
-  if(window.location.protocol === "file:") return "http://127.0.0.1:3000";
-  const host = String(window.location.hostname || "").toLowerCase();
-  if((host === "localhost" || host === "127.0.0.1") && !canUseRelativeApiPath()){
-    return "http://127.0.0.1:3000";
-  }
+  if(window.location.protocol === "file:") return "https://novagapp-mart.onrender.com";
   if(canUseRelativeApiPath()) return "";
   return "";
 }
@@ -952,7 +947,7 @@ async function getReferralCode(){
 
 function makeShareUrl(refCode){
   const base = window.location.protocol === "file:"
-    ? "http://127.0.0.1:3000/contest.html"
+    ? "https://novagapp-mart.onrender.com/contest.html"
     : (window.location.origin + window.location.pathname);
   const url = new URL(base);
   url.searchParams.set("ref", refCode);
@@ -1072,3 +1067,4 @@ if(!window.__contestInitPromise){
 </script>
 </body>
 </html>
+

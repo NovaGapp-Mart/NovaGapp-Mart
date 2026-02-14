@@ -15,13 +15,12 @@ function normalizeBase(value){
 }
 
 function isLocalRuntime(){
-  const host = String(location.hostname || "").toLowerCase();
-  return host === "127.0.0.1" || host === "localhost" || String(location.protocol || "") === "file:";
+  return String(location.protocol || "") === "file:";
 }
 
 function isLoopbackBase(base){
   const value = String(base || "").trim().toLowerCase();
-  return value.startsWith("http://127.0.0.1:") || value.startsWith("http://localhost:");
+  return value.startsWith("http://");
 }
 
 function buildPublicConfigEndpoints(){
@@ -40,7 +39,7 @@ function buildPublicConfigEndpoints(){
     const local = isLocalRuntime();
     const onLiveServer = String(location.port || "") === "5500";
     if(local && onLiveServer){
-      push("http://127.0.0.1:3000/api/public/config");
+      push("https://novagapp-mart.onrender.com/api/public/config");
     }
   }catch(_){ }
 
