@@ -107,10 +107,7 @@ body{margin:0;font-family:Arial,sans-serif;background:#f5f5f5}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="public-config.js"></script>
 <script>
-  window.supabase = supabase.createClient(
-    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
-    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
-  );
+  window.supa = window.supa || window.novaCreateSupabaseClient();
 </script>
 <script src="global.js"></script>
 </head>
@@ -217,7 +214,11 @@ body{margin:0;font-family:Arial,sans-serif;background:#f5f5f5}
 </nav>
 
 <script>
-const supa = window.supabase;
+const supa = window.supa;
+if(!supa){
+  location.href = "login.html";
+  throw new Error("supabase_client_unavailable");
+}
 let CURRENT_USER=null, CURRENT_SELLER=null, isSellerPaid=false, showBadge=false;
 
 (async function init(){

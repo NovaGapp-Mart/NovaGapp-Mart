@@ -327,7 +327,29 @@ let page = 0;
 let loading = false;
 let done = false;
 const PAGE_SIZE = 4;
-const currentUserPromise = window.NOVA.getUser();
+function hasNovaClient(){
+  return Boolean(window.NOVA && window.NOVA.supa && typeof window.NOVA.getUser === "function");
+}
+
+async function ensureNovaClientReady(timeoutMs){
+  const timeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : 4500;
+  const start = Date.now();
+  while(Date.now() - start < timeout){
+    if(hasNovaClient()) return true;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  return hasNovaClient();
+}
+
+const currentUserPromise = (async () => {
+  const ready = await ensureNovaClientReady();
+  if(!ready) return null;
+  try{
+    return await window.NOVA.getUser();
+  }catch(_){
+    return null;
+  }
+})();
 const creatorCache = {};
 const commentUserCache = {};
 const followerCountCache = {};
@@ -503,10 +525,20 @@ async function getFollowerCount(userId){
 }
 
 async function createReel(){
+  const ready = await ensureNovaClientReady();
+  if(!ready){
+    alert("Reels are not ready. Please refresh and try again.");
+    return;
+  }
   reelInput.click();
 }
 
 reelInput.onchange = async e => {
+  const ready = await ensureNovaClientReady();
+  if(!ready){
+    alert("Reel upload is unavailable right now.");
+    return;
+  }
   const file = e.target.files[0];
   if(!file) return;
 
@@ -546,6 +578,16 @@ reelInput.onchange = async e => {
 async function loadMore(){
   if(loading || done) return;
   loading = true;
+  const ready = await ensureNovaClientReady();
+  if(!ready){
+    loading = false;
+    done = true;
+    if(emptyState){
+      emptyState.textContent = "Unable to load reels.";
+      emptyState.style.display = "flex";
+    }
+    return;
+  }
 
   const from = page * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
@@ -994,6 +1036,8 @@ function focusReelElement(reel){
 
 async function ensureFocusReelLoaded(){
   if(!focusReelId || renderedIds.has(focusReelId)) return;
+  const ready = await ensureNovaClientReady();
+  if(!ready) return;
 
   let query = window.NOVA.supa
     .from("reels")

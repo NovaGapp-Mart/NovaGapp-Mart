@@ -11,6 +11,43 @@
     supabaseAnonKey: "",
     razorpayKeyId: ""
   });
+  const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
+
+  function getHostName(){
+    try{
+      return String(location.hostname || "").toLowerCase();
+    }catch(_){
+      return "";
+    }
+  }
+
+  function isLocalRuntime(){
+    const host = getHostName();
+    return host === "127.0.0.1" || host === "localhost" || String(location.protocol || "") === "file:";
+  }
+
+  function isLoopbackBase(base){
+    const value = String(base || "").trim().toLowerCase();
+    return value.startsWith("http://127.0.0.1:") || value.startsWith("http://localhost:");
+  }
+
+  function cleanupLoopbackApiBases(){
+    if(isLocalRuntime()) return;
+    const keys = ["contest_api_base", "api_base", "tryonApiBase"];
+    const cleanupStore = (store, storeKeys) => {
+      if(!store) return;
+      storeKeys.forEach(key => {
+        try{
+          const raw = String(store.getItem(key) || "").trim();
+          if(isLoopbackBase(raw)){
+            store.removeItem(key);
+          }
+        }catch(_){ }
+      });
+    };
+    cleanupStore(window.localStorage, keys);
+    cleanupStore(window.sessionStorage, ["contest_api_base", "api_base"]);
+  }
 
   function sanitizeConfig(raw){
     const next = {
@@ -80,15 +117,13 @@
     };
 
     pushEndpoint("/api/public/config");
+    pushEndpoint(DEFAULT_REMOTE_API_BASE + "/api/public/config");
 
     try{
-      const host = String(location.hostname || "").toLowerCase();
-      const isLocal = host === "127.0.0.1" || host === "localhost";
+      const isLocal = isLocalRuntime();
       const liveServer = String(location.port || "") === "5500";
       if(isLocal && liveServer){
         pushEndpoint("http://127.0.0.1:3000/api/public/config");
-        pushEndpoint("https://novagapp-mart.onrender.com
-/api/public/config");
       }
     }catch(_){ }
 
@@ -105,6 +140,7 @@
       .map(normalizeBase)
       .filter(Boolean)
       .forEach(base => {
+        if(!isLocalRuntime() && isLoopbackBase(base)) return;
         pushEndpoint(base + "/api/public/config");
       });
 
@@ -148,6 +184,8 @@
     throw new Error("public_config_fetch_failed");
   }
 
+  cleanupLoopbackApiBases();
+
   const fromStorage = readStored();
   const fromFallback = readFallback();
   const localPreferred = mergePreferPrimary(fromStorage, fromFallback);
@@ -185,5 +223,55 @@
         inflight = null;
       });
     return inflight;
+  };
+
+  function getEffectiveConfigSync(){
+    const current = sanitizeConfig(window.NOVA_PUBLIC_CONFIG || EMPTY_CONFIG);
+    if(current.supabaseUrl && current.supabaseAnonKey){
+      return current;
+    }
+    const fromServer = readFromServerSync();
+    if(fromServer){
+      const next = sanitizeConfig(fromServer);
+      window.NOVA_PUBLIC_CONFIG = next;
+      window.__NOVA_PUBLIC_CONFIG__ = next;
+      writeStored(next);
+      return next;
+    }
+    return current;
+  }
+
+  function createSupabaseClient(options){
+    const sdk = window.supabase;
+    if(!sdk || typeof sdk.createClient !== "function"){
+      return null;
+    }
+    const cfg = getEffectiveConfigSync();
+    if(!cfg.supabaseUrl || !cfg.supabaseAnonKey){
+      return null;
+    }
+    try{
+      return sdk.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, options);
+    }catch(_){
+      return null;
+    }
+  }
+
+  window.novaCreateSupabaseClient = function(options){
+    if(window.supa) return window.supa;
+    const client = createSupabaseClient(options);
+    if(client){
+      window.supa = client;
+    }
+    return client;
+  };
+
+  window.ensureNovaSupabaseClient = async function(options){
+    const existing = window.novaCreateSupabaseClient(options);
+    if(existing) return existing;
+    try{
+      await window.getNovaPublicConfig(true);
+    }catch(_){ }
+    return window.novaCreateSupabaseClient(options);
   };
 })();

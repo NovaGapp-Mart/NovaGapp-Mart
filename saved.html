@@ -7,6 +7,7 @@
 
 <!-- SUPABASE -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
 <script src="global.js"></script>
 
 <style>
@@ -83,6 +84,11 @@ body{background:#fff;color:#000}
 <script>
 /* 🔐 AUTH CHECK (SUPABASE) */
 (async ()=>{
+  const supabase = window.supa || window.novaCreateSupabaseClient();
+  if(!supabase){
+    location.href = "login.html";
+    return;
+  }
   const { data, error } = await supabase.auth.getUser();
 
   if(error || !data?.user){

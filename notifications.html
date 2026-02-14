@@ -58,12 +58,11 @@ body{margin:0;font-family:Arial,sans-serif;background:#f5f5f5}
 </div>
 
 <script>
-const supa =
-  window.supa ||
-  window.supabase?.createClient(
-    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
-    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
-  );
+const supa = window.supa || window.novaCreateSupabaseClient();
+if(!supa){
+  location.href = "login.html";
+  throw new Error("supabase_client_unavailable");
+}
 
 let CURRENT_USER = null;
 let IS_SELLER = false;

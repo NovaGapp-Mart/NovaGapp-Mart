@@ -17,6 +17,7 @@
       detectSessionInUrl:true
     }
   };
+  const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
   let socialInitIssue = "";
 
   function normalizePublicConfig(raw){
@@ -30,6 +31,16 @@
     return String(value || "").trim().replace(/\/+$/g, "");
   }
 
+  function isLocalRuntime(){
+    const host = String(location.hostname || "").toLowerCase();
+    return host === "127.0.0.1" || host === "localhost" || String(location.protocol || "") === "file:";
+  }
+
+  function isLoopbackBase(base){
+    const value = String(base || "").trim().toLowerCase();
+    return value.startsWith("http://127.0.0.1:") || value.startsWith("http://localhost:");
+  }
+
   function buildPublicConfigEndpoints(){
     const endpoints = [];
     const push = (value) => {
@@ -40,15 +51,13 @@
     };
 
     push("/api/public/config");
+    push(DEFAULT_REMOTE_API_BASE + "/api/public/config");
 
     try{
-      const host = String(location.hostname || "").toLowerCase();
-      const local = host === "127.0.0.1" || host === "localhost";
+      const local = isLocalRuntime();
       const onLiveServer = String(location.port || "") === "5500";
       if(local && onLiveServer){
         push("http://127.0.0.1:3000/api/public/config");
-        push("https://novagapp-mart.onrender.com
-/api/public/config");
       }
     }catch(_){ }
 
@@ -63,7 +72,10 @@
       bases
         .map(normalizeBase)
         .filter(Boolean)
-        .forEach(base => push(base + "/api/public/config"));
+        .forEach(base => {
+          if(!isLocalRuntime() && isLoopbackBase(base)) return;
+          push(base + "/api/public/config");
+        });
     }catch(_){ }
 
     return endpoints;

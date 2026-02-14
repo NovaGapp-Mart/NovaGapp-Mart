@@ -543,11 +543,24 @@ function pickLang(map){
 }
 
 function resolveApiBase(){
+  const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
+  const host = String(window.location.hostname || "").toLowerCase();
+  const allowLoopback = host === "127.0.0.1" || host === "localhost" || window.location.protocol === "file:";
   const params = new URLSearchParams(window.location.search);
   const fromQuery = String(params.get("api_base") || "").trim();
-  if(fromQuery) return fromQuery.replace(/\/+$/g, "");
+  if(fromQuery){
+    const normalized = fromQuery.replace(/\/+$/g, "");
+    const loopbackQuery = /^http:\/\/(127\.0\.0\.1|localhost):/i.test(normalized);
+    if(loopbackQuery && !allowLoopback){
+      return DEFAULT_REMOTE_API_BASE;
+    }
+    return normalized;
+  }
   if(String(window.location.port || "") === "3000") return "";
-  return "http://127.0.0.1:3000";
+  if(host === "localhost" || host === "127.0.0.1" || window.location.protocol === "file:"){
+    return "http://127.0.0.1:3000";
+  }
+  return DEFAULT_REMOTE_API_BASE;
 }
 
 function withQuery(path){

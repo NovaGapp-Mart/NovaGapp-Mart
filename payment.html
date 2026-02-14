@@ -104,21 +104,31 @@ body{margin:0;background:#f2f3f5}
 </div>
 
 <script>
-const supa =
-  window.supa ||
-  window.supabase?.createClient(
-    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
-    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
-  );
+const supa = window.supa || window.novaCreateSupabaseClient();
+if(!supa){
+  location.href = "login.html";
+  throw new Error("supabase_client_unavailable");
+}
 
 function normalizeBase(base){
   return String(base || "").trim().replace(/\/+$/g, "");
 }
 
+function isLoopbackBase(base){
+  return /^http:\/\/(127\.0\.0\.1|localhost):/i.test(String(base || "").trim());
+}
+
 function resolveApiBase(){
+  const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
+  const host = String(location.hostname || "").toLowerCase();
+  const allowLoopback = host === "127.0.0.1" || host === "localhost" || location.protocol === "file:";
   const q = new URLSearchParams(location.search);
   const fromQuery = normalizeBase(q.get("api_base"));
   if(fromQuery){
+    if(isLoopbackBase(fromQuery) && !allowLoopback){
+      try{ localStorage.removeItem("api_base"); }catch(_){ }
+      return DEFAULT_REMOTE_API_BASE;
+    }
     try{ localStorage.setItem("api_base", fromQuery); }catch(_){ }
     return fromQuery;
   }
@@ -131,15 +141,21 @@ function resolveApiBase(){
   try{
     fromStorage = normalizeBase(localStorage.getItem("api_base") || "");
   }catch(_){ }
-  if(fromStorage) return fromStorage;
+  if(fromStorage){
+    if(isLoopbackBase(fromStorage) && !allowLoopback){
+      try{ localStorage.removeItem("api_base"); }catch(_){ }
+    }else{
+      return fromStorage;
+    }
+  }
 
   const fromGlobal = normalizeBase(window.API_BASE || window.CONTEST_API_BASE || "");
-  if(fromGlobal) return fromGlobal;
+  if(fromGlobal && !(isLoopbackBase(fromGlobal) && !allowLoopback)) return fromGlobal;
 
-  if(location.protocol === "file:"){
+  if(location.protocol === "file:" || host === "localhost" || host === "127.0.0.1"){
     return "http://127.0.0.1:3000";
   }
-  return "http://127.0.0.1:3000";
+  return DEFAULT_REMOTE_API_BASE;
 }
 
 const API_BASE = resolveApiBase();

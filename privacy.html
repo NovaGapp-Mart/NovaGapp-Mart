@@ -121,11 +121,12 @@ input:checked + .slider:before{
 </div>
 
 <script>
-/* 🔐 SUPABASE CONFIG */
-const supabase = supabase.createClient(
-  window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
-  window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
-);
+/* Ã°Å¸â€Â SUPABASE CONFIG */
+const supabase = window.novaCreateSupabaseClient();
+if(!supabase){
+  location.href = "login.html";
+  throw new Error("supabase_client_unavailable");
+}
 
 const fields = [
   "privateAccount",
@@ -155,7 +156,7 @@ const fields = [
     document.getElementById(f).addEventListener("change",e=>{
       localStorage.setItem("privacy_"+f, e.target.checked);
 
-      // 🔮 FUTURE DB SYNC (ADD LATER, NO UI CHANGE)
+      // Ã°Å¸â€Â® FUTURE DB SYNC (ADD LATER, NO UI CHANGE)
     });
   });
 })();

@@ -131,11 +131,12 @@ select{
 </div>
 
 <script>
-/* 🔐 SUPABASE CONFIG */
-const supabase = supabase.createClient(
-  window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
-  window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
-);
+/* Ã°Å¸â€Â SUPABASE CONFIG */
+const supabase = window.novaCreateSupabaseClient();
+if(!supabase){
+  location.href = "login.html";
+  throw new Error("supabase_client_unavailable");
+}
 
 let currentUser;
 
@@ -177,7 +178,7 @@ function save(){
   status.innerText = "Saved";
   setTimeout(()=>status.innerText="",1200);
 
-  // 🔮 FUTURE DB SYNC (NO UI / LOGIC CHANGE REQUIRED)
+  // Ã°Å¸â€Â® FUTURE DB SYNC (NO UI / LOGIC CHANGE REQUIRED)
   //   user_id: currentUser.id,
   //   ...settings
   // });

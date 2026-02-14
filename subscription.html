@@ -10,10 +10,7 @@
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script src="global.js"></script>
 <script>
-  window.supabase = supabase.createClient(
-    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
-    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
-  );
+  window.supa = window.supa || window.novaCreateSupabaseClient();
 </script>
 
 <style>
@@ -120,6 +117,12 @@ button{
 </div>
 
 <script>
+const supabase = window.supa;
+if(!supabase){
+  alert("Supabase connection unavailable. Please refresh.");
+  location.href = "login.html";
+  throw new Error("supabase_client_unavailable");
+}
 let currentUser = null;
 let activePlan = "FREE";
 const RZP_KEY = window.NOVA_PUBLIC_CONFIG?.razorpayKeyId || "";
@@ -174,6 +177,14 @@ function pay(amount,plan){
   if(!currentUser){
     alert("Login required");
     location.href = "login.html";
+    return;
+  }
+  if(!String(RZP_KEY || "").trim()){
+    alert("Razorpay key is not configured.");
+    return;
+  }
+  if(typeof window.Razorpay !== "function"){
+    alert("Razorpay SDK failed to load.");
     return;
   }
 

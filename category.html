@@ -10,10 +10,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="public-config.js"></script>
   <script>
-    window.supa = window.supa || supabase.createClient(
-      window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
-      window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
-    );
+    window.supa = window.supa || window.novaCreateSupabaseClient();
   </script>
 
   <!-- 🔥 GLOBAL -->

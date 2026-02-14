@@ -109,7 +109,7 @@ header{
 }
 </style>
 
-<!-- 🔥 SUPABASE -->
+<!-- Ã°Å¸â€Â¥ SUPABASE -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="public-config.js"></script>
 <script src="global.js"></script>
@@ -119,7 +119,7 @@ header{
 
 <header>
   <div class="header-title">My Products</div>
-  <div class="notif-bell" id="notifBell">🔔
+  <div class="notif-bell" id="notifBell">Ã°Å¸â€â€
     <span class="notif-badge" id="notifCount" style="display:none">0</span>
   </div>
 </header>
@@ -146,14 +146,13 @@ const box = document.getElementById("productsBox");
 const summaryGrid = document.getElementById("summaryGrid");
 const toast = document.getElementById("toast");
 let notifChannel = null;
-const supa =
-  window.supa ||
-  window.supabase?.createClient(
-    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
-    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
-  );
+const supa = window.supa || window.novaCreateSupabaseClient();
+if(!supa){
+  location.href = "login.html";
+  throw new Error("supabase_client_unavailable");
+}
 
-/* 🔐 AUTH CHECK */
+/* Ã°Å¸â€Â AUTH CHECK */
 (async function(){
   if(!supa || !supa.auth){
     console.error("Supabase client not initialized. Check script load order.");
@@ -200,7 +199,7 @@ function renderSummary(products, soldMap){
   `;
 }
 
-/* 🔥 LOAD PRODUCTS FROM SUPABASE */
+/* Ã°Å¸â€Â¥ LOAD PRODUCTS FROM SUPABASE */
 async function loadMyProducts(){
   box.innerHTML = "";
 
@@ -353,7 +352,7 @@ async function setQty(id){
   loadMyProducts();
 }
 
-/* 🗑 DELETE PRODUCT */
+/* Ã°Å¸â€”â€˜ DELETE PRODUCT */
 async function deleteProduct(id){
   const ok = window.confirm("Delete this product?");
   if(!ok) return;
@@ -373,13 +372,13 @@ async function deleteProduct(id){
   loadMyProducts();
 }
 
-/* ✏️ EDIT PRODUCT */
+/* Ã¢Å“ÂÃ¯Â¸Â EDIT PRODUCT */
 function editProduct(id){
   localStorage.setItem("editProductId", id);
   location.href = "edit-product.html";
 }
 
-/* 🔔 NOTIFICATIONS */
+/* Ã°Å¸â€â€ NOTIFICATIONS */
 function initNotifications(){
   const bell = document.getElementById("notifBell");
   const panel = document.getElementById("notifPanel");

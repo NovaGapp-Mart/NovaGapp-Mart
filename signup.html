@@ -99,10 +99,15 @@ window.ensureSupaClient().catch(err => {
 
 function buildContestApiCandidates(){
   const out = [];
+  const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
   const push = (raw) => {
     const val = String(raw || "").trim().replace(/\/+$/g, "");
     if(!val) return;
     if(!/^https?:\/\//i.test(val)) return;
+    const isLoopback = /^http:\/\/(127\.0\.0\.1|localhost):/i.test(val);
+    const localHost = String(location.hostname || "").toLowerCase();
+    const allowLoopback = localHost === "127.0.0.1" || localHost === "localhost" || location.protocol === "file:";
+    if(isLoopback && !allowLoopback) return;
     if(out.includes(val)) return;
     out.push(val);
   };
@@ -110,6 +115,7 @@ function buildContestApiCandidates(){
   const host = String(location.hostname || "").toLowerCase();
   const isLocal = host === "127.0.0.1" || host === "localhost" || location.protocol === "file:";
   const qp = new URLSearchParams(location.search);
+  push(DEFAULT_REMOTE_API_BASE);
   push(qp.get("api_base"));
   try{
     push(localStorage.getItem("contest_api_base"));
@@ -118,8 +124,7 @@ function buildContestApiCandidates(){
   push(window.CONTEST_API_BASE || window.API_BASE || "");
   if(isLocal){
     push("http://127.0.0.1:3000");
-    push("https://novagapp-mart.onrender.com
-");
+    push("https://novagapp-mart.onrender.com");
   }
   if(!out.length && /^https?:\/\//i.test(location.origin)){
     out.push(location.origin.replace(/\/+$/g, ""));

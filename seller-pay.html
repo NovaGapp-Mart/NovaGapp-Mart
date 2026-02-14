@@ -8,10 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="public-config.js"></script>
 <script>
-  window.supabase = supabase.createClient(
-    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
-    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
-  );
+  window.supa = window.supa || window.novaCreateSupabaseClient();
 </script>
 <script src="global.js"></script>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
@@ -69,7 +66,11 @@ button{
 </div>
 
 <script>
-const supa = window.supabase;
+const supa = window.supa;
+if(!supa){
+  location.href = "login.html";
+  throw new Error("supabase_client_unavailable");
+}
 let CURRENT_USER = null;
 
 /* AUTH + STATUS */
@@ -100,9 +101,18 @@ let CURRENT_USER = null;
 
 /* RAZORPAY */
 payBtn.onclick = () => {
+  const key = String(window.NOVA_PUBLIC_CONFIG?.razorpayKeyId || "").trim();
+  if(!key){
+    alert("Razorpay key is not configured.");
+    return;
+  }
+  if(typeof window.Razorpay !== "function"){
+    alert("Razorpay SDK failed to load.");
+    return;
+  }
 
   const rzp = new Razorpay({
-    key: window.NOVA_PUBLIC_CONFIG?.razorpayKeyId || "",
+    key,
     amount: 50000,
     currency: "INR",
     name: "NOVAGAPP",

@@ -27,7 +27,7 @@ body{margin:0;font-family:Arial;background:#f4f6f8}
 }
 </style>
 
-<!-- ðŸ”¥ SUPABASE -->
+<!-- ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â¥ SUPABASE -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="public-config.js"></script>
 <script src="global.js"></script>
@@ -39,12 +39,11 @@ body{margin:0;font-family:Arial;background:#f4f6f8}
 <div id="ordersBox"></div>
 
 <script>
-const supa =
-  window.supa ||
-  window.supabase?.createClient(
-    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
-    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
-  );
+const supa = window.supa || window.novaCreateSupabaseClient();
+if(!supa){
+  location.href = "login.html";
+  throw new Error("supabase_client_unavailable");
+}
 
 const box = document.getElementById("ordersBox");
 let HIDDEN_IDS = new Set();
@@ -149,12 +148,12 @@ function renderOrders(orders){
   });
 }
 
-/* ðŸ” AUTH + ORDERS */
+/* ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â AUTH + ORDERS */
 (async function(){
   const { data } = await supa.auth.getSession();
   loadHiddenIds();
 
-  // ðŸ”´ GUEST â†’ show local orders only
+  // ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â´ GUEST ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ show local orders only
   if(!data.session){
     box.innerHTML = `
       <div class="empty">
@@ -168,7 +167,7 @@ function renderOrders(orders){
   HIDDEN_KEY = "hiddenCancelledOrders_" + user.id;
   loadHiddenIds();
 
-  /* ðŸ”¥ REAL ORDERS FROM SUPABASE */
+  /* ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â¥ REAL ORDERS FROM SUPABASE */
   const { data: orders, error } = await supa
     .from("orders")
     .select("*")

@@ -5,11 +5,11 @@
 <title>Checkout - NOVAGAPP</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
-<!-- 🔥 SUPABASE SDK -->
+<!-- Ã°Å¸â€Â¥ SUPABASE SDK -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="public-config.js"></script>
 
-<!-- 🔥 GLOBAL -->
+<!-- Ã°Å¸â€Â¥ GLOBAL -->
 <script src="global.js"></script>
 
 <style>
@@ -108,7 +108,7 @@ body{
 
 <body>
 
-<div class="header" id="backHeader">← Order Details</div>
+<div class="header" id="backHeader">Ã¢â€ Â Order Details</div>
 
 <!-- STEP 1 ADDRESS -->
 <div class="section">
@@ -137,7 +137,7 @@ body{
 <!-- PAYMENT -->
 <div class="section">
   <div class="step"><span>3</span><b>Payment</b></div>
-  <p>✔ UPI / Card / Netbanking (Next Step)</p>
+  <p>Ã¢Å“â€ UPI / Card / Netbanking (Next Step)</p>
 </div>
 
 <div class="footer">
@@ -154,14 +154,13 @@ function ensureUser(){
   });
 }
 let currentUser = null;
-const supa =
-  window.supa ||
-  window.supabase?.createClient(
-    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
-    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
-  );
+const supa = window.supa || window.novaCreateSupabaseClient();
+if(!supa){
+  location.href = "login.html";
+  throw new Error("supabase_client_unavailable");
+}
 
-/* 📦 LOAD CART */
+/* Ã°Å¸â€œÂ¦ LOAD CART */
 let cart = [];
 let itemsBox = document.getElementById("items");
 let total = 0;
@@ -218,7 +217,7 @@ function renderCart(){
 
 renderCart();
 document.addEventListener("ratesUpdated", renderCart);
-/* 🧾 PLACE ORDER (SUPABASE DB) */
+/* Ã°Å¸Â§Â¾ PLACE ORDER (SUPABASE DB) */
 async function placeOrder(){
   if(isPlacingOrder) return;
   const user = await ensureUser();
@@ -284,7 +283,7 @@ async function placeOrder(){
 
   if(error || !data?.id){
     isPlacingOrder = false;
-    alert("❌ Order failed. Please try again.");
+    alert("Ã¢ÂÅ’ Order failed. Please try again.");
     if(error) console.error(error);
     return;
   }

@@ -45,12 +45,11 @@ body{margin:0;font-family:Arial,sans-serif;background:#f3f4f6;color:#111827}
 </div>
 
 <script>
-const supa =
-  window.supa ||
-  window.supabase?.createClient(
-    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
-    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
-  );
+const supa = window.supa || window.novaCreateSupabaseClient();
+if(!supa){
+  location.href = "login.html";
+  throw new Error("supabase_client_unavailable");
+}
 
 const params = new URLSearchParams(location.search);
 const ORDER_ID =

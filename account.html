@@ -273,10 +273,16 @@
 
 <script>
 /* ðŸ”¥ SINGLE SUPABASE CLIENT (GLOBAL) */
-const supa = window.supabase.createClient(
-  window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
-  window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
-);
+const accountPublicConfig = window.NOVA_PUBLIC_CONFIG || {};
+const accountSupabaseUrl = String(accountPublicConfig.supabaseUrl || "").trim();
+const accountSupabaseAnonKey = String(accountPublicConfig.supabaseAnonKey || "").trim();
+const supa =
+  window.supabase &&
+  typeof window.supabase.createClient === "function" &&
+  accountSupabaseUrl &&
+  accountSupabaseAnonKey
+    ? window.supabase.createClient(accountSupabaseUrl, accountSupabaseAnonKey)
+    : null;
 function go(p){ location.href = p }
 function openPublicProduct(id){
   if(!id) return;
@@ -288,6 +294,17 @@ function openPublicProduct(id){
    FINAL ACCOUNT INIT
 ========================= */
 async function initAccount(){
+  if(!supa){
+    console.error("Supabase config missing in account page.");
+    loginPrompt.style.display = "block";
+    profileSection.style.display = "none";
+    personalInfoSection.style.display = "none";
+    publicInfoSection.style.display = "none";
+    accountActions.style.display = "none";
+    sellCta.style.display = "none";
+    logoutBox.style.display = "none";
+    return;
+  }
   const { data } = await supa.auth.getSession();
   const session = data?.session;
   const params = new URLSearchParams(location.search);
@@ -480,18 +497,20 @@ async function initAccount(){
 /* =========================
    AUTH STATE SYNC (MULTI DEVICE FIX)
 ========================= */
-supa.auth.onAuthStateChange((event, session)=>{
-  if(session){
-    initAccount();
-  }else{
-    loginPrompt.style.display = "block";
-    profileSection.style.display = "none";
-    personalInfoSection.style.display = "none";
-    accountActions.style.display = "none";
-    sellCta.style.display = "none";
-    logoutBox.style.display = "none";
-  }
-});
+if(supa){
+  supa.auth.onAuthStateChange((event, session)=>{
+    if(session){
+      initAccount();
+    }else{
+      loginPrompt.style.display = "block";
+      profileSection.style.display = "none";
+      personalInfoSection.style.display = "none";
+      accountActions.style.display = "none";
+      sellCta.style.display = "none";
+      logoutBox.style.display = "none";
+    }
+  });
+}
 
 function openPersonalInfo(){
   const allowed = localStorage.getItem("allow_personal_info") === "1";
@@ -511,7 +530,9 @@ function hidePersonalInfo(){
 
 /* LOGOUT */
 async function logout(){
-  await supa.auth.signOut();
+  if(supa){
+    await supa.auth.signOut();
+  }
   location.href = "login.html";
 }
 

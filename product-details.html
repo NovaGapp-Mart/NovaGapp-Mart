@@ -124,10 +124,7 @@ body{font-family:Arial;margin:0;padding-bottom:160px;background:#fff}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="public-config.js"></script>
 <script>
-  window.supa = window.supa || supabase.createClient(
-    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
-    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
-  );
+  window.supa = window.supa || window.novaCreateSupabaseClient();
 </script>
 <script src="global.js"></script>
 </head>
@@ -184,8 +181,20 @@ const PRO_PLAN = "PRO";
 const ENTERPRISE_PLAN = "ENTERPRISE";
 const FREE_TRYON_LIMIT = 2;
 const PRO_TRYON_LIMIT = 20;
-const TRYON_API_BASE = localStorage.getItem("tryonApiBase") || "https://novagapp-mart.onrender.com
-";
+function resolveTryonApiBase(){
+  const host = String(location.hostname || "").toLowerCase();
+  const allowLoopback = host === "127.0.0.1" || host === "localhost" || location.protocol === "file:";
+  const stored = String(localStorage.getItem("tryonApiBase") || "").trim().replace(/\/+$/g, "");
+  if(stored){
+    const isLoopback = /^http:\/\/(127\.0\.0\.1|localhost):/i.test(stored);
+    if(!isLoopback || allowLoopback){
+      return stored;
+    }
+    try{ localStorage.removeItem("tryonApiBase"); }catch(_){ }
+  }
+  return allowLoopback ? "http://127.0.0.1:3000" : "https://novagapp-mart.onrender.com";
+}
+const TRYON_API_BASE = resolveTryonApiBase();
 
 const supa = window.supa;
 const isPaidUser = localStorage.getItem("userPlan") === PAID_PLAN;
@@ -1247,8 +1256,6 @@ if(aiScreen){
 
 </body>
 </html>
-
-
 
 
 

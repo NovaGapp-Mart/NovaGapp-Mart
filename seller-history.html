@@ -58,7 +58,7 @@ header{
 
 <header>
   <span>Seller History</span>
-  <div class="notif-bell" id="notifBell">🔔
+  <div class="notif-bell" id="notifBell">ðŸ””
     <span class="notif-badge" id="notifCount" style="display:none">0</span>
   </div>
 </header>
@@ -118,14 +118,15 @@ header{
 <script>
 let currentUser = null;
 let notifChannel = null;
+const supa = window.supa || window.novaCreateSupabaseClient();
 
 (async function(){
-  window.supabase = window.supabase || supabase.createClient(
-    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
-    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
-  );
+  if(!supa){
+    location.href = "login.html";
+    return;
+  }
 
-  const { data } = await supabase.auth.getSession();
+  const { data } = await supa.auth.getSession();
   if(!data.session){
     location.href = "login.html";
     return;
@@ -139,7 +140,7 @@ let notifChannel = null;
 async function loadHistory(){
   const products = await fetchOwnedProducts();
 
-  const { data: orders } = await supabase
+  const { data: orders } = await supa
     .from("orders")
     .select("id,items,payment_method,created_at,address")
     .eq("seller_id", currentUser.id);
@@ -208,7 +209,7 @@ async function loadHistory(){
 }
 
 async function fetchOwnedProducts(){
-  const { data, error } = await supabase
+  const { data, error } = await supa
     .from("products")
     .select("*")
     .eq("owner_id", currentUser.id)
@@ -227,7 +228,7 @@ function openOrderDetails(orderId){
   location.href = "order-details.html?order_id=" + encodeURIComponent(orderId);
 }
 
-/* 🔔 NOTIFICATIONS */
+/* ðŸ”” NOTIFICATIONS */
 function initNotifications(){
   const bell = document.getElementById("notifBell");
   const panel = document.getElementById("notifPanel");
@@ -293,7 +294,7 @@ async function loadNotifications(){
 }
 
 async function fetchSellerNotifications(){
-  const bySellerId = await supabase
+  const bySellerId = await supa
     .from("notifications")
     .select("*")
     .eq("seller_id", currentUser.id)
@@ -301,7 +302,7 @@ async function fetchSellerNotifications(){
 
   if(!bySellerId.error && (bySellerId.data || []).length > 0) return bySellerId;
 
-  const byReceiver = await supabase
+  const byReceiver = await supa
     .from("notifications")
     .select("*")
     .eq("receiver_user_id", currentUser.id)
@@ -357,7 +358,7 @@ async function fetchOrderStatusMap(rows){
   const ids = [...new Set((rows || []).map(r=>r.order_id).filter(Boolean))];
   if(ids.length === 0) return {};
 
-  const { data, error } = await supabase
+  const { data, error } = await supa
     .from("orders")
     .select("id,status,payment_method,payment_id")
     .in("id", ids);
@@ -392,23 +393,23 @@ function updateBadge(count){
 }
 
 async function markRead(id){
-  await supabase
+  await supa
     .from("notifications")
     .update({ is_read: true })
     .eq("id", id);
 }
 
 async function deleteNotif(id){
-  await supabase
+  await supa
     .from("notifications")
     .update({ is_deleted: true })
     .eq("id", id);
 }
 
 function subscribeNotifications(){
-  if(notifChannel) supabase.removeChannel(notifChannel);
+  if(notifChannel) supa.removeChannel(notifChannel);
 
-  notifChannel = supabase
+  notifChannel = supa
     .channel("notif-" + currentUser.id)
     .on(
       "postgres_changes",

@@ -79,16 +79,16 @@ button{
 </div>
 
 <script>
-const SUPABASE_URL = window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "";
-const SUPABASE_ANON_KEY = window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || "";
-window.supa = window.supa || supabase.createClient(
-  SUPABASE_URL,
-  SUPABASE_ANON_KEY,
-  { auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true } }
-);
+window.supa = window.supa || window.novaCreateSupabaseClient({
+  auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true }
+});
 
 let currentUser = null;
 const supa = window.supa;
+if(!supa){
+  location.href = "login.html";
+  throw new Error("supabase_client_unavailable");
+}
 
 /* ======================
    AUTH CHECK

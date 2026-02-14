@@ -9,10 +9,7 @@
 <script src="public-config.js"></script>
 
   <script>
-    window.supabase = supabase.createClient(
-      window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
-      window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
-    );
+    window.supa = window.supa || window.novaCreateSupabaseClient();
   </script>
 
   <script src="global.js"></script>
@@ -71,7 +68,11 @@
 </div>
 
 <script>
-const supa = window.supabase;
+const supa = window.supa;
+if(!supa){
+  location.href = "login.html";
+  throw new Error("supabase_client_unavailable");
+}
 
 const avatar = document.getElementById("avatar");
 const photoFile = document.getElementById("photoFile");
