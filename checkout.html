@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Checkout - NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<!-- 🔥 SUPABASE SDK -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+
+<!-- 🔥 GLOBAL -->
+<script src="global.js"></script>
+
+<style>
+body{
+  margin:0;
+  font-family: Arial, sans-serif;
+  background:#f2f2f2;
+}
+.header{
+  background:#fff;
+  padding:12px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-size:18px;
+  font-weight:bold;
+  border-bottom:1px solid #ddd;
+}
+.section{
+  background:#fff;
+  margin:10px;
+  padding:15px;
+  border-radius:8px;
+}
+.step{
+  display:flex;
+  gap:10px;
+  font-size:14px;
+  margin-bottom:10px;
+}
+.step span{
+  width:22px;
+  height:22px;
+  border-radius:50%;
+  background:#2874f0;
+  color:#fff;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:12px;
+}
+.input{
+  width:100%;
+  padding:10px;
+  margin:8px 0;
+  border:1px solid #ccc;
+  border-radius:5px;
+}
+.cart-item{
+  display:flex;
+  gap:10px;
+  margin-bottom:12px;
+}
+.cart-item img{
+  width:70px;
+  height:70px;
+  border-radius:6px;
+  object-fit:cover;
+}
+.cart-title{
+  font-size:15px;
+  font-weight:bold;
+}
+.cart-price{
+  color:#388e3c;
+}
+.summary div{
+  display:flex;
+  justify-content:space-between;
+  margin:6px 0;
+}
+.total{
+  font-size:18px;
+  font-weight:bold;
+}
+.footer{
+  position:fixed;
+  bottom:0;
+  left:0;
+  right:0;
+  background:#fff;
+  padding:10px;
+  border-top:1px solid #ddd;
+}
+.footer button{
+  width:100%;
+  padding:14px;
+  background:#fb641b;
+  border:none;
+  color:#fff;
+  font-size:18px;
+  border-radius:6px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header" id="backHeader">← Order Details</div>
+
+<!-- STEP 1 ADDRESS -->
+<div class="section">
+  <div class="step"><span>1</span><b>Delivery Address</b></div>
+
+  <input class="input" id="name" placeholder="Full Name">
+  <input class="input" id="phone" placeholder="Mobile Number">
+  <input class="input" id="address" placeholder="House / Area">
+  <input class="input" id="city" placeholder="City">
+  <input class="input" id="pincode" placeholder="Pincode">
+</div>
+
+<!-- STEP 2 ORDER SUMMARY -->
+<div class="section">
+  <div class="step"><span>2</span><b>Order Summary</b></div>
+  <div id="items"></div>
+</div>
+
+<!-- PRICE SUMMARY -->
+<div class="section summary">
+  <div><span>Price</span><span id="price">$0</span></div>
+  <div><span>Discount</span><span>- $0</span></div>
+  <div class="total"><span>Total</span><span id="total">$0</span></div>
+</div>
+
+<!-- PAYMENT -->
+<div class="section">
+  <div class="step"><span>3</span><b>Payment</b></div>
+  <p>✔ UPI / Card / Netbanking (Next Step)</p>
+</div>
+
+<div class="footer">
+  <button onclick="placeOrder()">Continue to Payment</button>
+</div>
+
+<script>
+function ensureUser(){
+  if(currentUser) return Promise.resolve(currentUser);
+  if(!supa || !supa.auth) return Promise.resolve(null);
+  return supa.auth.getSession().then(({ data }) => {
+    currentUser = data?.session?.user || null;
+    return currentUser;
+  });
+}
+let currentUser = null;
+const supa =
+  window.supa ||
+  window.supabase?.createClient(
+    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+  );
+
+/* 📦 LOAD CART */
+let cart = [];
+let itemsBox = document.getElementById("items");
+let total = 0;
+let isPlacingOrder = false;
+
+function toUserCurrency(amount, fromCur){
+  if(typeof window.convertCurrency === "function"){
+    return convertCurrency(Number(amount) || 0, fromCur || "USD", window.USER_CURRENCY || "USD");
+  }
+  return Number(amount) || 0;
+}
+
+function renderCart(){
+  cart = JSON.parse(localStorage.getItem("cart")) || [];
+  cart = (cart || [])
+    .map(p=>({
+      id: p.id || null,
+      owner_id: p.owner_id || null,
+      name: p.name || "",
+      images: Array.isArray(p.images) ? p.images : [],
+      image: p.image || "",
+      price: Number(p.price || 0),
+      qty: Number(p.qty || 0),
+      currency: p.currency || "USD"
+    }))
+    .filter(p=>p.id && p.qty > 0);
+
+  if(cart.length === 0){
+    alert("Cart is empty");
+    location.href = "cart.html";
+    return;
+  }
+
+  itemsBox.innerHTML = "";
+  total = 0;
+  cart.forEach(p=>{
+    total += toUserCurrency((p.price || 0) * (p.qty || 0), p.currency);
+    itemsBox.innerHTML += `
+      <div class="cart-item">
+        <img src="${p.images?.[0] || p.image}">
+        <div>
+          <div class="cart-title">${translateProductName(p.name)}</div>
+          <div>Qty: ${p.qty}</div>
+          <div class="cart-price">${money(p.price, p.currency)}</div>
+        </div>
+      </div>
+    `;
+  });
+
+  document.getElementById("price").innerText = money(total || 0, window.USER_CURRENCY || "USD");
+  document.getElementById("discount").innerText = "- " + money(0, window.USER_CURRENCY || "USD");
+  document.getElementById("total").innerText = money(total || 0, window.USER_CURRENCY || "USD");
+}
+
+renderCart();
+document.addEventListener("ratesUpdated", renderCart);
+/* 🧾 PLACE ORDER (SUPABASE DB) */
+async function placeOrder(){
+  if(isPlacingOrder) return;
+  const user = await ensureUser();
+  if(!user){
+    location.href = "login.html";
+    return;
+  }
+  if(!Array.isArray(cart) || cart.length === 0){
+    return;
+  }
+  let name = document.getElementById("name").value.trim();
+  let phone = document.getElementById("phone").value.trim();
+  let address = document.getElementById("address").value.trim();
+  let city = document.getElementById("city").value.trim();
+  let pincode = document.getElementById("pincode").value.trim();
+
+  if(!name || !phone || !address || !city || !pincode){
+    alert("Please fill all address details");
+    return;
+  }
+
+  isPlacingOrder = true;
+  const cartWithOwners = await hydrateCartOwnerIds(cart);
+  const orderItems = (cartWithOwners || []).map((item)=>({
+    id: item.id,
+    name: item.name,
+    price: Number(item.price || 0),
+    currency: item.currency || "USD",
+    qty: Number(item.qty || 0),
+    owner_id: item.owner_id || null,
+    images: Array.isArray(item.images) ? item.images : []
+  }));
+
+  const sellerIds = [...new Set(orderItems.map(i=>i.owner_id).filter(Boolean))];
+  if(sellerIds.length !== 1){
+    isPlacingOrder = false;
+    alert("Please place separate orders for each seller.");
+    return;
+  }
+  const sellerId = sellerIds[0];
+
+  const order = {
+    user_id: user.id,
+    seller_id: sellerId,
+    email: user.email || "",
+    buyer_name: name,
+    buyer_address: { name, phone, address, city, pincode },
+    address: { name, phone, address, city, pincode },
+    items: orderItems,
+    amount: Number(total || 0),
+    total: Number(total || 0),
+    currency: localStorage.getItem("currency") || "USD",
+    status: "placed",
+    payment_method: "Pending Payment",
+    payment_status: "pending"
+  };
+
+  const { data, error } = await supa
+    .from("orders")
+    .insert(order)
+    .select("*")
+    .single();
+
+  if(error || !data?.id){
+    isPlacingOrder = false;
+    alert("❌ Order failed. Please try again.");
+    if(error) console.error(error);
+    return;
+  }
+
+  const stockResult = await reserveStockForOrderItems(orderItems);
+  if(!stockResult.ok){
+    await supa.from("orders").delete().eq("id", data.id);
+    isPlacingOrder = false;
+    alert(stockResult.message || "Not enough stock for one or more products.");
+    return;
+  }
+
+  localStorage.setItem("lastOrderId", data.id);
+  localStorage.setItem("lastOrder", JSON.stringify(data));
+
+  await createSellerNotifications({
+    orderId: data.id,
+    buyer: { name, phone, address, city, pincode, email: user.email || "" },
+    items: orderItems,
+    total,
+    currency: order.currency,
+    payment_method: order.payment_method
+  });
+
+  /* OPTIONAL: clear cart after order */
+  localStorage.removeItem("cart");
+
+  location.href = "payment.html";
+}
+
+async function reserveStockForOrderItems(orderItems){
+  const qtyByProduct = {};
+  (orderItems || []).forEach(item => {
+    const productId = String(item?.id || "").trim();
+    const qty = Math.max(0, Number(item?.qty || 0));
+    if(!productId || qty <= 0) return;
+    qtyByProduct[productId] = (qtyByProduct[productId] || 0) + qty;
+  });
+
+  const productIds = Object.keys(qtyByProduct);
+  if(productIds.length === 0){
+    return { ok:true };
+  }
+
+  const { data, error } = await supa
+    .from("products")
+    .select("id,owner_id,quantity")
+    .in("id", productIds);
+
+  if(error){
+    console.error("stock_fetch_failed", error);
+    return { ok:false, message:"Unable to verify stock right now." };
+  }
+
+  const byId = {};
+  (data || []).forEach(row => {
+    byId[row.id] = row;
+  });
+
+  for(const productId of productIds){
+    const row = byId[productId];
+    const need = qtyByProduct[productId] || 0;
+    const have = Math.max(0, Number(row?.quantity || 0));
+    if(!row || have < need){
+      return { ok:false, message:"Stock finished for one of the selected products." };
+    }
+  }
+
+  const applied = [];
+  try{
+    for(const productId of productIds){
+      const row = byId[productId];
+      const need = qtyByProduct[productId] || 0;
+      const prevQty = Math.max(0, Number(row?.quantity || 0));
+      const nextQty = Math.max(0, prevQty - need);
+
+      const { error: updateErr } = await supa
+        .from("products")
+        .update({ quantity: nextQty })
+        .eq("id", productId)
+        .eq("owner_id", row.owner_id);
+
+      if(updateErr){
+        throw updateErr;
+      }
+
+      applied.push({ id: productId, prevQty });
+    }
+
+    return { ok:true };
+  }catch(err){
+    console.error("stock_update_failed", err);
+    for(const row of applied){
+      try{
+        await supa
+          .from("products")
+          .update({ quantity: row.prevQty })
+          .eq("id", row.id);
+      }catch(_){ }
+    }
+    return { ok:false, message:"Stock update failed. Please retry." };
+  }
+}
+
+async function hydrateCartOwnerIds(items){
+  const base = Array.isArray(items) ? [...items] : [];
+  const productIds = [...new Set(base.map(i=>i.id).filter(Boolean))];
+  if(productIds.length === 0) return base;
+
+  const { data, error } = await supa
+    .from("products")
+    .select("id,owner_id")
+    .in("id", productIds);
+
+  if(error){
+    console.error(error);
+    return base;
+  }
+
+  const ownerMap = {};
+  (data || []).forEach(p=>{
+    ownerMap[p.id] = p.owner_id || null;
+  });
+
+  return base.map(i=>({
+    ...i,
+    owner_id: i.owner_id || ownerMap[i.id] || null
+  }));
+}
+
+function normalizePaymentMethodLabel(method){
+  const m = String(method || "").trim().toLowerCase();
+  if(!m) return "Pending Payment";
+  if(m.includes("cash") || m.includes("cod")) return "Cash on Delivery";
+  if(m.includes("upi")) return "UPI / Wallets";
+  if(m.includes("netbanking") || m.includes("net banking")) return "Net Banking";
+  if(m.includes("card")) return "Credit / Debit Card";
+  if(m.includes("online") || m.includes("razorpay")) return "Online Payment";
+  return method;
+}
+
+async function createSellerNotifications(payload){
+  const { orderId, buyer, items, total, currency, payment_method } = payload;
+  const paymentText = normalizePaymentMethodLabel(payment_method);
+  const buyerAddress = `${buyer?.address || ""}, ${buyer?.city || ""} ${buyer?.pincode || ""}`.trim();
+  const groups = {};
+  (items || []).forEach((i)=>{
+    const sellerId = i.owner_id || null;
+    if(!sellerId) return;
+    if(!groups[sellerId]) groups[sellerId] = [];
+    groups[sellerId].push(i);
+  });
+
+  const sellerIds = Object.keys(groups);
+  if(sellerIds.length === 0) return;
+
+  for(const sellerId of sellerIds){
+    const sellerItems = groups[sellerId] || [];
+    const primary = sellerItems[0] || {};
+    const qty = sellerItems.reduce((sum, item)=>sum + Number(item?.qty || 0), 0);
+    const sellerTotal = sellerItems.reduce((sum, item)=>sum + (Number(item?.price || 0) * Number(item?.qty || 0)), 0);
+    const productSummary = sellerItems
+      .map(item=>`${item.name || "Product"} x${Number(item.qty || 0)}`)
+      .join(", ");
+    const message =
+      `Buyer: ${buyer?.name || ""} | Phone: ${buyer?.phone || ""} | Address: ${buyerAddress} | Product: ${productSummary} | Qty: ${qty} | Payment: ${paymentText}`;
+
+    const row = {
+      receiver_user_id: sellerId,
+      seller_id: sellerId,
+      type: "new_order",
+      title: "New Order Received",
+      message,
+      order_id: orderId,
+      product_id: primary.id || null,
+      product_name: primary.name || "",
+      qty,
+      buyer_name: buyer?.name || "",
+      buyer_address: buyerAddress,
+      buyer_phone: buyer?.phone || "",
+      payment_method: paymentText,
+      total: Number(sellerTotal || 0),
+      currency: currency || "USD",
+      is_read: false,
+      is_deleted: false
+    };
+
+    const { error } = await supa.from("notifications").insert([row]);
+    if(error) console.error("Failed to create seller notification:", error);
+  }
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Plans | NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script src="global.js"></script>
+<script>
+  window.supabase = supabase.createClient(
+    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+  );
+</script>
+
+<style>
+:root{
+  --orange:#ff7a00;
+  --bg:#0d0f14;
+  --card:#151925;
+}
+body{
+  margin:0;
+  font-family:Inter,system-ui;
+  background:var(--bg);
+  color:#fff;
+}
+.header{
+  background:var(--orange);
+  padding:16px;
+  font-size:20px;
+  font-weight:800;
+}
+.container{
+  max-width:1100px;
+  margin:auto;
+  padding:20px;
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:24px;
+}
+.plan{
+  background:var(--card);
+  border-radius:16px;
+  padding:26px;
+  box-shadow:0 15px 40px rgba(0,0,0,.5);
+  position:relative;
+}
+.price{font-size:32px;font-weight:900}
+button{
+  width:100%;
+  padding:14px;
+  margin-top:18px;
+  border:none;
+  border-radius:12px;
+  font-size:15px;
+  font-weight:800;
+  cursor:pointer;
+}
+.buy{background:var(--orange);color:#000}
+.current{background:#333;color:#aaa}
+.badge{
+  position:absolute;
+  top:-12px;right:-12px;
+  background:var(--orange);
+  color:#000;
+  padding:6px 12px;
+  border-radius:10px;
+  font-size:12px;
+  font-weight:900;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">Plans</div>
+
+<div class="container">
+
+<!-- FREE -->
+<div class="plan" id="plan-free">
+  <h3>FREE</h3>
+  <div class="price"><span class="money" data-money="0" data-currency="USD">$0</span></div>
+  <ul>
+    <li>2 previews / day</li>
+    <li>Normal speed</li>
+  </ul>
+  <button class="current">Default</button>
+</div>
+
+<!-- PRO -->
+<div class="plan" id="plan-pro">
+  <h3>PRO</h3>
+  <div class="price"><span class="money" data-money="40" data-currency="USD">$40</span> / month</div>
+  <ul>
+    <li>20 previews / day</li>
+    <li>Fast processing</li>
+    <li>Analytics</li>
+  </ul>
+  <button class="buy" onclick="pay(40,'PRO')">Upgrade</button>
+</div>
+
+<!-- ENTERPRISE -->
+<div class="plan enterprise" id="plan-enterprise">
+  <div class="badge">MOST RECOMMENDED</div>
+  <h3>ENTERPRISE</h3>
+  <div class="price"><span class="money" data-money="4000" data-currency="USD">$4000</span> / month</div>
+  <ul>
+    <li>Unlimited previews</li>
+    <li>Branding off</li>
+    <li>Priority queue</li>
+  </ul>
+  <button class="buy" onclick="pay(4000,'ENTERPRISE')">Contact Sales</button>
+</div>
+
+</div>
+
+<script>
+let currentUser = null;
+let activePlan = "FREE";
+const RZP_KEY = window.NOVA_PUBLIC_CONFIG?.razorpayKeyId || "";
+
+/* ======================
+   AUTH + CURRENT PLAN
+====================== */
+(async ()=>{
+  const { data } = await supabase.auth.getUser();
+  if(!data?.user){
+    alert("Login required");
+    location.href="login.html";
+    return;
+  }
+  currentUser = data.user;
+  loadPlan();
+})();
+
+async function loadPlan(){
+  const { data } = await supabase
+    .from("subscription")
+    .select("plan")
+    .eq("user_id", currentUser.id)
+    .order("created_at",{ascending:false})
+    .limit(1)
+    .maybeSingle();
+
+  if(data?.plan){
+    activePlan = data.plan;
+    markCurrent();
+  }
+}
+
+function markCurrent(){
+  document.querySelectorAll(".plan").forEach(p=>{
+    const btn = p.querySelector("button");
+    if(!btn) return;
+    btn.disabled=false;
+    btn.className="buy";
+    if(p.id === "plan-" + activePlan.toLowerCase()){
+      btn.innerText="Current";
+      btn.className="current";
+      btn.disabled=true;
+    }
+  });
+}
+
+/* ======================
+   PAYMENT (RAZORPAY)
+====================== */
+function pay(amount,plan){
+  if(!currentUser){
+    alert("Login required");
+    location.href = "login.html";
+    return;
+  }
+
+  const rzp = new Razorpay({
+    key: RZP_KEY,
+    amount: amount * 100,
+    currency: "USD",
+    name: "NOVAGAPP",
+    description: plan + " Subscription",
+    handler: async function(res){
+      if(!res?.razorpay_payment_id){
+        alert("Payment verification failed");
+        return;
+      }
+
+      const { error } = await supabase.from("subscription").insert({
+        user_id: currentUser.id,
+        plan: plan,
+        amount: amount,
+        currency: "USD",
+        payment_id: res.razorpay_payment_id,
+        status: "active"
+      });
+
+      if(error){
+        alert("Subscription update failed");
+        console.error(error);
+        return;
+      }
+
+      alert("Plan activated");
+      location.reload();
+    }
+  });
+
+  rzp.on("payment.failed", function(){
+    alert("Payment failed. Please try again.");
+  });
+
+  rzp.open();
+}
+</script>
+
+</body>
+</html>
+
+
+

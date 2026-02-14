@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vote Now</title>
+<script src="global.js"></script>
+<style>
+:root{
+  --bg:#e8e8e8;
+  --ink:#111111;
+  --orange:#ff8700;
+  --orange-soft:#f7b784;
+  --pink:#ff0a54;
+  --black:#060606;
+  --white:#ffffff;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:Arial,sans-serif;
+  background:var(--bg);
+  color:var(--ink);
+}
+.top-strip{
+  background:#000;
+  color:#fff;
+  padding:10px 0;
+  border-bottom:2px solid #262626;
+}
+.top-inner{
+  width:min(980px,94vw);
+  margin:0 auto;
+  display:grid;
+  grid-template-columns:52px 1fr auto;
+  gap:10px;
+  align-items:center;
+}
+.brand-logo{
+  width:48px;
+  height:48px;
+  object-fit:contain;
+  border-radius:999px;
+  background:#151515;
+  border:1px solid #2c2c2c;
+  padding:4px;
+}
+.sale-name{
+  margin:0;
+  text-align:center;
+  font-weight:900;
+  letter-spacing:.04em;
+  font-size:clamp(14px,2.6vw,24px);
+}
+.back-link{
+  text-decoration:none;
+  color:#fff;
+  font-size:12px;
+  font-weight:700;
+  border:1px solid #585858;
+  border-radius:999px;
+  padding:7px 12px;
+  background:#121212;
+}
+.page{
+  width:min(980px,94vw);
+  margin:0 auto;
+  padding:14px 0 30px;
+  display:grid;
+  gap:12px;
+}
+.status-bar{
+  background:#fff;
+  border:1px solid #d2d2d2;
+  border-radius:10px;
+  padding:10px 12px;
+  font-size:13px;
+  color:#2b2b2b;
+  display:flex;
+  justify-content:space-between;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.status-chip{
+  font-weight:800;
+  border-radius:999px;
+  padding:4px 10px;
+  border:1px solid transparent;
+}
+.status-chip.online{
+  color:#0f6b2e;
+  background:#d9f8e4;
+  border-color:#99e0b4;
+}
+.status-chip.pending{
+  color:#6a4b00;
+  background:#ffe8bd;
+  border-color:#f5cc84;
+}
+.status-chip.offline{
+  color:#8a1919;
+  background:#ffd8d8;
+  border-color:#f2aaaa;
+}
+.vote-list{
+  display:grid;
+  gap:16px;
+  max-height:74vh;
+  overflow-y:auto;
+  padding-right:4px;
+}
+.contest-card{
+  background:#fff;
+  border:5px solid var(--orange);
+  border-radius:2px;
+  overflow:hidden;
+}
+.poster-wrap{
+  aspect-ratio:1/1;
+  width:100%;
+  background:#dcdcdc;
+}
+.poster{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+}
+.name-strip{
+  background:var(--orange-soft);
+  color:#131313;
+  font-weight:900;
+  font-size:clamp(18px,4vw,28px);
+  line-height:1.1;
+  padding:10px 14px;
+  text-transform:capitalize;
+}
+.rules-box{
+  background:var(--black);
+  color:#fff;
+  padding:12px 14px;
+}
+.rules-box h3{
+  margin:0;
+  font-size:clamp(19px,4.8vw,28px);
+  font-weight:500;
+}
+.winner-line{
+  margin:8px 0 0;
+  color:#f3bc8b;
+  font-size:13px;
+  line-height:1.35;
+}
+.prize-list{
+  margin:8px 0 0;
+  padding-left:18px;
+  display:grid;
+  gap:6px;
+  color:#f8f8f8;
+  font-size:13px;
+  line-height:1.35;
+}
+.vote-btn{
+  display:block;
+  text-decoration:none;
+  text-align:center;
+  background:var(--pink);
+  color:#000;
+  font-weight:900;
+  font-size:clamp(20px,5.8vw,34px);
+  line-height:1;
+  padding:12px 12px;
+}
+.vote-btn:hover{filter:brightness(.96)}
+.meta-card{
+  background:#fff;
+  border:1px solid #dadada;
+  border-radius:12px;
+  padding:12px 14px;
+}
+.meta-card h2{
+  margin:0;
+  font-size:17px;
+}
+.meta-lines{
+  margin:8px 0 0;
+  padding-left:18px;
+  display:grid;
+  gap:6px;
+  color:#313131;
+  font-size:13px;
+  line-height:1.4;
+}
+@media (max-width:680px){
+  .top-inner{grid-template-columns:48px 1fr auto}
+  .back-link{padding:6px 10px;font-size:11px}
+  .vote-list{max-height:none}
+}
+</style>
+</head>
+<body>
+<header class="top-strip">
+  <div class="top-inner">
+    <img class="brand-logo" src="images/logo.png" alt="Logo">
+    <h1 class="sale-name" id="saleName">BIG LAUNCHING DAYS SALE</h1>
+    <a class="back-link" id="backBtn" href="contest.html">Back</a>
+  </div>
+</header>
+
+<main class="page">
+  <section class="status-bar">
+    <span id="gatewayLabel">Payment Server</span>
+    <span id="gatewayStatus" class="status-chip pending">Checking...</span>
+  </section>
+
+  <section class="vote-list" id="voteList"></section>
+
+  <section class="meta-card">
+    <h2 id="priceTitle">Voting Price (Each contest has separate payment)</h2>
+    <ul class="meta-lines" id="priceLines"></ul>
+  </section>
+
+  <section class="meta-card">
+    <h2 id="megaTitle">Mega Lucky Prizes (All 6 contests combined)</h2>
+    <ul class="meta-lines" id="megaLines"></ul>
+  </section>
+</main>
+
+<script>
+const TEXTS = {
+  en: {
+    saleName: "BIG LAUNCHING DAYS SALE",
+    backBtn: "Back",
+    gatewayLabel: "Payment Server",
+    gatewayChecking: "Checking...",
+    gatewayOnline: "Online",
+    gatewayPending: "Pending",
+    gatewayOffline: "Offline mode",
+    rulesPrize: "Rules and Prize",
+    voteNow: "Vote now",
+    priceTitle: "Voting Price (Each contest has separate payment)",
+    megaTitle: "Mega Lucky Prizes (All 6 contests combined)",
+    priceLines: [
+      "1 Vote = $5",
+      "7 Votes = $25",
+      "20 Votes = $50",
+      "6 contests = 6 independent contests",
+      "Payment and voting are separate in every contest"
+    ],
+    megaLines: [
+      "Rank 1: Global Mega Winner - Rolls-Royce Cullinan (FREE)",
+      "Rank 2 to Rank 10 (9 winners): Disneyland trip for family of 7",
+      "Duration: 10 days",
+      "Flights + hotel + park tickets included"
+    ]
+  },
+  hi: {
+    saleName: "बिग लॉन्चिंग डेज़ सेल",
+    backBtn: "वापस",
+    gatewayLabel: "पेमेंट सर्वर",
+    gatewayChecking: "जांच जारी है...",
+    gatewayOnline: "ऑनलाइन",
+    gatewayPending: "पेंडिंग",
+    gatewayOffline: "ऑफलाइन मोड",
+    rulesPrize: "नियम और प्राइज",
+    voteNow: "अभी वोट करें",
+    priceTitle: "वोटिंग प्राइस (हर कॉन्टेस्ट का पेमेंट अलग है)",
+    megaTitle: "मेगा लकी प्राइजेस (सभी 6 कॉन्टेस्ट मिलाकर)",
+    priceLines: [
+      "1 वोट = $5",
+      "7 वोट = $25",
+      "20 वोट = $50",
+      "6 कॉन्टेस्ट = 6 अलग कॉन्टेस्ट",
+      "हर कॉन्टेस्ट में पेमेंट और वोटिंग अलग है"
+    ],
+    megaLines: [
+      "रैंक 1: ग्लोबल मेगा विनर - रोल्स-रॉयस कुलिनन (फ्री)",
+      "रैंक 2 से 10 (9 विनर्स): 7 लोगों की फैमिली के लिए डिज़नीलैंड ट्रिप",
+      "अवधि: 10 दिन",
+      "फ्लाइट + होटल + पार्क टिकट शामिल"
+    ]
+  },
+  it: {
+    saleName: "BIG LAUNCHING DAYS SALE",
+    backBtn: "Indietro",
+    gatewayLabel: "Server pagamento",
+    gatewayChecking: "Controllo...",
+    gatewayOnline: "Online",
+    gatewayPending: "In attesa",
+    gatewayOffline: "Modalita offline",
+    rulesPrize: "Regole e premi",
+    voteNow: "Vota ora",
+    priceTitle: "Prezzo voto (pagamento separato per contest)",
+    megaTitle: "Mega Lucky Prizes (tutti i 6 contest insieme)",
+    priceLines: [
+      "1 Voto = $5",
+      "7 Voti = $25",
+      "20 Voti = $50",
+      "6 contest = 6 contest indipendenti",
+      "Pagamento e voto separati in ogni contest"
+    ],
+    megaLines: [
+      "Rank 1: Global Mega Winner - Rolls-Royce Cullinan (FREE)",
+      "Rank 2 to Rank 10 (9 winners): Disneyland trip for family of 7",
+      "Duration: 10 days",
+      "Flights + hotel + park tickets included"
+    ]
+  }
+};
+
+const CONTESTS = [
+  {
+    id: 1,
+    href: "contest-battle-1.html",
+    poster: "Images/vote-box-1.jpg",
+    name: {
+      en: "Cristiano Ronaldo vs Lionel Messi",
+      hi: "क्रिस्टियानो रोनाल्डो बनाम लियोनेल मेसी",
+      it: "Cristiano Ronaldo vs Lionel Messi"
+    },
+    meta: {
+      en: "From voters of winning side | 100 Winners",
+      hi: "विनिंग साइड के वोटर्स में से | 100 विनर्स",
+      it: "From voters of winning side | 100 Winners"
+    },
+    prizes: {
+      en: [
+        "Original Ronaldo or Messi jersey (winner side)",
+        "Next live football match trip",
+        "Round-trip flight",
+        "3 days stay",
+        "Match ticket",
+        "Only user eligible (family not included)"
+      ],
+      hi: [
+        "ओरिजिनल रोनाल्डो या मेसी जर्सी (विनर साइड)",
+        "अगले लाइव फुटबॉल मैच की ट्रिप",
+        "राउंड-ट्रिप फ्लाइट",
+        "3 दिन का स्टे",
+        "मैच टिकट",
+        "सिर्फ यूज़र के लिए (फैमिली शामिल नहीं)"
+      ],
+      it: [
+        "Original Ronaldo or Messi jersey (winner side)",
+        "Next live football match trip",
+        "Round-trip flight",
+        "3 days stay",
+        "Match ticket",
+        "Only user eligible (family not included)"
+      ]
+    }
+  },
+  {
+    id: 2,
+    href: "contest-battle-2.html",
+    poster: "Images/vote-box-2.jpg",
+    name: {
+      en: "India vs Pakistan",
+      hi: "भारत बनाम पाकिस्तान",
+      it: "India vs Pakistan"
+    },
+    meta: {
+      en: "From voters of winning side | 100 Winners",
+      hi: "विनिंग साइड के वोटर्स में से | 100 विनर्स",
+      it: "From voters of winning side | 100 Winners"
+    },
+    prizes: {
+      en: [
+        "Original cricket jersey",
+        "India vs Pakistan match ticket",
+        "Stadium ticket",
+        "Travel + 3 days stay",
+        "Only user eligible"
+      ],
+      hi: [
+        "ओरिजिनल क्रिकेट जर्सी",
+        "भारत बनाम पाकिस्तान मैच टिकट",
+        "स्टेडियम टिकट",
+        "ट्रैवल + 3 दिन का स्टे",
+        "सिर्फ यूज़र के लिए"
+      ],
+      it: [
+        "Original cricket jersey",
+        "India vs Pakistan match ticket",
+        "Stadium ticket",
+        "Travel + 3 days stay",
+        "Only user eligible"
+      ]
+    }
+  },
+  {
+    id: 3,
+    href: "contest-battle-3.html",
+    poster: "Images/vote-box-3.jpg",
+    name: {
+      en: "Taylor Swift vs BTS",
+      hi: "टेलर स्विफ्ट बनाम BTS",
+      it: "Taylor Swift vs BTS"
+    },
+    meta: {
+      en: "From voters of winning side | 50 Winners",
+      hi: "विनिंग साइड के वोटर्स में से | 50 विनर्स",
+      it: "From voters of winning side | 50 Winners"
+    },
+    prizes: {
+      en: [
+        "Live concert ticket",
+        "International venue possible",
+        "Seat category decided by organiser"
+      ],
+      hi: [
+        "लाइव कॉन्सर्ट टिकट",
+        "इंटरनेशनल वेन्यू संभव",
+        "सीट कैटेगरी आयोजक तय करेगा"
+      ],
+      it: [
+        "Live concert ticket",
+        "International venue possible",
+        "Seat category decided by organiser"
+      ]
+    }
+  },
+  {
+    id: 4,
+    href: "contest-battle-4.html",
+    poster: "Images/vote-box-4.jpg",
+    name: {
+      en: "Apple vs Samsung",
+      hi: "एप्पल बनाम सैमसंग",
+      it: "Apple vs Samsung"
+    },
+    meta: {
+      en: "From voters of winning side | 100 Winners",
+      hi: "विनिंग साइड के वोटर्स में से | 100 विनर्स",
+      it: "From voters of winning side | 100 Winners"
+    },
+    prizes: {
+      en: [
+        "Apple or Samsung accessories",
+        "AirPods, Buds, AirTag, Watch accessories"
+      ],
+      hi: [
+        "एप्पल या सैमसंग एक्सेसरीज़",
+        "AirPods, Buds, AirTag, Watch एक्सेसरीज़"
+      ],
+      it: [
+        "Apple or Samsung accessories",
+        "AirPods, Buds, AirTag, Watch accessories"
+      ]
+    }
+  },
+  {
+    id: 5,
+    href: "contest-battle-5.html",
+    poster: "Images/vote-box-5.jpg",
+    name: {
+      en: "Marvel Studios vs DC Studios",
+      hi: "मार्वल स्टूडियोज़ बनाम DC स्टूडियोज़",
+      it: "Marvel Studios vs DC Studios"
+    },
+    meta: {
+      en: "From voters of winning side | 50 Winners",
+      hi: "विनिंग साइड के वोटर्स में से | 50 विनर्स",
+      it: "From voters of winning side | 50 Winners"
+    },
+    prizes: {
+      en: [
+        "Movie premiere or fan experience",
+        "Merchandise + event access"
+      ],
+      hi: [
+        "मूवी प्रीमियर या फैन एक्सपीरियंस",
+        "मर्चेंडाइज़ + इवेंट एक्सेस"
+      ],
+      it: [
+        "Movie premiere or fan experience",
+        "Merchandise + event access"
+      ]
+    }
+  },
+  {
+    id: 6,
+    href: "contest-battle-6.html",
+    poster: "Images/vote-box-6.jpg",
+    name: {
+      en: "Real Madrid vs Barcelona (El Clasico)",
+      hi: "रीयल मैड्रिड बनाम बार्सिलोना (एल क्लासिको)",
+      it: "Real Madrid vs Barcelona (El Clasico)"
+    },
+    meta: {
+      en: "From voters of winning side | 100 Winners",
+      hi: "विनिंग साइड के वोटर्स में से | 100 विनर्स",
+      it: "From voters of winning side | 100 Winners"
+    },
+    prizes: {
+      en: [
+        "Original Real Madrid or Barcelona jersey (winner side)",
+        "Next live football match trip",
+        "Round-trip flight",
+        "3 days stay",
+        "Match ticket",
+        "Only user eligible (family not included)"
+      ],
+      hi: [
+        "ओरिजिनल रीयल मैड्रिड या बार्सिलोना जर्सी (विनर साइड)",
+        "अगले लाइव फुटबॉल मैच की ट्रिप",
+        "राउंड-ट्रिप फ्लाइट",
+        "3 दिन का स्टे",
+        "मैच टिकट",
+        "सिर्फ यूज़र के लिए (फैमिली शामिल नहीं)"
+      ],
+      it: [
+        "Original Real Madrid or Barcelona jersey (winner side)",
+        "Next live football match trip",
+        "Round-trip flight",
+        "3 days stay",
+        "Match ticket",
+        "Only user eligible (family not included)"
+      ]
+    }
+  }
+];
+
+const state = {
+  lang: "en",
+  apiBase: ""
+};
+
+function resolveLang(){
+  const raw = String(window.USER_LANG || localStorage.getItem("lang") || "en").toLowerCase();
+  if(TEXTS[raw]) return raw;
+  const short = raw.split("-")[0];
+  return TEXTS[short] ? short : "en";
+}
+
+function tr(key){
+  const dict = TEXTS[state.lang] || TEXTS.en;
+  return dict[key] ?? TEXTS.en[key] ?? key;
+}
+
+function pickLang(map){
+  return (map && (map[state.lang] || map.en || map.hi || map.it)) || "";
+}
+
+function resolveApiBase(){
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = String(params.get("api_base") || "").trim();
+  if(fromQuery) return fromQuery.replace(/\/+$/g, "");
+  if(String(window.location.port || "") === "3000") return "";
+  return "http://127.0.0.1:3000";
+}
+
+function withQuery(path){
+  const params = new URLSearchParams(window.location.search);
+  if(state.apiBase) params.set("api_base", state.apiBase);
+  const qs = params.toString();
+  return qs ? (path + "?" + qs) : path;
+}
+
+function escapeHtml(raw){
+  return String(raw || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderStatic(){
+  document.documentElement.lang = state.lang;
+  document.getElementById("saleName").textContent = tr("saleName");
+  document.getElementById("backBtn").textContent = tr("backBtn");
+  document.getElementById("backBtn").href = withQuery("contest.html");
+  document.getElementById("gatewayLabel").textContent = tr("gatewayLabel");
+  document.getElementById("priceTitle").textContent = tr("priceTitle");
+  document.getElementById("megaTitle").textContent = tr("megaTitle");
+
+  const priceLines = tr("priceLines") || [];
+  const megaLines = tr("megaLines") || [];
+  document.getElementById("priceLines").innerHTML = priceLines.map(item => "<li>" + escapeHtml(item) + "</li>").join("");
+  document.getElementById("megaLines").innerHTML = megaLines.map(item => "<li>" + escapeHtml(item) + "</li>").join("");
+}
+
+function renderContests(){
+  const list = document.getElementById("voteList");
+  list.innerHTML = CONTESTS.map(contest => {
+    const name = pickLang(contest.name);
+    const winnerMeta = pickLang(contest.meta);
+    const prizes = (contest.prizes && (contest.prizes[state.lang] || contest.prizes.en || [])) || [];
+
+    return [
+      '<article class="contest-card">',
+      '<div class="poster-wrap"><img class="poster" src="' + escapeHtml(contest.poster) + '" alt="Contest poster ' + contest.id + '"></div>',
+      '<div class="name-strip">' + escapeHtml(name) + '</div>',
+      '<div class="rules-box">',
+      '<h3>' + escapeHtml(tr("rulesPrize")) + '</h3>',
+      '<p class="winner-line">' + escapeHtml(winnerMeta) + '</p>',
+      '<ul class="prize-list">' + prizes.map(row => '<li>' + escapeHtml(row) + '</li>').join("") + '</ul>',
+      '</div>',
+      '<a class="vote-btn" href="' + escapeHtml(withQuery(contest.href)) + '">' + escapeHtml(tr("voteNow")) + '</a>',
+      '</article>'
+    ].join("");
+  }).join("");
+}
+
+function setGateway(labelKey, tone){
+  const el = document.getElementById("gatewayStatus");
+  el.textContent = tr(labelKey);
+  el.className = "status-chip " + tone;
+}
+
+function apiUrl(path){
+  return state.apiBase ? (state.apiBase + path) : path;
+}
+
+async function checkGateway(){
+  setGateway("gatewayChecking", "pending");
+  try{
+    const res = await fetch(apiUrl("/api/contest/dashboard"), { method: "GET" });
+    const payload = await res.json().catch(() => ({}));
+    if(!res.ok || !payload?.ok){
+      setGateway("gatewayOffline", "offline");
+      return;
+    }
+    const ready = Boolean(payload?.data?.razorpay_ready);
+    if(ready) setGateway("gatewayOnline", "online");
+    else setGateway("gatewayPending", "pending");
+  }catch(_){
+    setGateway("gatewayOffline", "offline");
+  }
+}
+
+function renderAll(){
+  renderStatic();
+  renderContests();
+}
+
+function init(){
+  state.lang = resolveLang();
+  state.apiBase = resolveApiBase();
+  renderAll();
+  checkGateway();
+}
+
+document.addEventListener("languageUpdated", () => {
+  state.lang = resolveLang();
+  renderAll();
+});
+
+init();
+</script>
+</body>
+</html>

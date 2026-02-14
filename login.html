@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Login - NOVAGAPP</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="stylesheet" href="style.css">
+
+  <!-- ✅ SUPABASE SDK FIRST -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+
+  <!-- ✅ SINGLE CLIENT (GLOBAL) -->
+  <script>
+    (function(){
+      function normalizeConfig(raw){
+        return {
+          supabaseUrl: String(raw?.supabaseUrl || "").trim(),
+          supabaseAnonKey: String(raw?.supabaseAnonKey || "").trim()
+        };
+      }
+
+      async function ensureSupaClient(){
+        if(window.supa){
+          return window.supa;
+        }
+
+        let cfg = normalizeConfig(window.NOVA_PUBLIC_CONFIG || window.__NOVA_PUBLIC_CONFIG__ || {});
+        if((!cfg.supabaseUrl || !cfg.supabaseAnonKey) && typeof window.getNovaPublicConfig === "function"){
+          try{
+            cfg = normalizeConfig(await window.getNovaPublicConfig(true));
+          }catch(_){ }
+        }
+
+        if(!cfg.supabaseUrl || !cfg.supabaseAnonKey){
+          throw new Error("Supabase public config missing");
+        }
+
+        window.supa = supabase.createClient(
+          cfg.supabaseUrl,
+          cfg.supabaseAnonKey,
+          {
+            auth:{
+              persistSession:true,
+              autoRefreshToken:true,
+              detectSessionInUrl:true
+            }
+          }
+        );
+        return window.supa;
+      }
+
+      window.ensureSupaClient = ensureSupaClient;
+      ensureSupaClient().catch(err => {
+        console.warn("Supabase init failed:", err?.message || err);
+      });
+    })();
+  </script>
+
+  <!-- OPTIONAL GLOBAL (currency/lang only) -->
+  <script src="global.js"></script>
+
+  <style>
+    .password-box{ position:relative }
+    .toggle-password{
+      position:absolute;
+      right:12px;
+      top:50%;
+      transform:translateY(-50%);
+      cursor:pointer;
+      user-select:none;
+    }
+    .forgot{
+      text-align:right;
+      font-size:13px;
+      color:#ff7a00;
+      cursor:pointer;
+      margin-top:6px;
+    }
+  </style>
+</head>
+
+<body class="login-body">
+
+<div class="login-card">
+  <img src="images/logo.png" class="login-logo">
+  <h2 class="login-title">Login to NOVAGAPP</h2>
+
+  <div class="input-box">
+    <input id="email" type="email" placeholder="Email">
+  </div>
+
+  <div class="input-box password-box">
+    <input id="password" type="password" placeholder="Password">
+    <span class="toggle-password" onclick="togglePassword()">👁</span>
+  </div>
+
+  <div class="forgot" onclick="forgotPassword()">Forgot password?</div>
+
+  <button class="login-btn" onclick="login()">Login</button>
+
+  <div class="or">OR</div>
+
+  <button class="google-btn" onclick="googleLogin()">
+    <img src="https://img.icons8.com/color/48/google-logo.png">
+    Continue with Google
+  </button>
+
+  <div class="signup">
+    New to NOVAGAPP?
+    <span onclick="location.href='signup.html'">Sign up</span>
+  </div>
+</div>
+
+<script>
+function buildContestApiCandidates(){
+  const out = [];
+  const push = (raw) => {
+    const val = String(raw || "").trim().replace(/\/+$/g, "");
+    if(!val) return;
+    if(!/^https?:\/\//i.test(val)) return;
+    if(out.includes(val)) return;
+    out.push(val);
+  };
+
+  const host = String(location.hostname || "").toLowerCase();
+  const isLocal = host === "127.0.0.1" || host === "localhost" || location.protocol === "file:";
+  const qp = new URLSearchParams(location.search);
+  push(qp.get("api_base"));
+  try{
+    push(localStorage.getItem("contest_api_base"));
+    push(localStorage.getItem("api_base"));
+  }catch(_){ }
+  push(window.CONTEST_API_BASE || window.API_BASE || "");
+  if(isLocal){
+    push("http://127.0.0.1:3000");
+    push("http://localhost:3000");
+  }
+  if(!out.length && /^https?:\/\//i.test(location.origin)){
+    out.push(location.origin.replace(/\/+$/g, ""));
+  }
+  return out;
+}
+
+async function registerContestAccount(user){
+  if(!user?.id) return false;
+  const payload = {
+    user_id: String(user.id || "").trim(),
+    user_name: String((user.user_metadata?.full_name || user.user_metadata?.name || user.email || "").split("@")[0] || "").trim(),
+    email: String(user.email || "").trim()
+  };
+  const candidates = buildContestApiCandidates();
+  for(const base of candidates){
+    try{
+      const res = await fetch(base + "/api/contest/account/register", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+      if(res.ok) return true;
+    }catch(_){ }
+  }
+  return false;
+}
+
+/* 👁 TOGGLE PASSWORD */
+function togglePassword(){
+  const p = document.getElementById("password");
+  p.type = p.type === "password" ? "text" : "password";
+}
+
+/* 🔐 EMAIL LOGIN */
+async function login(){
+  let supa;
+  try{
+    supa = await window.ensureSupaClient();
+  }catch(err){
+    alert("Supabase config missing. Start server on port 3000 or check public-config.js");
+    return;
+  }
+
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
+
+  if(!email || !password){
+    alert("Email & password required");
+    return;
+  }
+
+  const { error } = await supa.auth.signInWithPassword({
+    email, password
+  });
+
+  if(error){
+    alert(error.message);
+    return;
+  }
+
+  try{
+    const { data:userData } = await supa.auth.getUser();
+    await registerContestAccount(userData?.user || null);
+  }catch(_){ }
+
+  const next = localStorage.getItem("onboarded") === "1"
+    ? "index.html"
+    : "onboarding.html";
+  location.href = next;
+}
+
+/* 🔐 GOOGLE LOGIN */
+async function googleLogin(){
+  let supa;
+  try{
+    supa = await window.ensureSupaClient();
+  }catch(err){
+    alert("Supabase config missing. Start server on port 3000 or check public-config.js");
+    return;
+  }
+
+  await supa.auth.signInWithOAuth({
+    provider:"google",
+    options:{
+      redirectTo: window.location.origin + "/onboarding.html"
+    }
+  });
+}
+
+/* 🔁 FORGOT PASSWORD */
+async function forgotPassword(){
+  let supa;
+  try{
+    supa = await window.ensureSupaClient();
+  }catch(err){
+    alert("Supabase config missing. Start server on port 3000 or check public-config.js");
+    return;
+  }
+
+  const email = document.getElementById("email").value.trim();
+  if(!email){
+    alert("Enter email first");
+    return;
+  }
+
+  const { error } = await supa.auth.resetPasswordForEmail(email,{
+    redirectTo: window.location.origin + "/reset-password.html"
+  });
+
+  if(error){
+    alert(error.message);
+  }else{
+    alert("Password reset email sent");
+  }
+}
+</script>
+
+</body>
+</html>

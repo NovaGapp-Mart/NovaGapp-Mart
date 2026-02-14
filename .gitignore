@@ -1,0 +1,15 @@
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# logs
+*.log
+
+# dependencies
+node_modules/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Watch – NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body{margin:0;font-family:Arial;background:#fff}
+
+/* PLAYER */
+.player{background:#000;position:sticky;top:0;z-index:10}
+.player video{width:100%;max-height:60vh}
+
+/* ACTIONS */
+.actions{
+  display:flex;justify-content:space-around;
+  padding:10px;border-bottom:1px solid #eee
+}
+.actions button{
+  display:flex;gap:6px;align-items:center;
+  background:none;border:none;font-size:14px;cursor:pointer
+}
+.actions img{width:22px}
+
+/* INFO */
+.info{padding:12px}
+.info h2{margin:6px 0;font-size:18px}
+.info p{font-size:14px;color:#444}
+.info small{color:#777}
+
+/* COMMENTS */
+.comments{padding:12px}
+.comments input{
+  width:100%;padding:8px;font-size:14px;margin-bottom:8px
+}
+.comment{font-size:14px;margin:6px 0;border-bottom:1px solid #eee}
+
+/* RELATED */
+.related{padding:12px}
+.card{
+  display:flex;gap:10px;margin-bottom:12px;cursor:pointer
+}
+.card video{
+  width:160px;height:90px;background:#000;border-radius:6px
+}
+.card h4{margin:0;font-size:14px}
+.card small{color:#666}
+</style>
+</head>
+
+<body>
+
+<div class="player">
+  <video id="video" controls autoplay></video>
+</div>
+
+<div class="actions">
+  <button onclick="likeVideo()">👍 <span id="likes">0</span></button>
+  <button onclick="dislikeVideo()">👎 <span id="dislikes">0</span></button>
+  <button onclick="shareVideo()">🔗 Share</button>
+</div>
+
+<div class="info">
+  <h2 id="title"></h2>
+  <small id="author"></small>
+  <p id="desc"></p>
+</div>
+
+<div class="comments">
+  <input id="commentInput" placeholder="Add a comment…" onkeypress="addComment(event)">
+  <div id="commentList"></div>
+</div>
+
+<hr>
+
+<div class="related">
+  <b>Related videos</b>
+  <div id="related"></div>
+</div>
+
+<script>
+/* 🔥 MOCK DATA */
+const VIDEOS = [
+  {
+    id:"1",
+    title:"First NOVAGAPP Video",
+    desc:"This is a demo description",
+    author:"user_123",
+    category:"tech",
+    url:"https://www.w3schools.com/html/mov_bbb.mp4"
+  },
+  {
+    id:"2",
+    title:"Trending Tech Reel",
+    desc:"Trending now",
+    author:"user_456",
+    category:"tech",
+    url:"https://www.w3schools.com/html/movie.mp4"
+  },
+  {
+    id:"3",
+    title:"Gaming Highlights",
+    desc:"Gameplay moments",
+    author:"user_789",
+    category:"gaming",
+    url:"https://www.w3schools.com/html/mov_bbb.mp4"
+  }
+];
+
+/* LOAD VIDEO */
+const params = new URLSearchParams(location.search);
+const videoId = params.get("v") || "1";
+const current = VIDEOS.find(v=>v.id===videoId) || VIDEOS[0];
+
+video.src = current.url;
+title.innerText = current.title;
+desc.innerText = current.desc;
+author.innerText = "By " + current.author;
+
+/* LIKE / DISLIKE */
+let likeCount=0, dislikeCount=0;
+function likeVideo(){ likes.innerText=++likeCount; }
+function dislikeVideo(){ dislikes.innerText=++dislikeCount; }
+
+/* COMMENTS */
+function addComment(e){
+  if(e.key!=="Enter") return;
+  if(!commentInput.value.trim()) return;
+  commentList.innerHTML +=
+    `<div class="comment">${commentInput.value}</div>`;
+  commentInput.value="";
+}
+
+/* SHARE */
+function shareVideo(){
+  navigator.share
+    ? navigator.share({title:current.title,url:location.href})
+    : alert("Copy link: "+location.href);
+}
+
+/* RELATED */
+VIDEOS.filter(v=>v.category===current.category && v.id!==current.id)
+  .forEach(v=>{
+    const d=document.createElement("div");
+    d.className="card";
+    d.innerHTML=`
+      <video src="${v.url}" muted></video>
+      <div>
+        <h4>${v.title}</h4>
+        <small>${v.author}</small>
+      </div>
+    `;
+    d.onclick=()=>location.href=`watch.html?v=${v.id}`;
+    related.appendChild(d);
+  });
+</script>
+
+</body>
+</html>

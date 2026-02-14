@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Settings and activity - NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<script src="social.js"></script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial}
+body{background:#fff;color:#111}
+
+.header{
+  display:flex;align-items:center;gap:10px;
+  padding:14px;border-bottom:1px solid #eee;
+}
+.header svg{width:22px;height:22px;cursor:pointer}
+.header h2{font-size:18px}
+
+.search{padding:10px 14px}
+.search-box{
+  display:flex;align-items:center;gap:8px;
+  background:#f4f4f4;border:1px solid #eee;border-radius:10px;
+  padding:10px 12px;
+}
+.search-box svg{width:18px;height:18px;fill:#666}
+.search-box input{border:none;background:transparent;outline:none;width:100%;font-size:14px}
+
+.section{padding:6px 0}
+.section-title{
+  padding:12px 16px 6px;
+  font-size:13px;color:#777;font-weight:bold;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.section-note{
+  padding:0 16px 10px;
+  font-size:12px;color:#888;
+}
+
+.item{
+  display:flex;align-items:center;gap:12px;
+  padding:12px 16px;
+  cursor:pointer;
+}
+.item:hover{background:#fafafa}
+.item .icon{
+  width:28px;height:28px;border-radius:8px;
+  display:flex;align-items:center;justify-content:center;
+  border:1px solid #eee;background:#fff;
+}
+.item .icon svg{width:18px;height:18px;fill:#111}
+.item .content{flex:1}
+.item .title{font-size:15px}
+.item .desc{font-size:12px;color:#777;margin-top:2px}
+.item .meta{font-size:13px;color:#777;margin-right:6px}
+.item .chev{font-size:18px;color:#bbb}
+
+.divider{border:none;border-top:1px solid #eee;margin:6px 0}
+
+/* MODAL */
+.modal-backdrop{
+  position:fixed;inset:0;background:rgba(0,0,0,0.45);
+  opacity:0;pointer-events:none;transition:0.2s;z-index:50;
+}
+.modal{
+  position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:90%;max-width:420px;background:#fff;border-radius:12px;
+  padding:16px;z-index:60;opacity:0;pointer-events:none;transition:0.2s;
+  max-height:80vh;overflow:auto;
+}
+.modal.show{opacity:1;pointer-events:auto}
+.modal-backdrop.show{opacity:1;pointer-events:auto}
+.modal h3{margin-bottom:10px}
+.modal .row{display:flex;gap:8px;margin-top:10px}
+.modal .row input{flex:1;padding:8px;border:1px solid #ddd;border-radius:8px}
+.modal .row button{padding:8px 10px;border:none;border-radius:8px;background:#111;color:#fff;cursor:pointer}
+.modal .list{margin-top:10px}
+.modal .list-item{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee}
+.modal .list-item button{border:none;background:#f2f2f2;border-radius:6px;padding:4px 8px;cursor:pointer}
+.modal .footer{display:flex;gap:8px;margin-top:12px}
+.modal .footer button{flex:1;border:none;border-radius:8px;padding:8px;cursor:pointer;font-weight:bold}
+.modal .close{background:#eee}
+.modal .save{background:#111;color:#fff}
+
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #eee}
+.toggle-row:last-child{border-bottom:none}
+.switch{position:relative;width:44px;height:24px}
+.switch input{display:none}
+.slider{position:absolute;inset:0;background:#ccc;border-radius:24px;transition:.2s}
+.slider:before{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
+.switch input:checked + .slider{background:#111}
+.switch input:checked + .slider:before{transform:translateX(20px)}
+</style>
+</head>
+
+<body>
+<div class="header">
+  <svg onclick="history.back()" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+  <h2>Settings and activity</h2>
+</div>
+
+<div class="search">
+  <div class="search-box">
+    <svg viewBox="0 0 24 24"><path d="M21 21l-5.2-5.2a7 7 0 1 0-1.8 1.8L21 21z"/></svg>
+    <input id="searchInput" placeholder="Search">
+  </div>
+</div>
+
+<div class="section" data-section>
+  <div class="section-title">
+    <span>Your account</span>
+    <span style="font-size:12px;color:#666">NOVAGAPP</span>
+  </div>
+  <div class="item" data-link="account-center.html" data-search="accounts center password security personal details">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0-5-5m0 2c-4 0-8 2-8 4v2h16v-2"/></svg></div>
+    <div class="content">
+      <div class="title">Accounts Center</div>
+      <div class="desc">Password, security, personal details, preferences</div>
+    </div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+  <div class="section-note">
+    Manage your connected experiences and account settings across NOVAGAPP services.
+  </div>
+</div>
+
+<hr class="divider">
+
+<div class="section" data-section>
+  <div class="section-title">How you use NOVAGAPP</div>
+  <div class="item" data-action="saved" data-search="saved">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M6 4h12v16l-6-4-6 4z"/></svg></div>
+    <div class="content"><div class="title">Saved</div></div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+  <div class="item" data-action="archive" data-search="archive">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M3 4h18v4H3zM5 9h14v11H5z"/></svg></div>
+    <div class="content"><div class="title">Archive</div></div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+  <div class="item" data-action="activity" data-search="activity">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M12 8v4l3 3"/></svg></div>
+    <div class="content"><div class="title">Your activity</div></div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+  <div class="item" data-link="notifications.html" data-search="notifications">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M12 2a6 6 0 0 0-6 6v4l-2 2v1h16v-1l-2-2V8a6 6 0 0 0-6-6z"/></svg></div>
+    <div class="content"><div class="title">Notifications</div></div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+  <div class="item" data-action="time" data-search="time management">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10"/></svg></div>
+    <div class="content"><div class="title">Time management</div></div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<div class="section" data-section>
+  <div class="section-title">For professionals</div>
+  <div class="item" data-link="seller-history.html" data-search="insights">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M4 20h16v-2H4zM6 18V8h3v10H6zm5 0V4h3v14h-3zm5 0v-6h3v6h-3z"/></svg></div>
+    <div class="content"><div class="title">Insights</div></div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+  <div class="item" data-link="subscription.html" data-search="verified">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M12 2l2 4 4 .5-3 3 .7 4-3.7-2-3.7 2 .7-4-3-3 4-.5z"/></svg></div>
+    <div class="content"><div class="title">NOVAGAPP Verified</div></div>
+    <div class="meta" id="verifiedStatus">Not subscribed</div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+  <div class="item" data-link="seller.html" data-search="account type tools">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M3 13h18v8H3zM5 3h14v8H5z"/></svg></div>
+    <div class="content"><div class="title">Account type and tools</div></div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+  <div class="item" data-link="seller-pay.html" data-search="ads payments">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M3 7h18v10H3zM6 10h6"/></svg></div>
+    <div class="content"><div class="title">Ads payments</div></div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<div class="section" data-section>
+  <div class="section-title">Who can see your content</div>
+  <div class="item" data-action="privacy" data-search="privacy account privacy">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.5 9.7-8 11-4.5-1.3-8-6-8-11V6z"/></svg></div>
+    <div class="content"><div class="title">Account privacy</div></div>
+    <div class="meta" id="privacyStatus">Public</div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+  <div class="item" data-action="close" data-search="close friends">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M12 3l2 4 4 .5-3 3 .7 4-3.7-2-3.7 2 .7-4-3-3 4-.5z"/></svg></div>
+    <div class="content"><div class="title">Close Friends</div></div>
+    <div class="meta" id="closeCount">0</div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+  <div class="item" data-action="cross" data-search="crossposting">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M4 7h7v7H4zM13 10h7v7h-7z"/></svg></div>
+    <div class="content"><div class="title">Crossposting</div></div>
+    <div class="meta" id="crossStatus">Off</div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+  <div class="item" data-action="blocked" data-search="blocked">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M3 3l18 18"/></svg></div>
+    <div class="content"><div class="title">Blocked</div></div>
+    <div class="meta" id="blockedCount">0</div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+  <div class="item" data-action="story" data-search="story location">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 9 9 0 0 0-9-9z"/></svg></div>
+    <div class="content"><div class="title">Story and location</div></div>
+    <div class="meta" id="storyStatus">Off</div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+  <div class="item" data-action="friends" data-search="activity friends">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M7 8a3 3 0 1 0 3-3 3 3 0 0 0-3 3zm8 1a3 3 0 1 0 3-3 3 3 0 0 0-3 3z"/></svg></div>
+    <div class="content"><div class="title">Activity in Friends tab</div></div>
+    <div class="meta" id="friendsStatus">On</div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<div class="section" data-section>
+  <div class="section-title">How others can interact with you</div>
+  <div class="item" data-action="messages" data-search="messages story replies">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M21 6h-18v12h4v4l4-4h10z"/></svg></div>
+    <div class="content"><div class="title">Messages and story replies</div></div>
+    <div class="meta" id="messageStatus">On</div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+  <div class="item" data-action="tags" data-search="tags mentions">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M5 7h6v6H5zM13 11h6v6h-6z"/></svg></div>
+    <div class="content"><div class="title">Tags and mentions</div></div>
+    <div class="meta" id="tagsStatus">On</div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+  <div class="item" data-action="comments" data-search="comments">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M21 6h-18v12h4v4l4-4h10z"/></svg></div>
+    <div class="content"><div class="title">Comments</div></div>
+    <div class="meta" id="commentsStatus">On</div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+  <div class="item" data-action="sharing" data-search="sharing reuse">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M12 3l9 9-9 9-9-9z"/></svg></div>
+    <div class="content"><div class="title">Sharing and reuse</div></div>
+    <div class="meta" id="sharingStatus">On</div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+  <div class="item" data-action="restricted" data-search="restricted">
+    <div class="icon"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10"/></svg></div>
+    <div class="content"><div class="title">Restricted</div></div>
+    <div class="meta" id="restrictedCount">0</div>
+    <div class="chev">&rsaquo;</div>
+  </div>
+</div>
+
+<!-- MODALS -->
+<div class="modal-backdrop" id="modalBackdrop"></div>
+<div class="modal" id="listModal">
+  <h3 id="listTitle">List</h3>
+  <div class="row">
+    <input id="listInput" placeholder="Add username">
+    <button onclick="addListItem()">Add</button>
+  </div>
+  <div class="list" id="listItems"></div>
+  <div class="footer">
+    <button class="close" onclick="closeModal()">Close</button>
+    <button class="save" onclick="closeModal()">Done</button>
+  </div>
+</div>
+
+<div class="modal" id="toggleModal">
+  <h3 id="toggleTitle">Settings</h3>
+  <div id="toggleBody"></div>
+  <div class="footer">
+    <button class="close" onclick="closeModal()">Close</button>
+    <button class="save" onclick="closeModal()">Done</button>
+  </div>
+</div>
+
+<script>
+let user = null;
+let settings = {};
+let currentListKey = null;
+
+const defaults = {
+  privacy: "Public",
+  crossposting: false,
+  storyLocation: false,
+  activityFriends: true,
+  allowMessages: true,
+  allowStoryReplies: true,
+  allowTags: true,
+  allowComments: true,
+  allowSharing: true,
+  dailyReminder: false,
+  breakMode: false
+};
+
+function storageKey(){
+  return "m_settings_" + user.id;
+}
+function loadSettings(){
+  const raw = localStorage.getItem(storageKey());
+  settings = raw ? JSON.parse(raw) : { ...defaults };
+}
+function saveSettings(){
+  localStorage.setItem(storageKey(), JSON.stringify(settings));
+  refreshStatus();
+}
+
+function listKey(name){
+  return name + "_" + user.id;
+}
+function getList(name){
+  return JSON.parse(localStorage.getItem(listKey(name)) || "[]");
+}
+function setList(name, list){
+  localStorage.setItem(listKey(name), JSON.stringify(list));
+  refreshStatus();
+}
+
+function refreshStatus(){
+  privacyStatus.textContent = settings.privacy;
+  crossStatus.textContent = settings.crossposting ? "On" : "Off";
+  storyStatus.textContent = settings.storyLocation ? "On" : "Off";
+  friendsStatus.textContent = settings.activityFriends ? "On" : "Off";
+  messageStatus.textContent = settings.allowMessages ? "On" : "Off";
+  tagsStatus.textContent = settings.allowTags ? "On" : "Off";
+  commentsStatus.textContent = settings.allowComments ? "On" : "Off";
+  sharingStatus.textContent = settings.allowSharing ? "On" : "Off";
+
+  closeCount.textContent = getList("close_friends").length;
+  blockedCount.textContent = getList("blocked").length;
+  restrictedCount.textContent = getList("restricted").length;
+}
+
+function openListModal(title, key, placeholder){
+  currentListKey = key;
+  listTitle.textContent = title;
+  listInput.placeholder = placeholder || "Add username";
+  renderList();
+  openModal("list");
+}
+
+function renderList(){
+  const list = getList(currentListKey);
+  listItems.innerHTML = "";
+  if(!list.length){
+    listItems.innerHTML = "<div style='color:#777;padding:10px 0'>No users</div>";
+    return;
+  }
+  list.forEach(name => {
+    const row = document.createElement("div");
+    row.className = "list-item";
+    row.innerHTML = `<span>${name}</span><button>Remove</button>`;
+    row.querySelector("button").onclick = () => {
+      const next = list.filter(n => n !== name);
+      setList(currentListKey, next);
+      renderList();
+    };
+    listItems.appendChild(row);
+  });
+}
+
+function addListItem(){
+  const val = listInput.value.trim();
+  if(!val) return;
+  const list = getList(currentListKey);
+  if(!list.includes(val)) list.push(val);
+  setList(currentListKey, list);
+  listInput.value = "";
+  renderList();
+}
+
+function openToggleModal(title, rows){
+  toggleTitle.textContent = title;
+  toggleBody.innerHTML = "";
+  rows.forEach(r => {
+    const wrap = document.createElement("div");
+    wrap.className = "toggle-row";
+    wrap.innerHTML = `
+      <span>${r.label}</span>
+      <label class='switch'>
+        <input type='checkbox' ${settings[r.key] ? "checked" : ""}>
+        <span class='slider'></span>
+      </label>
+    `;
+    wrap.querySelector("input").onchange = e => {
+      settings[r.key] = e.target.checked;
+      saveSettings();
+    };
+    toggleBody.appendChild(wrap);
+  });
+  openModal("toggle");
+}
+
+function openModal(type){
+  modalBackdrop.classList.add("show");
+  listModal.classList.remove("show");
+  toggleModal.classList.remove("show");
+  if(type === "list") listModal.classList.add("show");
+  if(type === "toggle") toggleModal.classList.add("show");
+}
+function closeModal(){
+  modalBackdrop.classList.remove("show");
+  listModal.classList.remove("show");
+  toggleModal.classList.remove("show");
+}
+modalBackdrop.onclick = closeModal;
+
+(async()=>{
+  user = await window.NOVA.requireUser();
+  loadSettings();
+  refreshStatus();
+
+  // Update verified status if subscription exists
+  const { data: sub, error: subError } = await window.NOVA.supa
+    .from("subscription")
+    .select("id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if(!subError && sub){
+    verifiedStatus.textContent = "Subscribed";
+  }
+})();
+
+// Actions
+const actions = {
+  privacy: () => {
+    settings.privacy = settings.privacy === "Public" ? "Private" : "Public";
+    saveSettings();
+  },
+  cross: () => { settings.crossposting = !settings.crossposting; saveSettings(); },
+  story: () => { settings.storyLocation = !settings.storyLocation; saveSettings(); },
+  friends: () => { settings.activityFriends = !settings.activityFriends; saveSettings(); },
+  tags: () => { settings.allowTags = !settings.allowTags; saveSettings(); },
+  comments: () => { settings.allowComments = !settings.allowComments; saveSettings(); },
+  sharing: () => { settings.allowSharing = !settings.allowSharing; saveSettings(); },
+  close: () => openListModal("Close Friends", "close_friends", "Add username"),
+  blocked: () => openListModal("Blocked", "blocked", "Add username"),
+  restricted: () => openListModal("Restricted", "restricted", "Add username"),
+  saved: () => openListModal("Saved", "saved_items", "Add title"),
+  archive: () => openListModal("Archive", "archive_items", "Add title"),
+  activity: async () => {
+    const { data: reactions } = await window.NOVA.supa
+      .from("reactions")
+      .select("reaction,created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending:false })
+      .limit(10);
+    const { data: comments } = await window.NOVA.supa
+      .from("comments")
+      .select("created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending:false })
+      .limit(10);
+
+    const list = [
+      ...(reactions || []).map(r => `You ${r.reaction}d something`),
+      ...(comments || []).map(() => "You commented")
+    ];
+
+    openListModal("Your activity", "activity_items", "Add note");
+    if(list.length){
+      setList("activity_items", list);
+      renderList();
+    }
+  },
+  time: () => {
+    openToggleModal("Time management", [
+      { key: "dailyReminder", label: "Daily reminder" },
+      { key: "breakMode", label: "Take a break" }
+    ]);
+  },
+  messages: () => {
+    openToggleModal("Messages and story replies", [
+      { key: "allowMessages", label: "Allow messages" },
+      { key: "allowStoryReplies", label: "Allow story replies" }
+    ]);
+  }
+};
+
+// Links
+document.querySelectorAll(".item[data-link]").forEach(item => {
+  item.onclick = () => location.href = item.dataset.link;
+});
+
+// Actions
+document.querySelectorAll(".item[data-action]").forEach(item => {
+  item.onclick = () => {
+    const action = item.dataset.action;
+    if(actions[action]) actions[action]();
+  };
+});
+
+// Search filter
+searchInput.oninput = e => {
+  const q = e.target.value.toLowerCase().trim();
+  document.querySelectorAll(".item").forEach(item => {
+    const text = (item.dataset.search || item.innerText || "").toLowerCase();
+    item.style.display = !q || text.includes(q) ? "flex" : "none";
+  });
+  document.querySelectorAll(".section").forEach(section => {
+    const visible = Array.from(section.querySelectorAll(".item")).some(i => i.style.display !== "none");
+    section.style.display = visible ? "block" : "none";
+  });
+};
+</script>
+</body>
+</html>

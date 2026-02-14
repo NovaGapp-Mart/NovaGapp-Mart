@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Details – NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+body{
+  margin:0;
+  background:#fff;
+  font-family:Arial;
+}
+.header{
+  padding:12px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  border-bottom:1px solid #ddd;
+}
+textarea{
+  width:100%;
+  height:120px;
+  border:none;
+  padding:15px;
+  font-size:15px;
+  outline:none;
+}
+button{
+  background:#ff6a00;
+  color:#fff;
+  border:none;
+  padding:8px 16px;
+  border-radius:20px;
+  font-weight:600;
+}
+.preview{
+  padding:15px;
+}
+.preview img,.preview video{
+  width:100%;
+  border-radius:14px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+  <b>New Post</b>
+  <button onclick="publish()">Share</button>
+</div>
+
+<div class="preview" id="preview"></div>
+
+<textarea id="caption" placeholder="Write a caption… #hashtag"></textarea>
+
+<script>
+/* ======================
+   SECURITY CHECK
+====================== */
+if(!window.selectedMedia || !window.selectedType){
+  alert("Media not found. Please select again.");
+  location.href = "create.html";
+}
+
+/* ======================
+   PREVIEW
+====================== */
+const file = window.selectedMedia;
+const type = window.selectedType;
+
+const url = URL.createObjectURL(file);
+
+preview.innerHTML = type === "reel"
+  ? `<video src="${url}" controls></video>`
+  : `<img src="${url}">`;
+
+/* ======================
+   PUBLISH
+====================== */
+function publish(){
+  const text = caption.value.trim();
+
+  // store caption in memory (optional)
+  window.selectedCaption = text;
+
+  // 🚀 NEXT STEP: REAL UPLOAD PAGE
+  if(type === "reel"){
+    location.href = "upload-reel.html";
+  }else{
+    location.href = "upload-post.html";
+  }
+}
+</script>
+
+</body>
+</html>

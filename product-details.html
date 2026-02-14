@@ -1,0 +1,1253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Product Details</title>
+
+<style>
+body{font-family:Arial;margin:0;padding-bottom:160px;background:#fff}
+.header{padding:15px;display:flex;align-items:center;border-bottom:1px solid #eee}
+.back-btn{font-size:24px;cursor:pointer;margin-right:15px}
+.image-slider{width:100%;display:flex;overflow-x:auto;scroll-snap-type:x mandatory;background:#f5f5f5}
+.image-slider img{min-width:100%;height:350px;object-fit:contain;scroll-snap-align:start}
+.content{padding:20px}
+.p-name{font-size:22px;font-weight:bold}
+.p-price{font-size:20px;color:#ff6a00;font-weight:bold}
+.p-mrp{text-decoration:line-through;color:#888;margin-left:10px}
+.p-desc{margin-top:15px;color:#555}
+.low-stock{font-size:13px;color:#d14;font-weight:bold;margin-top:6px}
+.out-stock{
+  font-size:13px;
+  color:#666;
+  font-weight:bold;
+  margin-top:6px;
+  display:inline-block;
+  background:#efefef;
+  padding:4px 10px;
+  border-radius:999px
+}
+.reviews{padding:0 20px 20px}
+.reviews h3{margin:0 0 10px}
+.review-item{background:#fff;border:1px solid #e9e9e9;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,0.04)}
+.review-head{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:#666;margin-bottom:8px}
+.review-name{font-weight:bold;color:#222}
+.review-stars{display:flex;gap:2px;margin-bottom:8px}
+.review-stars .star{color:#ddd}
+.review-stars .star.filled{color:#ffb400}
+.review-text{color:#444;line-height:1.4}
+.review-images{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.review-thumb{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid #eee;cursor:pointer}
+.review-form{margin-top:12px;padding:14px;border:1px solid #e9e9e9;border-radius:12px;background:#fff}
+.review-form label{font-size:13px;color:#555}
+.review-form textarea{width:100%;padding:10px;border-radius:8px;border:1px solid #ddd;margin-top:8px}
+.review-form button{margin-top:10px;width:100%;background:#ff6a00;color:#fff;border:none;padding:12px;border-radius:8px;font-weight:bold}
+.review-note{font-size:13px;color:#d14;margin-top:8px}
+.star-input{display:flex;gap:6px;margin-top:8px}
+.star-input .star-btn{font-size:22px;color:#ddd;cursor:pointer;user-select:none}
+.star-input .star-btn.filled{color:#ffb400}
+.review-upload{margin-top:10px}
+.review-preview{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.review-preview img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid #eee}
+.seller-badge{
+  display:inline-block;
+  margin-left:8px;
+  background:linear-gradient(135deg,#f7d774,#d6a21f);
+  color:#4a3300;
+  font-size:11px;
+  font-weight:bold;
+  padding:3px 6px;
+  border-radius:6px;
+  vertical-align:middle;
+  box-shadow:0 2px 6px rgba(0,0,0,.18)
+}
+.seller-line{
+  font-size:13px;
+  color:#666;
+  margin-top:6px
+}
+.seller-count{
+  margin-left:6px;
+  color:#444;
+  font-weight:600
+}
+.owner-actions{
+  display:flex;
+  gap:10px;
+  margin-top:12px
+}
+.owner-actions button{
+  flex:1;
+  border:none;
+  border-radius:10px;
+  padding:11px 12px;
+  font-weight:bold;
+  cursor:pointer
+}
+.owner-edit{
+  background:#1677ff;
+  color:#fff
+}
+.owner-delete{
+  background:#ff3b30;
+  color:#fff
+}
+.seller-strip{
+  position:fixed;
+  top:52px;
+  left:0;
+  right:0;
+  background:#fff;
+  padding:8px 15px;
+  border-bottom:1px solid #eee;
+  font-size:13px;
+  display:none;
+  z-index:150
+}
+.seller-strip b{color:#222}
+.buy-box{position:fixed;bottom:0;width:100%;background:#fff;padding:15px;box-shadow:0 -2px 10px rgba(0,0,0,0.1);display:flex;gap:10px}
+.btn-cart{flex:1;background:#ff9f00;color:#fff;border:none;padding:15px}
+.btn-buy{flex:1;background:#fb641b;color:#fff;border:none;padding:15px}
+.btn-cart:disabled,.btn-buy:disabled{
+  background:#b7b7b7;
+  color:#f5f5f5;
+  cursor:not-allowed
+}
+.try-menu{position:fixed;bottom:0;width:100%;background:#fff;border-radius:20px 20px 0 0;padding:20px;display:none;z-index:200}
+.try-menu button{width:100%;padding:15px;margin:10px 0}
+.ai-screen{position:fixed;inset:0;background:#fff;display:none;justify-content:center;align-items:center;text-align:center;z-index:300}
+.loader{width:50px;height:50px;border:5px solid #ddd;border-top:5px solid #4a90e2;border-radius:50%;animation:spin 1s linear infinite;margin:20px auto}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+
+<!-- 🔥 SUPABASE -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<script>
+  window.supa = window.supa || supabase.createClient(
+    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+  );
+</script>
+<script src="global.js"></script>
+</head>
+
+<body>
+
+<div class="header">
+  <span class="back-btn" onclick="history.back()">←</span>
+  <b>Product Details</b>
+</div>
+
+<div id="sellerStrip" class="seller-strip">
+  Published by <b id="sellerStripName">Seller</b> <span id="sellerStripCount"></span>
+</div>
+
+<div id="productBox"></div>
+
+<div id="previewGuide" style="padding:15px;background:#fff7e6;font-size:14px;display:none">
+📸 Best Preview Tips:
+<ul>
+<li>Plain background</li>
+<li>Stand straight</li>
+<li>Good lighting</li>
+<li>Wear tight clothes</li>
+</ul>
+</div>
+
+<div class="try-menu" id="tryMenu">
+  <button onclick="openGallery()">Upload Photo</button>
+  <button onclick="openCamera()">Capture Photo</button>
+</div>
+
+<div class="ai-screen" id="aiScreen">
+  <div id="aiContent">
+    <div class="loader"></div>
+    <h3>Just wait for moment your images will be ready</h3>
+    <p>Please hold on while we prepare your try-on.</p>
+  </div>
+</div>
+
+<input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
+<input type="file" id="galleryInput" accept="image/*" hidden>
+
+<script>
+/* =======================
+   EXISTING LOGIC (AS IT IS)
+======================= */
+
+const DAY = 86400000;
+const FREE_LIMIT = 1;
+const PAID_PLAN = "4000";
+const FREE_PLAN = "FREE";
+const PRO_PLAN = "PRO";
+const ENTERPRISE_PLAN = "ENTERPRISE";
+const FREE_TRYON_LIMIT = 2;
+const PRO_TRYON_LIMIT = 20;
+const TRYON_API_BASE = localStorage.getItem("tryonApiBase") || "http://localhost:3000";
+
+const supa = window.supa;
+const isPaidUser = localStorage.getItem("userPlan") === PAID_PLAN;
+let ACTIVE_PLAN = "FREE";
+let PLAN_READY = false;
+let CURRENT_USER_ID = null;
+let CURRENT_USER_EMAIL = null;
+let CURRENT_USERNAME = "";
+let SELECTED_REVIEW_IMAGES = [];
+const REVIEW_FILE_KEYS = new Set();
+let SELECTED_RATING = 0;
+let USERNAME_MAP = {};
+
+let previewCount = parseInt(localStorage.getItem("previewCount")) || 0;
+let resetTime = parseInt(localStorage.getItem("previewResetTime")) || Date.now();
+
+const box = document.getElementById("productBox");
+const params = new URLSearchParams(location.search);
+const productId = params.get("id") || localStorage.getItem("selectedProductId");
+const tryMenu = document.getElementById("tryMenu");
+const aiScreen = document.getElementById("aiScreen");
+const aiContent = document.getElementById("aiContent");
+const cameraInput = document.getElementById("cameraInput");
+const galleryInput = document.getElementById("galleryInput");
+let AI_CANCEL_REQUIRED = false;
+
+function isUuid(v){
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v || ""));
+}
+
+if(!productId || !isUuid(productId)){
+  alert("Product not found");
+  history.back();
+}
+
+/* 🔥 REAL PRODUCT FROM SUPABASE */
+document.addEventListener("DOMContentLoaded", ()=>{
+  (async function(){
+  const { data: p, error } = await supa
+    .from("products")
+    .select("*")
+    .eq("id", productId)
+    .single();
+
+  if(error || !p){
+    alert("Product removed");
+    history.back();
+    return;
+  }
+
+  const { data: sessionData } = await supa.auth.getSession();
+  const currentUserId = sessionData?.session?.user?.id || "";
+  const canManageProduct = Boolean(currentUserId && p.owner_id && currentUserId === p.owner_id);
+
+  const sellerName = await getSellerDisplayName(p);
+  const safeSellerName = sellerName || "Seller";
+  const sellerProductCount = await getSellerProductCount(p.owner_id);
+  const sellerCountLabel = formatSellerListingCount(sellerProductCount);
+  const rawQty = p.quantity;
+  const parsedQty = (rawQty === null || rawQty === undefined || rawQty === "")
+    ? NaN
+    : Number(rawQty);
+  const hasQty = Number.isFinite(parsedQty);
+  const remainingQty = hasQty ? Math.max(0, parsedQty) : 9999;
+  const isOutOfStock = hasQty && remainingQty <= 0;
+  const stockStatusHtml = isOutOfStock
+    ? `<div class="out-stock">Out of stock</div>`
+    : (hasQty && remainingQty < 1000
+      ? `<div class="low-stock">Only ${remainingQty} left</div>`
+      : "");
+
+  let sellerBadgeHtml = "";
+  if(p.owner_id){
+    const { data: seller } = await supa
+      .from("sellers")
+      .select("show_badge,is_paid")
+      .eq("user_id", p.owner_id)
+      .maybeSingle();
+
+    if(seller && seller.is_paid && seller.show_badge){
+      sellerBadgeHtml = `<span class="seller-badge">⭐ Seller</span>`;
+    }
+  }
+
+  box.innerHTML = `
+    <div class="image-slider" id="slider">
+      ${(p.images || []).map(i=>`<img src="${i}">`).join("")}
+    </div>
+
+    <div class="content">
+      <div class="p-name">${translateProductName(p.name)} ${sellerBadgeHtml}</div>
+      <div class="p-price">${formatPrice(p.price, p.currency)}
+        <span class="p-mrp">${formatPrice(p.mrp, p.currency)}</span>
+      </div>
+      ${stockStatusHtml}
+      <div class="seller-line">
+        Published by <b id="sellerInlineName">${safeSellerName}</b>
+        <span class="seller-count" id="sellerInlineCount">${sellerCountLabel}</span>
+      </div>
+      <div class="p-desc">${p.desc || ""}</div>
+      ${canManageProduct ? `
+      <div class="owner-actions">
+        <button type="button" class="owner-edit" id="editOwnedProductBtn">Edit Product</button>
+        <button type="button" class="owner-delete" id="deleteOwnedProductBtn">Delete Product</button>
+      </div>
+      ` : ""}
+    </div>
+
+    <div class="buy-box">
+      <button class="btn-cart" ${isOutOfStock ? "disabled" : ""}>${isOutOfStock ? "OUT OF STOCK" : "ADD TO CART"}</button>
+      <button class="btn-buy" ${isOutOfStock ? "disabled" : ""}>${isOutOfStock ? "OUT OF STOCK" : "BUY NOW"}</button>
+    </div>
+
+    <div class="reviews" id="reviewsSection">
+      <h3>Customer Reviews</h3>
+      <div id="reviewsList"></div>
+
+      <div class="review-note" id="reviewGateNote" style="display:none"></div>
+
+      <div class="review-form" id="reviewForm">
+        <h4 style="margin:0 0 6px">Write a Review</h4>
+
+        <label>Rating</label>
+        <div class="star-input" id="starInput">
+          <span class="star-btn" data-value="1">★</span>
+          <span class="star-btn" data-value="2">★</span>
+          <span class="star-btn" data-value="3">★</span>
+          <span class="star-btn" data-value="4">★</span>
+          <span class="star-btn" data-value="5">★</span>
+        </div>
+
+        <textarea id="reviewText" rows="3" placeholder="Share your experience"></textarea>
+
+        <div class="review-upload">
+          <label for="reviewImages">Add photos</label>
+          <input type="file" id="reviewImages" accept="image/*" multiple>
+          <div class="review-preview" id="reviewPreview"></div>
+        </div>
+
+        <button id="postReviewBtn">Submit Review</button>
+        <div class="review-note" id="reviewNote" style="display:none"></div>
+      </div>
+    </div>  `;
+
+  const btnCart = box.querySelector(".btn-cart");
+  const btnBuy = box.querySelector(".btn-buy");
+
+  if(btnCart){
+    btnCart.addEventListener("click", (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      if(isOutOfStock){
+        showToast("Out of stock");
+        return;
+      }
+      addProductToCart(p, 1);
+    });
+  }
+
+  if(btnBuy){
+    btnBuy.addEventListener("click", (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      if(isOutOfStock){
+        showToast("Out of stock");
+        return;
+      }
+      const added = addProductToCart(p, 1);
+      if(added){
+        location.href = "checkout.html";
+      }
+    });
+  }
+
+  if(canManageProduct){
+    const editBtn = document.getElementById("editOwnedProductBtn");
+    const deleteBtn = document.getElementById("deleteOwnedProductBtn");
+    if(editBtn){
+      editBtn.addEventListener("click", ()=>{
+        openProductEditor(p.id);
+      });
+    }
+    if(deleteBtn){
+      deleteBtn.addEventListener("click", async ()=>{
+        const ok = window.confirm("Delete this product from listings?");
+        if(!ok) return;
+        deleteBtn.disabled = true;
+        await deleteOwnedProduct(p.id, currentUserId);
+        deleteBtn.disabled = false;
+      });
+    }
+  }
+
+  /* 🔴 LONG PRESS MENU */
+  const slider = document.getElementById("slider");
+  let pressTimer;
+  let pressStart = null;
+
+  slider.addEventListener("touchstart", (e)=>{
+    if(!e.touches || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    pressStart = { x: t.clientX, y: t.clientY };
+    pressTimer = setTimeout(()=>{
+      tryMenu.style.display = "block";
+    }, 600);
+  });
+
+  slider.addEventListener("touchmove", (e)=>{
+    if(!pressStart || !e.touches || !e.touches[0]) return;
+    const t = e.touches[0];
+    const dx = Math.abs(t.clientX - pressStart.x);
+    const dy = Math.abs(t.clientY - pressStart.y);
+    if(dx > 10 || dy > 10){
+      clearTimeout(pressTimer);
+      pressStart = null;
+    }
+  });
+
+  slider.addEventListener("touchend", ()=>{
+    clearTimeout(pressTimer);
+    pressStart = null;
+  });
+
+  slider.addEventListener("contextmenu", (e)=>{
+    e.preventDefault();
+    tryMenu.style.display = "block";
+  });
+
+  /* PHOTO HANDLING NEEDS p */
+  window._productForPreview = p;
+
+  // Reviews: load list + prepare submit form (no reload)
+  await loadReviews(p.id);
+  await setupReviewForm(p);
+
+  const stripNameEl = document.getElementById("sellerStripName");
+  if(stripNameEl) stripNameEl.textContent = safeSellerName;
+  const stripCountEl = document.getElementById("sellerStripCount");
+  if(stripCountEl) stripCountEl.textContent = sellerCountLabel;
+
+  const strip = document.getElementById("sellerStrip");
+  if(strip){
+    window.addEventListener("scroll", ()=>{
+      strip.style.display = window.scrollY > 220 ? "block" : "none";
+    });
+  }
+})();
+});
+
+async function getSellerDisplayName(product){
+  if(!product?.owner_id) return "";
+
+  const { data, error } = await supa
+    .from("users")
+    .select("username")
+    .eq("user_id", product.owner_id)
+    .maybeSingle();
+
+  if(error){
+    console.error(error);
+    return product.owner_id.slice(0, 8);
+  }
+
+  return data?.username || product.owner_id.slice(0, 8);
+}
+
+function formatSellerListingCount(total){
+  const count = Math.max(0, Number(total) || 0);
+  if(!count) return "";
+  return `(${count} ${count === 1 ? "product" : "products"} listed)`;
+}
+
+async function getSellerProductCount(ownerId){
+  if(!ownerId) return 0;
+
+  const { count, error } = await supa
+    .from("products")
+    .select("id", { count: "exact", head: true })
+    .eq("owner_id", ownerId);
+
+  if(error){
+    console.error(error);
+    return 0;
+  }
+
+  return Math.max(0, Number(count) || 0);
+}
+
+function formatPrice(amount, currency){
+  if(typeof window.moneyTag === "function"){
+    return moneyTag(amount, currency || "USD");
+  }
+  const val = Number(amount) || 0;
+  return "$" + val;
+}
+
+function showToast(message){
+  const text = String(message || "").trim();
+  if(!text) return;
+  const toast = document.createElement("div");
+  toast.textContent = text;
+  toast.style.position = "fixed";
+  toast.style.left = "50%";
+  toast.style.bottom = "100px";
+  toast.style.transform = "translateX(-50%)";
+  toast.style.background = "#222";
+  toast.style.color = "#fff";
+  toast.style.padding = "10px 14px";
+  toast.style.borderRadius = "10px";
+  toast.style.fontSize = "13px";
+  toast.style.zIndex = "2400";
+  toast.style.opacity = "0";
+  toast.style.transition = "opacity .18s ease";
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => { toast.style.opacity = "1"; });
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    setTimeout(() => toast.remove(), 200);
+  }, 1600);
+}
+
+function addProductToCart(p, qtyAdd){
+  if(!p || !p.id) return;
+  const addQty = Number(qtyAdd || 1);
+  const rawQty = p.quantity;
+  const parsedQty = (rawQty === null || rawQty === undefined || rawQty === "")
+    ? NaN
+    : Number(rawQty);
+  const hasStockCap = Number.isFinite(parsedQty) && parsedQty >= 0;
+  const maxQty = hasStockCap ? parsedQty : null;
+  if(hasStockCap && maxQty <= 0){
+    showToast("Out of stock");
+    return false;
+  }
+  let cart = JSON.parse(localStorage.getItem("cart")) || [];
+  let item = cart.find(i => i.id === p.id);
+
+  const image =
+    (Array.isArray(p.images) && p.images[0]) ||
+    (typeof p.images === "string" ? p.images : "") ||
+    "";
+
+  if(item){
+    if(hasStockCap && item.qty >= maxQty){
+      showToast("Out of stock");
+      return false;
+    }
+    item.qty += addQty;
+    if(hasStockCap && item.qty > maxQty){
+      item.qty = maxQty;
+    }
+  }
+  else cart.push({
+    id: p.id,
+    name: p.name || "",
+    price: Number(p.price || 0),
+    currency: p.currency || "USD",
+    images: [image],
+    qty: hasStockCap ? Math.min(addQty, maxQty) : addQty,
+    owner_id: p.owner_id || ""
+  });
+
+  localStorage.setItem("cart", JSON.stringify(cart));
+  showToast("Your product added to cart");
+  return true;
+}
+
+function openProductEditor(productId){
+  if(!productId) return;
+  localStorage.setItem("editProductId", productId);
+  location.href = "edit-product.html";
+}
+
+async function deleteOwnedProduct(productId, ownerId){
+  if(!productId || !ownerId){
+    alert("Product delete failed");
+    return;
+  }
+
+  const { error } = await supa
+    .from("products")
+    .delete()
+    .eq("id", productId)
+    .eq("owner_id", ownerId);
+
+  if(error){
+    console.error(error);
+    alert("Failed to delete product");
+    return;
+  }
+
+  if(localStorage.getItem("selectedProductId") === productId){
+    localStorage.removeItem("selectedProductId");
+  }
+  alert("Product deleted");
+  location.href = "my-products.html";
+}
+
+// Fetch and render reviews for current product
+async function loadReviews(productId){
+  const list = document.getElementById("reviewsList");
+  list.innerHTML = "Loading reviews...";
+
+  if(!isUuid(productId)){
+    list.innerHTML = "<p style='font-size:13px;color:#777'>Invalid product</p>";
+    return;
+  }
+
+  const { data, error } = await supa
+    .from("product_reviews")
+    .select("user_id,rating,review,created_at,image_urls")
+    .eq("product_id", productId)
+    .order("created_at", { ascending: false });
+
+  if(error){
+    console.error("loadReviews error", error);
+    list.innerHTML = "<p style='font-size:13px;color:#777'>Failed to load reviews</p>";
+    return;
+  }
+
+  if(!data || data.length === 0){
+    list.innerHTML = "<p style='font-size:13px;color:#777'>No reviews yet</p>";
+    return;
+  }
+
+  await hydrateUsernames(data.map(r=>r.user_id));
+
+  list.innerHTML = "";
+  data.forEach(r=>{
+    const node = renderReviewItem(r);
+    list.appendChild(node);
+  });
+}
+
+// Setup review form with auth + duplicate check
+async function setupReviewForm(product){
+  const productId = product?.id;
+  if(!productId) return;
+  const form = document.getElementById("reviewForm");
+  const gate = document.getElementById("reviewGateNote");
+  const note = document.getElementById("reviewNote");
+  const btn = document.getElementById("postReviewBtn");
+  const reviewImages = document.getElementById("reviewImages");
+  const reviewPreview = document.getElementById("reviewPreview");
+
+  const { data } = await supa.auth.getSession();
+  const user = data?.session?.user;
+  CURRENT_USER_ID = user?.id || null;
+  CURRENT_USER_EMAIL = user?.email || null;
+  CURRENT_USERNAME =
+    user?.user_metadata?.username ||
+    user?.user_metadata?.full_name ||
+    localStorage.getItem("username") ||
+    (CURRENT_USER_EMAIL ? CURRENT_USER_EMAIL.split("@")[0] : "");
+
+  initStarInput();
+
+  if(!user){
+    gate.style.display = "block";
+    gate.textContent = "Login required to write a review";
+    form.style.display = "none";
+    return;
+  }
+
+  const { data: existing, error: existsError } = await supa
+    .from("product_reviews")
+    .select("id")
+    .eq("product_id", productId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if(existsError){
+    console.error(existsError);
+  }
+
+  if(existing){
+    gate.style.display = "block";
+    gate.textContent = "You have already reviewed this product";
+    disableReviewForm();
+    return;
+  }
+
+  reviewImages.onchange = e=>{
+    const files = [...e.target.files];
+    files.forEach(f=>{
+      const key = `${f.name}|${f.size}|${f.lastModified}`;
+      if(REVIEW_FILE_KEYS.has(key)) return;
+      REVIEW_FILE_KEYS.add(key);
+      SELECTED_REVIEW_IMAGES.push(f);
+
+      const img = document.createElement("img");
+      img.src = URL.createObjectURL(f);
+      img.onload = () => URL.revokeObjectURL(img.src);
+      reviewPreview.appendChild(img);
+    });
+    e.target.value = "";
+  };
+
+  btn.onclick = async ()=>{
+    const review = document.getElementById("reviewText").value.trim();
+    if(SELECTED_RATING < 1 || SELECTED_RATING > 5){
+      note.style.display = "block";
+      note.textContent = "Please select a rating";
+      return;
+    }
+    if(!review){
+      note.style.display = "block";
+      note.textContent = "Please write a review";
+      return;
+    }
+
+    btn.disabled = true;
+
+    let imageUrls = [];
+    try{
+      imageUrls = await Promise.all(SELECTED_REVIEW_IMAGES.map(f => new Promise((resolve, reject)=>{
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error("Image read failed"));
+        reader.readAsDataURL(f);
+      })));
+    }catch(err){
+      console.error(err);
+      note.style.display = "block";
+      note.textContent = "Image processing failed";
+      btn.disabled = false;
+      return;
+    }
+
+    const { error } = await supa
+      .from("product_reviews")
+      .insert({
+        product_id: productId,
+        user_id: user.id,
+        rating: SELECTED_RATING,
+        review,
+        image_urls: imageUrls
+      });
+
+    if(error){
+      console.error(error);
+      note.style.display = "block";
+      note.textContent = "Failed to post review";
+      btn.disabled = false;
+      return;
+    }
+
+    await createSellerReviewNotification({
+      sellerId: product.owner_id || "",
+      productId,
+      productName: product.name || "Product",
+      buyerName: getUserLabel(user.id),
+      reviewText: review
+    });
+
+    // Append instantly (no reload)
+    const newReview = {
+      user_id: user.id,
+      rating: SELECTED_RATING,
+      review,
+      image_urls: imageUrls,
+      created_at: new Date().toISOString()
+    };
+
+    USERNAME_MAP[user.id] = getUserLabel(user.id);
+    prependReview(newReview);
+
+    document.getElementById("reviewText").value = "";
+    reviewPreview.innerHTML = "";
+    SELECTED_REVIEW_IMAGES = [];
+    REVIEW_FILE_KEYS.clear();
+
+    gate.style.display = "block";
+    gate.textContent = "You have already reviewed this product";
+    disableReviewForm();
+  };
+}
+
+async function createSellerReviewNotification(payload){
+  if(!payload?.sellerId || !payload?.productId) return;
+
+  const row = {
+    receiver_user_id: payload.sellerId,
+    seller_id: payload.sellerId,
+    type: "review_comment",
+    title: "New Product Review",
+    message: payload.reviewText || "",
+    product_id: payload.productId,
+    product_name: payload.productName || "Product",
+    buyer_name: payload.buyerName || "Buyer",
+    is_read: false,
+    is_deleted: false
+  };
+
+  const { error } = await supa.from("notifications").insert([row]);
+  if(error) console.error(error);
+}
+
+function getUserLabel(userId){
+  if(userId && USERNAME_MAP[userId]) return USERNAME_MAP[userId];
+  if(CURRENT_USER_ID && CURRENT_USER_ID === userId && CURRENT_USER_EMAIL){
+    return CURRENT_USER_EMAIL.split("@")[0];
+  }
+  return userId ? userId.slice(0, 8) : "User";
+}
+
+async function hydrateUsernames(userIds){
+  const uniqueIds = [...new Set((userIds || []).filter(Boolean))];
+  if(uniqueIds.length === 0) return;
+
+  const primary = await supa
+    .from("users")
+    .select("user_id,username")
+    .in("user_id", uniqueIds);
+  if(!primary.error){
+    (primary.data || []).forEach(u=>{
+      if(u.username) USERNAME_MAP[u.user_id] = u.username;
+    });
+    return;
+  }
+  console.error(primary.error);
+}
+
+function renderReviewItem(r){
+  const name = getUserLabel(r.user_id);
+  const date = formatReviewDate(r.created_at);
+  const starsHtml = renderStars(r.rating || 0);
+  const images = Array.isArray(r.image_urls) ? r.image_urls : [];
+
+  const div = document.createElement("div");
+  div.className = "review-item";
+  div.innerHTML = `
+    <div class="review-head">
+      <div class="review-name">${name}</div>
+      <div>${date}</div>
+    </div>
+    <div class="review-stars">${starsHtml}</div>
+    <div class="review-text">${r.review || ""}</div>
+    ${images.length ? `<div class="review-images">
+      ${images.map(u=>`<img class="review-thumb" src="${u}" data-full="${u}">`).join("")}
+    </div>` : ""}
+  `;
+
+  div.querySelectorAll(".review-thumb").forEach(img=>{
+    img.addEventListener("click", ()=>{
+      const url = img.getAttribute("data-full");
+      if(url) window.open(url, "_blank");
+    });
+  });
+
+  return div;
+}
+
+function renderStars(rating){
+  const safe = Math.max(0, Math.min(5, Number(rating) || 0));
+  let html = "";
+  for(let i=1;i<=5;i++){
+    html += `<span class="star ${i<=safe ? "filled" : ""}">★</span>`;
+  }
+  return html;
+}
+
+function formatReviewDate(iso){
+  try{
+    const d = new Date(iso);
+    return d.toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"numeric" });
+  }catch{
+    return "";
+  }
+}
+
+function prependReview(review){
+  const list = document.getElementById("reviewsList");
+  const node = renderReviewItem(review);
+  if(list.firstChild){
+    list.insertBefore(node, list.firstChild);
+  }else{
+    list.appendChild(node);
+  }
+}
+
+function initStarInput(){
+  const starWrap = document.getElementById("starInput");
+  if(!starWrap) return;
+  const stars = [...starWrap.querySelectorAll(".star-btn")];
+
+  const fill = val=>{
+    stars.forEach(s=>{
+      const v = Number(s.dataset.value);
+      if(v <= val) s.classList.add("filled");
+      else s.classList.remove("filled");
+    });
+  };
+
+  starWrap.addEventListener("mousemove", e=>{
+    const target = e.target.closest(".star-btn");
+    if(!target) return;
+    fill(Number(target.dataset.value));
+  });
+
+  starWrap.addEventListener("mouseleave", ()=>{
+    fill(SELECTED_RATING);
+  });
+
+  starWrap.addEventListener("click", e=>{
+    const target = e.target.closest(".star-btn");
+    if(!target) return;
+    SELECTED_RATING = Number(target.dataset.value);
+    fill(SELECTED_RATING);
+  });
+
+  fill(SELECTED_RATING);
+}
+
+function disableReviewForm(){
+  const form = document.getElementById("reviewForm");
+  if(!form) return;
+  form.style.opacity = "0.6";
+  form.querySelectorAll("input,textarea,button").forEach(el=>el.disabled = true);
+  form.querySelectorAll(".star-btn").forEach(el=>{
+    el.style.pointerEvents = "none";
+  });
+}
+
+/* ===== TRY-ON HELPERS (ADDED) ===== */
+function getLocalDateKey(){
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function normalizePlanValue(planValue){
+  const raw = String(planValue || "").trim().toUpperCase();
+  if(!raw){
+    return FREE_PLAN;
+  }
+  const digits = raw.replace(/[^0-9]/g, "");
+  if(
+    raw === ENTERPRISE_PLAN ||
+    raw === "ENTERPRISE_PLAN" ||
+    raw.includes("ENTERPRISE") ||
+    digits === "4000"
+  ){
+    return ENTERPRISE_PLAN;
+  }
+  if(
+    raw === PRO_PLAN ||
+    raw === "PRO_PLAN" ||
+    raw.includes("PRO") ||
+    digits === "40"
+  ){
+    return PRO_PLAN;
+  }
+  return FREE_PLAN;
+}
+
+function closeAiScreen(force = false){
+  if(!aiScreen) return;
+  if(AI_CANCEL_REQUIRED && !force) return;
+  aiScreen.style.display = "none";
+  aiScreen.oncontextmenu = null;
+  AI_CANCEL_REQUIRED = false;
+}
+
+async function ensureActivePlan(){
+  if(PLAN_READY) return ACTIVE_PLAN;
+  let plan = normalizePlanValue(localStorage.getItem("userPlan"));
+
+  try{
+    const { data } = await supa.auth.getSession();
+    const user = data?.session?.user || null;
+    if(user){
+      CURRENT_USER_ID = CURRENT_USER_ID || user.id;
+      CURRENT_USER_EMAIL = CURRENT_USER_EMAIL || user.email;
+      const { data: sub } = await supa
+        .from("subscription")
+        .select("plan")
+        .eq("user_id", user.id)
+        .order("created_at",{ascending:false})
+        .limit(1)
+        .maybeSingle();
+      if(sub?.plan){
+        plan = normalizePlanValue(sub.plan);
+      }
+    }
+  }catch(_){}
+
+  ACTIVE_PLAN = plan;
+  PLAN_READY = true;
+  return ACTIVE_PLAN;
+}
+
+function getPlanLimit(plan){
+  const p = normalizePlanValue(plan);
+  if(p === ENTERPRISE_PLAN){
+    return Infinity;
+  }
+  if(p === PRO_PLAN){
+    return PRO_TRYON_LIMIT;
+  }
+  return FREE_TRYON_LIMIT;
+}
+
+function getPlanCode(plan){
+  const p = normalizePlanValue(plan);
+  if(p === ENTERPRISE_PLAN) return "4000";
+  if(p === PRO_PLAN) return "40";
+  return "free";
+}
+
+function getPlanLabel(plan){
+  const code = getPlanCode(plan);
+  if(code === "4000") return "$4000/month";
+  if(code === "40") return "$40/month";
+  return "Free";
+}
+
+function getTryOnCounter(userId){
+  const key = `tryon_daily_${userId || "guest"}`;
+  const today = getLocalDateKey();
+  let data = { date: today, count: 0 };
+  try{
+    const raw = localStorage.getItem(key);
+    if(raw){
+      const parsed = JSON.parse(raw);
+      if(parsed && parsed.date === today){
+        data = parsed;
+      }
+    }
+  }catch(_){}
+  return { key, data };
+}
+
+function saveTryOnCounter(key, data){
+  try{
+    localStorage.setItem(key, JSON.stringify(data));
+  }catch(_){}
+}
+
+function incrementTryOnCounter(userId, plan){
+  const limit = getPlanLimit(plan);
+  if(limit === Infinity) return;
+  const { key, data } = getTryOnCounter(userId || "guest");
+  data.count = Number(data.count || 0) + 1;
+  saveTryOnCounter(key, data);
+}
+
+async function canUseTryOn(){
+  const plan = await ensureActivePlan();
+  const limit = getPlanLimit(plan);
+  if(limit === Infinity){
+    return { allowed:true, plan, limit };
+  }
+  const { key, data } = getTryOnCounter(CURRENT_USER_ID || "guest");
+  if(data.count >= limit){
+    return { allowed:false, plan, limit, key, data };
+  }
+  return { allowed:true, plan, limit, key, data };
+}
+
+function getBackendPlanValue(plan){
+  return getPlanCode(plan);
+}
+
+function showTryOnError(message){
+  AI_CANCEL_REQUIRED = true;
+  aiScreen.style.display = "flex";
+  aiContent.innerHTML = `
+    <h3>Unable to process this photo</h3>
+    <p style="font-size:13px;color:#777">${message || "Please try again."}</p>
+    <button type="button" onclick="closeAiScreen(true)" style="margin-top:10px;padding:10px 14px;border:none;border-radius:8px;background:#444;color:#fff;font-weight:bold;cursor:pointer">Cancel</button>
+  `;
+}
+
+function showTryOnLimitReached(plan, limit, message){
+  const safeLimit = typeof limit === "number" || limit === Infinity ? limit : getPlanLimit(plan);
+  const limitText = safeLimit === Infinity ? "Unlimited" : `${safeLimit} images/day`;
+  AI_CANCEL_REQUIRED = false;
+  aiScreen.style.display = "flex";
+  aiContent.innerHTML = `
+    <h3>Daily Limit Reached</h3>
+    <p style="font-size:13px;color:#555">${message || "You reached your daily try-on limit."}</p>
+    <p style="font-size:13px;color:#777">Current plan: ${getPlanLabel(plan)} | Limit: ${limitText}</p>
+    <button onclick="location.href='subscription.html'" style="margin-top:10px;padding:10px 14px;border:none;border-radius:8px;background:#ff6a00;color:#fff;font-weight:bold;cursor:pointer">Upgrade Subscription</button>
+  `;
+}
+
+function showTryOnQueuedMessage(data){
+  const waitMessage = data?.waiting_message || "Just wait for moment your images will be ready.";
+  const deliveryMessage = data?.dm_delivery_message || "Technical issues are active right now, so your image cannot be generated at this moment. Your image will be delivered automatically in DM within 24 hours.";
+  const pricingMessage = data?.pricing_info || "Per image price is $1, but due to this issue your image is free.";
+  const freeMessage = data?.free_delivery ? "Image download is free for this request." : "";
+  AI_CANCEL_REQUIRED = true;
+  aiScreen.style.display = "flex";
+  aiContent.innerHTML = `
+    <h3>${waitMessage}</h3>
+    <p style="font-size:13px;color:#555">${deliveryMessage}</p>
+    <p style="font-size:13px;color:#555">${pricingMessage}</p>
+    <p style="font-size:13px;color:${data?.free_delivery ? "#1f8b4c" : "#777"}">${freeMessage}</p>
+    <button type="button" onclick="closeAiScreen(true)" style="margin-top:10px;padding:10px 14px;border:none;border-radius:8px;background:#444;color:#fff;font-weight:bold;cursor:pointer">Cancel</button>
+  `;
+}
+
+function showTryOnLoading(){
+  AI_CANCEL_REQUIRED = false;
+  aiScreen.style.display = "flex";
+  aiContent.innerHTML = `
+    <div class="loader"></div>
+    <h3>Just wait for moment your images will be ready</h3>
+    <p>Processing your try-on image...</p>
+  `;
+}
+
+function showTryOnResult(imageUrl, downloadAllowed){
+  AI_CANCEL_REQUIRED = false;
+  aiScreen.style.display = "flex";
+  const canDownload = !!downloadAllowed;
+  aiContent.innerHTML = `
+    <h3>Preview Ready</h3>
+    <img src="${imageUrl}" style="width:85%;max-width:520px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.2);margin-top:10px">
+    <p style="font-size:12px;color:#777">Tap to close</p>
+  `;
+  aiScreen.oncontextmenu = canDownload ? null : (e)=>e.preventDefault();
+  const img = aiContent.querySelector("img");
+  if(img && !canDownload){
+    img.setAttribute("draggable", "false");
+    img.style.pointerEvents = "none";
+  }
+  setTimeout(()=>{ aiScreen.style.display="none"; }, 12000);
+}
+
+async function runTryOn(file){
+  const p = window._productForPreview;
+  if(!p || !file) return;
+  if(!file || !file.size){
+    showTryOnError("Please select a valid photo.");
+    return;
+  }
+
+  console.log("[tryon] user image selected", {
+    name: file.name,
+    type: file.type,
+    size: file.size
+  });
+
+  showTryOnLoading();
+
+  try{
+    const plan = await ensureActivePlan();
+    const planCode = getPlanCode(plan);
+    const access = await canUseTryOn();
+    if(!access.allowed){
+      showTryOnLimitReached(access.plan, access.limit, "You reached your daily image limit. Upgrade to continue.");
+      return;
+    }
+    const userPlan = getBackendPlanValue(plan);
+    const userId = CURRENT_USER_ID || "guest";
+    const username = CURRENT_USERNAME || localStorage.getItem("username") || "guest";
+    const userEmail = CURRENT_USER_EMAIL || "";
+    const userLanguage = window.USER_LANG || navigator.language || "en";
+
+    const form = new FormData();
+    form.append("userImage", file, "user.jpg");
+    form.append("product_id", String(productId || ""));
+    form.append("user_id", userId);
+    form.append("username", username);
+    form.append("user_email", userEmail);
+    form.append("user_language", userLanguage);
+    form.append("user_plan", userPlan);
+    form.append("product_info", JSON.stringify({
+      id: p.id || productId || "",
+      name: p.name || "",
+      category: p.category || "",
+      price: Number(p.price || 0),
+      currency: p.currency || "USD",
+      owner_id: p.owner_id || "",
+      image: (Array.isArray(p.images) ? p.images[0] : p.images) || ""
+    }));
+
+    const res = await fetch(`${TRYON_API_BASE}/tryon`, {
+      method:"POST",
+      body: form
+    });
+    console.log("[tryon] backend response", res.status);
+    const data = await res.json().catch(()=>null);
+
+    if(data?.status === "limit_reached"){
+      showTryOnLimitReached(data?.plan || planCode, data?.limit, data?.upgrade_prompt || "Daily limit reached. Upgrade to continue.");
+      return;
+    }
+
+    if(data?.status === "manual_processing"){
+      incrementTryOnCounter(userId, plan);
+      showTryOnQueuedMessage(data);
+      return;
+    }
+
+    if(data?.status === "success" && data?.image){
+      incrementTryOnCounter(userId, plan);
+      showTryOnResult(data.image, data.download_allowed);
+      return;
+    }
+
+    if(!data?.image){
+      throw new Error(data?.error || "Try-on failed.");
+    }
+    incrementTryOnCounter(userId, plan);
+    showTryOnResult(data.image, data.download_allowed);
+  }catch(err){
+    showTryOnQueuedMessage({
+      waiting_message: "Just wait for moment your images will be ready.",
+      dm_delivery_message: "Technical issues are active right now, so your image cannot be generated at this moment. Your image will be delivered automatically in DM within 24 hours.",
+      pricing_info: "Per image price is $1, but due to this issue your image is free.",
+      free_delivery: true
+    });
+  }
+}
+
+/* ===== AI / PREVIEW (AS IT IS) ===== */
+
+function closeMenu(){ tryMenu.style.display="none"; }
+
+function openCamera(){
+  document.getElementById("previewGuide").style.display="block";
+  closeMenu();
+  cameraInput.setAttribute("capture","environment");
+  cameraInput.value="";
+  cameraInput.click();
+}
+
+function openGallery(){
+  document.getElementById("previewGuide").style.display="block";
+  closeMenu();
+  galleryInput.value="";
+  galleryInput.click();
+}
+
+function photoSelected(){
+  const input = this;
+  const file = input && input.files && input.files[0] ? input.files[0] : null;
+  if(!file) return;
+  closeMenu();
+  runTryOn(file);
+  input.value = "";
+}
+
+cameraInput.onchange = photoSelected;
+galleryInput.onchange = photoSelected;
+
+if(aiScreen){
+  aiScreen.addEventListener("click", (e)=>{
+    if(e.target !== aiScreen) return;
+    closeAiScreen(false);
+  });
+}
+</script>
+
+</body>
+</html>
+
+
+
+
+

@@ -1,0 +1,452 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Welcome | NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="global.js"></script>
+
+<style>
+:root{
+  --orange:#ff7a00;
+  --bg:#0d0f14;
+  --card:#151925;
+  --text:#fff;
+  --muted:#9aa4bf;
+}
+body{
+  margin:0;
+  background:var(--bg);
+  font-family:Arial,system-ui;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  min-height:100vh;
+}
+.card{
+  width:100%;
+  max-width:420px;
+  background:var(--card);
+  padding:28px;
+  border-radius:16px;
+}
+h2{color:var(--text);margin:0 0 8px}
+p{color:var(--muted);margin:0 0 20px}
+select,button{
+  width:100%;
+  padding:14px;
+  border-radius:12px;
+  margin-top:12px;
+  border:none;
+  font-size:15px;
+}
+select{background:#0f1220;color:#fff}
+button{
+  background:var(--orange);
+  color:#fff;
+  font-weight:600;
+}
+</style>
+</head>
+
+<body>
+
+<div class="card">
+  <h2 id="title">Welcome</h2>
+  <p id="subtitle">Select your country, language & currency</p>
+
+  <select id="lang"></select>
+  <select id="currency"></select>
+  <select id="country"></select>
+
+  <button onclick="save()">Continue</button>
+</div>
+
+<script>
+let currentUser = null;
+
+/* ======================
+   AUTH CHECK
+====================== */
+(async ()=>{
+  const { data } = await supabase.auth.getUser();
+  if(!data?.user){
+    location.href="login.html";
+    return;
+  }
+  currentUser = data.user;
+})();
+
+const langEl = document.getElementById("lang");
+const currencyEl = document.getElementById("currency");
+const countryEl = document.getElementById("country");
+
+/* ---------- LANGUAGES ---------- */
+const globalLanguages = [
+  ["en","English"],
+  ["zh","Mandarin Chinese"],
+  ["es","Spanish"],
+  ["ar","Arabic"],
+  ["fr","French"],
+  ["de","German"],
+  ["pt","Portuguese"],
+  ["ru","Russian"],
+  ["ja","Japanese"],
+  ["ko","Korean"],
+  ["it","Italian"],
+  ["tr","Turkish"],
+  ["id","Indonesian"],
+  ["th","Thai"],
+  ["vi","Vietnamese"]
+];
+
+const indianLanguages = [
+  ["as","Assamese"],
+  ["bn","Bengali"],
+  ["brx","Bodo"],
+  ["doi","Dogri"],
+  ["gu","Gujarati"],
+  ["hi","Hindi"],
+  ["kn","Kannada"],
+  ["ks","Kashmiri"],
+  ["kok","Konkani"],
+  ["mai","Maithili"],
+  ["ml","Malayalam"],
+  ["mni","Manipuri (Meitei)"],
+  ["mr","Marathi"],
+  ["ne","Nepali"],
+  ["or","Odia"],
+  ["pa","Punjabi"],
+  ["sa","Sanskrit"],
+  ["sat","Santali"],
+  ["sd","Sindhi"],
+  ["ta","Tamil"],
+  ["te","Telugu"],
+  ["ur","Urdu"]
+];
+
+function fillLanguages(){
+  langEl.innerHTML = "";
+  const g1 = document.createElement("optgroup");
+  g1.label = "Global Languages";
+  globalLanguages.forEach(l=>{
+    const o=document.createElement("option");
+    o.value=l[0];
+    o.textContent=l[1];
+    g1.appendChild(o);
+  });
+  const g2 = document.createElement("optgroup");
+  g2.label = "Indian Languages (22 Scheduled)";
+  indianLanguages.forEach(l=>{
+    const o=document.createElement("option");
+    o.value=l[0];
+    o.textContent=l[1];
+    g2.appendChild(o);
+  });
+  langEl.appendChild(g1);
+  langEl.appendChild(g2);
+}
+
+/* ---------- CURRENCIES ---------- */
+const currencies = [
+  ["USD","US Dollar (USD)"],
+  ["EUR","Euro (EUR)"],
+  ["GBP","British Pound (GBP)"],
+  ["JPY","Japanese Yen (JPY)"],
+  ["CNY","Chinese Yuan (CNY)"],
+  ["CHF","Swiss Franc (CHF)"],
+  ["CAD","Canadian Dollar (CAD)"],
+  ["AUD","Australian Dollar (AUD)"],
+  ["SGD","Singapore Dollar (SGD)"],
+  ["HKD","Hong Kong Dollar (HKD)"],
+  ["KRW","South Korean Won (KRW)"],
+  ["SAR","Saudi Riyal (SAR)"],
+  ["AED","UAE Dirham (AED)"],
+  ["NOK","Norwegian Krone (NOK)"],
+  ["SEK","Swedish Krona (SEK)"],
+  ["INR","Indian Rupee (INR)"]
+];
+
+function fillCurrencies(){
+  currencyEl.innerHTML = "";
+  currencies.forEach(c=>{
+    const o=document.createElement("option");
+    o.value=c[0];
+    o.textContent=c[1];
+    currencyEl.appendChild(o);
+  });
+}
+
+/* ---------- COUNTRIES ---------- */
+const countries = [
+  ["Afghanistan","🇦🇫"],
+  ["Albania","🇦🇱"],
+  ["Algeria","🇩🇿"],
+  ["Andorra","🇦🇩"],
+  ["Angola","🇦🇴"],
+  ["Antigua and Barbuda","🇦🇬"],
+  ["Argentina","🇦🇷"],
+  ["Armenia","🇦🇲"],
+  ["Australia","🇦🇺"],
+  ["Austria","🇦🇹"],
+  ["Azerbaijan","🇦🇿"],
+  ["Bahamas","🇧🇸"],
+  ["Bahrain","🇧🇭"],
+  ["Bangladesh","🇧🇩"],
+  ["Barbados","🇧🇧"],
+  ["Belarus","🇧🇾"],
+  ["Belgium","🇧🇪"],
+  ["Belize","🇧🇿"],
+  ["Benin","🇧🇯"],
+  ["Bhutan","🇧🇹"],
+  ["Bolivia","🇧🇴"],
+  ["Bosnia and Herzegovina","🇧🇦"],
+  ["Botswana","🇧🇼"],
+  ["Brazil","🇧🇷"],
+  ["Brunei","🇧🇳"],
+  ["Bulgaria","🇧🇬"],
+  ["Burkina Faso","🇧🇫"],
+  ["Burundi","🇧🇮"],
+  ["Cabo Verde","🇨🇻"],
+  ["Cambodia","🇰🇭"],
+  ["Cameroon","🇨🇲"],
+  ["Canada","🇨🇦"],
+  ["Central African Republic","🇨🇫"],
+  ["Chad","🇹🇩"],
+  ["Chile","🇨🇱"],
+  ["China","🇨🇳"],
+  ["Colombia","🇨🇴"],
+  ["Comoros","🇰🇲"],
+  ["Congo (Congo-Brazzaville)","🇨🇬"],
+  ["Costa Rica","🇨🇷"],
+  ["Croatia","🇭🇷"],
+  ["Cuba","🇨🇺"],
+  ["Cyprus","🇨🇾"],
+  ["Czechia (Czech Republic)","🇨🇿"],
+  ["Democratic Republic of Congo","🇨🇩"],
+  ["Denmark","🇩🇰"],
+  ["Djibouti","🇩🇯"],
+  ["Dominica","🇩🇲"],
+  ["Dominican Republic","🇩🇴"],
+  ["Ecuador","🇪🇨"],
+  ["Egypt","🇪🇬"],
+  ["El Salvador","🇸🇻"],
+  ["Equatorial Guinea","🇬🇶"],
+  ["Eritrea","🇪🇷"],
+  ["Estonia","🇪🇪"],
+  ["Eswatini","🇸🇿"],
+  ["Ethiopia","🇪🇹"],
+  ["Fiji","🇫🇯"],
+  ["Finland","🇫🇮"],
+  ["France","🇫🇷"],
+  ["Gabon","🇬🇦"],
+  ["Gambia","🇬🇲"],
+  ["Georgia","🇬🇪"],
+  ["Germany","🇩🇪"],
+  ["Ghana","🇬🇭"],
+  ["Greece","🇬🇷"],
+  ["Grenada","🇬🇩"],
+  ["Guatemala","🇬🇹"],
+  ["Guinea","🇬🇳"],
+  ["Guinea-Bissau","🇬🇼"],
+  ["Guyana","🇬🇾"],
+  ["Haiti","🇭🇹"],
+  ["Holy See (Vatican City)","🇻🇦"],
+  ["Honduras","🇭🇳"],
+  ["Hungary","🇭🇺"],
+  ["Iceland","🇮🇸"],
+  ["India","🇮🇳"],
+  ["Indonesia","🇮🇩"],
+  ["Iran","🇮🇷"],
+  ["Iraq","🇮🇶"],
+  ["Ireland","🇮🇪"],
+  ["Israel","🇮🇱"],
+  ["Italy","🇮🇹"],
+  ["Jamaica","🇯🇲"],
+  ["Japan","🇯🇵"],
+  ["Jordan","🇯🇴"],
+  ["Kazakhstan","🇰🇿"],
+  ["Kenya","🇰🇪"],
+  ["Kiribati","🇰🇮"],
+  ["Kuwait","🇰🇼"],
+  ["Kyrgyzstan","🇰🇬"],
+  ["Laos","🇱🇦"],
+  ["Latvia","🇱🇻"],
+  ["Lebanon","🇱🇧"],
+  ["Lesotho","🇱🇸"],
+  ["Liberia","🇱🇷"],
+  ["Libya","🇱🇾"],
+  ["Liechtenstein","🇱🇮"],
+  ["Lithuania","🇱🇹"],
+  ["Luxembourg","🇱🇺"],
+  ["Madagascar","🇲🇬"],
+  ["Malawi","🇲🇼"],
+  ["Malaysia","🇲🇾"],
+  ["Maldives","🇲🇻"],
+  ["Mali","🇲🇱"],
+  ["Malta","🇲🇹"],
+  ["Marshall Islands","🇲🇭"],
+  ["Mauritania","🇲🇷"],
+  ["Mauritius","🇲🇺"],
+  ["Mexico","🇲🇽"],
+  ["Micronesia","🇫🇲"],
+  ["Moldova","🇲🇩"],
+  ["Monaco","🇲🇨"],
+  ["Mongolia","🇲🇳"],
+  ["Montenegro","🇲🇪"],
+  ["Morocco","🇲🇦"],
+  ["Mozambique","🇲🇿"],
+  ["Myanmar (Burma)","🇲🇲"],
+  ["Namibia","🇳🇦"],
+  ["Nauru","🇳🇷"],
+  ["Nepal","🇳🇵"],
+  ["Netherlands","🇳🇱"],
+  ["New Zealand","🇳🇿"],
+  ["Nicaragua","🇳🇮"],
+  ["Niger","🇳🇪"],
+  ["Nigeria","🇳🇬"],
+  ["North Korea","🇰🇵"],
+  ["North Macedonia","🇲🇰"],
+  ["Norway","🇳🇴"],
+  ["Oman","🇴🇲"],
+  ["Pakistan","🇵🇰"],
+  ["Palau","🇵🇼"],
+  ["Palestine","🇵🇸"],
+  ["Panama","🇵🇦"],
+  ["Papua New Guinea","🇵🇬"],
+  ["Paraguay","🇵🇾"],
+  ["Peru","🇵🇪"],
+  ["Philippines","🇵🇭"],
+  ["Poland","🇵🇱"],
+  ["Portugal","🇵🇹"],
+  ["Qatar","🇶🇦"],
+  ["Romania","🇷🇴"],
+  ["Russia","🇷🇺"],
+  ["Rwanda","🇷🇼"],
+  ["Saint Kitts and Nevis","🇰🇳"],
+  ["Saint Lucia","🇱🇨"],
+  ["Saint Vincent and the Grenadines","🇻🇨"],
+  ["Samoa","🇼🇸"],
+  ["San Marino","🇸🇲"],
+  ["Sao Tome and Principe","🇸🇹"],
+  ["Saudi Arabia","🇸🇦"],
+  ["Senegal","🇸🇳"],
+  ["Serbia","🇷🇸"],
+  ["Seychelles","🇸🇨"],
+  ["Sierra Leone","🇸🇱"],
+  ["Singapore","🇸🇬"],
+  ["Slovakia","🇸🇰"],
+  ["Slovenia","🇸🇮"],
+  ["Solomon Islands","🇸🇧"],
+  ["Somalia","🇸🇴"],
+  ["South Africa","🇿🇦"],
+  ["South Korea","🇰🇷"],
+  ["South Sudan","🇸🇸"],
+  ["Spain","🇪🇸"],
+  ["Sri Lanka","🇱🇰"],
+  ["Sudan","🇸🇩"],
+  ["Suriname","🇸🇷"],
+  ["Sweden","🇸🇪"],
+  ["Switzerland","🇨🇭"],
+  ["Syria","🇸🇾"],
+  ["Tajikistan","🇹🇯"],
+  ["Tanzania","🇹🇿"],
+  ["Thailand","🇹🇭"],
+  ["Timor-Leste","🇹🇱"],
+  ["Togo","🇹🇬"],
+  ["Tonga","🇹🇴"],
+  ["Trinidad and Tobago","🇹🇹"],
+  ["Tunisia","🇹🇳"],
+  ["Turkey (Türkiye)","🇹🇷"],
+  ["Turkmenistan","🇹🇲"],
+  ["Tuvalu","🇹🇻"],
+  ["Uganda","🇺🇬"],
+  ["Ukraine","🇺🇦"],
+  ["United Arab Emirates","🇦🇪"],
+  ["United Kingdom","🇬🇧"],
+  ["United States of America","🇺🇸"],
+  ["Uruguay","🇺🇾"],
+  ["Uzbekistan","🇺🇿"],
+  ["Vanuatu","🇻🇺"],
+  ["Venezuela","🇻🇪"],
+  ["Vietnam","🇻🇳"],
+  ["Yemen","🇾🇪"],
+  ["Zambia","🇿🇲"],
+  ["Zimbabwe","🇿🇼"]
+];
+
+function flagToCode(flag){
+  if(!flag) return "";
+  return Array.from(flag).map(ch=>{
+    const codePoint = ch.codePointAt(0);
+    return String.fromCharCode(codePoint - 127397);
+  }).join("");
+}
+
+function fillCountries(){
+  countryEl.innerHTML = "";
+  countries.forEach(c=>{
+    const name = c[0];
+    const flag = c[1];
+    const o=document.createElement("option");
+    o.value = flagToCode(flag);
+    o.dataset.name = name;
+    o.dataset.flag = flag;
+    o.textContent = `${name} ${flag}`;
+    countryEl.appendChild(o);
+  });
+}
+
+fillLanguages();
+fillCurrencies();
+fillCountries();
+
+/* restore saved selections */
+const savedLang = localStorage.getItem("lang");
+const savedCurrency = localStorage.getItem("currency");
+const savedCountryCode = localStorage.getItem("country_code");
+if(savedLang) langEl.value = savedLang;
+if(savedCurrency) currencyEl.value = savedCurrency;
+if(savedCountryCode) countryEl.value = savedCountryCode;
+
+/* ---------- TRANSLATION ---------- */
+const translations={
+  en:{t:"Welcome",s:"Select your country, language & currency"},
+  hi:{t:"स्वागत है",s:"अपना देश, भाषा और मुद्रा चुनें"},
+  de:{t:"Willkommen",s:"Land, Sprache & Währung wählen"},
+  fr:{t:"Bienvenue",s:"Choisissez votre pays, langue et devise"},
+  es:{t:"Bienvenido",s:"Selecciona tu país, idioma y moneda"}
+};
+
+function applyTranslation(){
+  const t = translations[langEl.value] || translations.en;
+  title.innerText = t.t;
+  subtitle.innerText = t.s;
+}
+
+langEl.onchange = applyTranslation;
+applyTranslation();
+
+/* ======================
+   SAVE (REAL - SUPABASE)
+====================== */
+async function save(){
+  if(!currentUser) return;
+
+  const countryOpt = countryEl.options[countryEl.selectedIndex];
+  const countryName = countryOpt?.dataset?.name || countryOpt?.textContent || "";
+
+  localStorage.setItem("country_code", countryEl.value || "");
+  localStorage.setItem("country", countryName);
+  localStorage.setItem("currency", currencyEl.value || "USD");
+  localStorage.setItem("lang", langEl.value || "en");
+  localStorage.setItem("onboarded", "1");
+
+  location.href="index.html";
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Find ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â¥ SUPABASE SDK -->
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
+<!-- ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â¥ GLOBAL SUPABASE INIT -->
+<script src="global.js"></script>
+<script src="public-config.js"></script>
+<script src="social.js"></script>
+
+<style>
+body{
+  margin:0;
+  font-family:Arial;
+  background:#fff;
+}
+
+/* ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â SEARCH BAR */
+.search{
+  position:sticky;
+  top:0;
+  background:#fff;
+  padding:10px;
+  border-bottom:1px solid #ddd;
+  display:flex;
+  gap:8px;
+}
+.search input{
+  flex:1;
+  padding:12px;
+  border-radius:25px;
+  border:1px solid #ccc;
+  font-size:14px;
+  outline:none;
+}
+.search button{
+  width:46px;
+  border-radius:50%;
+  border:none;
+  background:#ff6a00;
+  color:#fff;
+  font-size:18px;
+  cursor:pointer;
+}
+
+/* ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ‚Â¤ USER LIST */
+.list{
+  max-width:500px;
+  margin:auto;
+  padding-bottom:80px;
+}
+.section-title{
+  padding:12px 12px 6px;
+  font-size:12px;
+  font-weight:bold;
+  color:#555;
+  letter-spacing:1px;
+}
+.section{
+  border-bottom:1px solid #eee;
+  padding-bottom:6px;
+}
+.user{
+  display:flex;
+  align-items:center;
+  padding:10px;
+  gap:12px;
+  cursor:pointer;
+}
+.user:hover{background:#f5f5f5}
+.user img{
+  width:44px;
+  height:44px;
+  border-radius:50%;
+  object-fit:cover;
+}
+.user b{font-size:14px}
+.user span{font-size:12px;color:#666}
+.user .info{display:flex;flex-direction:column}
+.name-row{display:flex;align-items:center;gap:6px}
+.seller-badge{
+  background:#111;color:#fff;font-size:10px;padding:2px 6px;border-radius:10px
+}
+.seller-star{
+  background:linear-gradient(135deg,#f7d774,#d6a21f);
+  color:#4a3300;
+  font-size:10px;
+  padding:2px 6px;
+  border-radius:10px;
+  font-weight:700;
+  box-shadow:0 2px 6px rgba(0,0,0,.18);
+}
+.product-list{font-size:12px;color:#666;margin-top:2px}
+.reel-item{
+  display:flex;align-items:center;gap:12px;padding:10px;cursor:pointer;
+}
+.reel-item video{
+  width:72px;height:96px;object-fit:cover;border-radius:8px;background:#000;
+}
+.reel-item .meta{font-size:13px}
+.reel-item small{color:#666}
+.profile-actions{
+  display:flex;
+  gap:8px;
+  margin-top:8px;
+}
+.action-btn{
+  border:1px solid #ddd;
+  border-radius:16px;
+  padding:6px 12px;
+  font-size:12px;
+  font-weight:600;
+  cursor:pointer;
+  background:#fff;
+  color:#111;
+  box-shadow:0 1px 2px rgba(0,0,0,0.06);
+}
+.action-btn.follow{
+  background:#ff6a00;
+  color:#fff;
+  border-color:#ff6a00;
+}
+.action-btn.follow.followed{
+  background:#999;
+  border-color:#999;
+  color:#fff;
+}
+.action-btn.message{
+  background:#111;
+  color:#fff;
+  border-color:#111;
+}
+
+/* TABS */
+.tabs{
+  display:flex;
+  gap:8px;
+  padding:8px 10px;
+  border-bottom:1px solid #eee;
+  background:#fff;
+  overflow-x:auto;
+}
+.tab-btn{
+  border:none;
+  border-radius:16px;
+  padding:8px 14px;
+  font-size:12px;
+  cursor:pointer;
+  background:#f2f2f2;
+  color:#111;
+  white-space:nowrap;
+}
+.tab-btn.active{
+  background:#111;
+  color:#fff;
+}
+
+/* ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â» BOTTOM NAV */
+.nav{
+  position:fixed;
+  bottom:0;left:0;
+  width:100%;
+  height:60px;
+  background:#111;
+  display:flex;
+}
+.nav div{
+  flex:1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.nav svg{width:24px;height:24px;fill:#888}
+.nav .active svg{fill:#ff6a00}
+</style>
+</head>
+
+<body>
+
+<!-- ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â SEARCH -->
+<div class="search">
+  <input type="text" id="searchInput" placeholder="Search users...">
+  <button onclick="searchUsers()">&#128269;</button>
+</div>
+
+<div class="tabs" id="tabs">
+  <button class="tab-btn active" data-tab="reels">Reels</button>
+  <button class="tab-btn" data-tab="account">Sellers &amp; Buyers</button>
+  <button class="tab-btn" data-tab="profile">Profile</button>
+</div>
+
+<!-- ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ‚Â¤ RESULTS -->
+<div class="list" id="list"></div>
+
+<!-- ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â» NAV -->
+<div class="nav">
+  <div onclick="go('index.html')">
+    <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3l-10-9-10 9h3v8z"/></svg>
+  </div>
+  <div onclick="go('reel.html')">
+    <svg viewBox="0 0 24 24"><path d="M17 10.5v-7l-12 9 12 9v-7l7 4v-12z"/></svg>
+  </div>
+  <div onclick="go('find.html')" class="active">
+    <svg viewBox="0 0 24 24"><path d="M21 21l-5.2-5.2a7 7 0 1 0-1.4 1.4L21 21zM10 16a6 6 0 1 1 0-12 6 6 0 0 1 0 12z"/></svg>
+  </div>
+  <div onclick="go('chat.html')">
+    <svg viewBox="0 0 24 24"><path d="M21 6h-18v12h4v4l4-4h10z"/></svg>
+  </div>
+  <div onclick="go('m-account.html')">
+    <svg viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5m0 2c-3.3 0-10 1.7-10 5v3h20v-3c0-3.3-6.7-5-10-5"/></svg>
+  </div>
+</div>
+
+<script>
+/* DOM */
+const searchInput = document.getElementById("searchInput");
+const list = document.getElementById("list");
+const tabs = document.getElementById("tabs");
+let activeTab = "reels";
+let supa = window.NOVA && window.NOVA.supa;
+
+/* ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â LOGIN CHECK */
+(async function(){
+  if(!supa) return;
+  const { data } = await supa.auth.getSession();
+  if(!data.session){
+    location.href = "login.html";
+  }
+})();
+
+/* ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â SEARCH FUNCTION (SUPABASE ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ INSTAGRAM TYPE) */
+async function searchUsers(){
+  const q = searchInput.value.trim();
+  list.innerHTML = "";
+
+  if(!supa){
+    supa = window.NOVA && window.NOVA.supa;
+  }
+  if(!supa){
+    alert("Please refresh and try again.");
+    return;
+  }
+
+  if(!q){
+    alert("Type username first");
+    return;
+  }
+
+  const reelsReq = supa
+    .from("reels")
+    .select("id,video_url,title,description,user_id")
+    .or(`title.ilike.%${q}%,description.ilike.%${q}%`)
+    .limit(12);
+
+  const usersReq = supa
+    .from("users")
+    .select("user_id, username, full_name, photo")
+    .ilike("username", q + "%")
+    .limit(20);
+
+  const [{ data: reels, error: reelsErr }, { data: users, error: usersErr }] =
+    await Promise.all([reelsReq, usersReq]);
+
+  if(reelsErr || usersErr){
+    alert("Search error: " + (reelsErr?.message || usersErr?.message));
+    return;
+  }
+
+  const sellerBadgeSet = new Set();
+  const productOwnerSet = new Set();
+  const userIds = (users || []).map(u => u.user_id).filter(Boolean);
+  if(userIds.length){
+    const { data: sellers } = await supa
+      .from("sellers")
+      .select("user_id,is_paid,show_badge")
+      .in("user_id", userIds);
+    (sellers || []).forEach(s => {
+      if(s?.is_paid && s?.show_badge) sellerBadgeSet.add(s.user_id);
+    });
+
+    const { data: productOwners } = await supa
+      .from("products")
+      .select("owner_id")
+      .in("owner_id", userIds)
+      .limit(300);
+    (productOwners || []).forEach(p => {
+      if(p?.owner_id) productOwnerSet.add(p.owner_id);
+    });
+    productOwnerSet.forEach(id => {
+      if(!sellerBadgeSet.has(id)) sellerBadgeSet.add(id);
+    });
+  }
+
+  const sectionReels = document.createElement("div");
+  sectionReels.className = "section";
+  sectionReels.dataset.section = "reels";
+  sectionReels.innerHTML = `<div class="section-title">REELS</div>`;
+  const reelsWrap = document.createElement("div");
+  if(!reels || reels.length === 0){
+    reelsWrap.innerHTML = "<p style='padding:0 12px 12px;color:#777'>No reels found</p>";
+  }else{
+    reels.forEach(r=>{
+      const row = document.createElement("div");
+      row.className = "reel-item";
+      row.innerHTML = `
+        <video src="${r.video_url}" muted></video>
+        <div class="meta">
+          <div><b>${r.title || "Reel"}</b></div>
+          <small>${r.description || ""}</small>
+        </div>
+      `;
+      row.onclick = () => location.href = "reel.html";
+      reelsWrap.appendChild(row);
+    });
+  }
+  sectionReels.appendChild(reelsWrap);
+  list.appendChild(sectionReels);
+
+  const sectionAccount = document.createElement("div");
+  sectionAccount.className = "section";
+  sectionAccount.dataset.section = "account";
+  sectionAccount.innerHTML = `<div class="section-title">SELLERS &amp; BUYERS</div>`;
+  const accountWrap = document.createElement("div");
+  if(!users || users.length === 0){
+    accountWrap.innerHTML = "<p style='padding:0 12px 12px;color:#777'>No accounts found</p>";
+  }else{
+    users.forEach(u=>{
+      const d = document.createElement("div");
+      d.className = "user";
+      const sellerBadge = sellerBadgeSet.has(u.user_id)
+        ? `<span class="seller-star">&#11088; Seller</span>`
+        : "";
+      d.innerHTML = `
+        <img src="${u.photo || 'images/user.png'}">
+        <div class="info">
+          <div class="name-row">
+            <b>${u.username || "User"}</b>
+            ${sellerBadge}
+          </div>
+          <span>${u.full_name || ""}</span>
+        </div>
+      `;
+      d.onclick = () => location.href = `account.html?uid=${u.user_id}`;
+      accountWrap.appendChild(d);
+    });
+  }
+  sectionAccount.appendChild(accountWrap);
+  list.appendChild(sectionAccount);
+
+  const sectionProfile = document.createElement("div");
+  sectionProfile.className = "section";
+  sectionProfile.dataset.section = "profile";
+  sectionProfile.innerHTML = `<div class="section-title">PROFILE</div>`;
+  const profileWrap = document.createElement("div");
+  if(!users || users.length === 0){
+    profileWrap.innerHTML = "<p style='padding:0 12px 12px;color:#777'>No profiles found</p>";
+  }else{
+    const { data: sessionData } = await supa.auth.getSession();
+    const currentUserId = sessionData?.session?.user?.id || null;
+    const followSet = new Set();
+    const ids = users.map(u=>u.user_id).filter(Boolean);
+    const sellerSet = new Set();
+    const productsByOwner = {};
+
+    if(ids.length){
+      if(currentUserId){
+        const { data: follows } = await supa
+          .from("follows")
+          .select("following_id")
+          .eq("follower_id", currentUserId)
+          .in("following_id", ids);
+        (follows || []).forEach(f=> followSet.add(f.following_id));
+      }
+
+      const { data: sellers } = await supa
+        .from("sellers")
+        .select("user_id,is_paid,show_badge")
+        .in("user_id", ids);
+      (sellers || []).forEach(s => {
+        if(s?.is_paid && s?.show_badge) sellerSet.add(s.user_id);
+      });
+
+      const { data: products } = await supa
+        .from("products")
+        .select("owner_id,name,created_at")
+        .in("owner_id", ids)
+        .order("created_at", { ascending:false })
+        .limit(200);
+      (products || []).forEach(p => {
+        if(!p?.owner_id || !p?.name) return;
+        if(!productsByOwner[p.owner_id]) productsByOwner[p.owner_id] = [];
+        if(productsByOwner[p.owner_id].length < 3){
+          productsByOwner[p.owner_id].push(p.name);
+        }
+      });
+    }
+
+    users.forEach(u=>{
+      const d = document.createElement("div");
+      d.className = "user";
+      const name = u.full_name || u.username || "User";
+      const productNames = productsByOwner[u.user_id] || [];
+      const productText = productNames.length ? productNames.join(", ") : "No products listed";
+      const badgeHtml = sellerSet.has(u.user_id) ? `<span class="seller-badge">Seller</span>` : "";
+      d.innerHTML = `
+        <img src="${u.photo || 'images/user.png'}">
+        <div class="info">
+          <div class="name-row">
+            <b>${name}</b>
+            ${badgeHtml}
+          </div>
+          <div class="product-list">${productText}</div>
+          <div class="profile-actions">
+            <button class="action-btn follow follow-btn">Follow</button>
+            <button class="action-btn message message-btn">Message</button>
+          </div>
+        </div>
+      `;
+      d.onclick = () => location.href = `m-account.html?uid=${u.user_id}`;
+
+      const followBtn = d.querySelector(".follow-btn");
+      const msgBtn = d.querySelector(".message-btn");
+
+      if(followSet.has(u.user_id)){
+        followBtn.textContent = "Followed";
+        followBtn.classList.add("followed");
+      }
+
+      followBtn.onclick = async e => {
+        e.stopPropagation();
+        if(!currentUserId){
+          location.href = "login.html";
+          return;
+        }
+        followBtn.disabled = true;
+        if(followSet.has(u.user_id)){
+          await supa
+            .from("follows")
+            .delete()
+            .eq("follower_id", currentUserId)
+            .eq("following_id", u.user_id);
+          followSet.delete(u.user_id);
+          followBtn.textContent = "Follow";
+          followBtn.classList.remove("followed");
+        }else{
+          await supa
+            .from("follows")
+            .insert({ follower_id: currentUserId, following_id: u.user_id });
+          followSet.add(u.user_id);
+          followBtn.textContent = "Followed";
+          followBtn.classList.add("followed");
+        }
+        followBtn.disabled = false;
+      };
+
+      msgBtn.onclick = e => {
+        e.stopPropagation();
+        location.href = `chat.html?uid=${u.user_id}`;
+      };
+
+      profileWrap.appendChild(d);
+    });
+  }
+  sectionProfile.appendChild(profileWrap);
+  list.appendChild(sectionProfile);
+  setActiveTab(activeTab);
+}
+
+/* ENTER KEY */
+searchInput.addEventListener("keydown", e=>{
+  if(e.key === "Enter") searchUsers();
+});
+
+tabs.addEventListener("click", e => {
+  const btn = e.target.closest(".tab-btn");
+  if(!btn) return;
+  activeTab = btn.dataset.tab || "reels";
+  setActiveTab(activeTab);
+});
+
+function setActiveTab(tabKey){
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.tab === tabKey);
+  });
+  document.querySelectorAll(".section").forEach(section => {
+    section.style.display = section.dataset.section === tabKey ? "block" : "none";
+  });
+}
+
+function go(p){ location.href = p; }
+</script>
+
+</body>
+</html>

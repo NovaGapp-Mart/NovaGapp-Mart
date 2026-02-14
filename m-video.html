@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MVideo - NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<script src="social.js"></script>
+
+<style>
+body{
+  margin:0;
+  font-family:Arial;
+  background:#fff;
+}
+
+.profile-bar{
+  padding:12px 10px 0;
+  display:flex;align-items:center;gap:10px;
+}
+.profile-avatar{
+  width:44px;height:44px;border-radius:50%;
+  background:linear-gradient(45deg,#ff6a00,#ff2d55);
+  color:#fff;display:flex;align-items:center;justify-content:center;font-weight:bold;
+}
+.profile-meta small{color:#666}
+
+/* SEARCH BAR */
+.search-bar{
+  position:sticky;
+  top:0;
+  background:#fff;
+  padding:10px;
+  border-bottom:1px solid #ddd;
+  z-index:10;
+}
+.search-bar input{
+  width:100%;
+  padding:12px;
+  border-radius:25px;
+  border:1px solid #ccc;
+  font-size:14px;
+  outline:none;
+}
+
+.upload-bar{
+  padding:10px;
+  border-bottom:1px solid #eee;
+  display:flex;justify-content:space-between;align-items:center;
+}
+.upload-bar button{
+  background:#111;color:#fff;border:none;border-radius:20px;
+  padding:8px 14px;cursor:pointer;font-size:13px;
+}
+
+/* VIDEO FEED */
+.feed{
+  max-width:720px;
+  margin:auto;
+  padding-bottom:80px;
+}
+.video-card{
+  margin-bottom:18px;
+  border-bottom:1px solid #eee;
+  padding-bottom:12px;
+}
+.video-card video{
+  width:100%;
+  border-radius:12px;
+  background:#000;
+}
+.video-info{
+  padding:8px 4px;
+}
+.video-info h4{
+  margin:4px 0;
+  font-size:15px;
+}
+.video-info small{
+  color:#666;
+}
+.video-actions{
+  display:flex;gap:12px;align-items:center;font-size:12px;color:#333;
+}
+.video-actions button{
+  border:none;background:#f2f2f2;border-radius:16px;padding:6px 10px;cursor:pointer;font-size:12px;
+}
+
+/* BOTTOM NAV */
+.nav{
+  position:fixed;
+  bottom:0;left:0;
+  width:100%;
+  height:60px;
+  background:#111;
+  display:flex;
+}
+.nav div{
+  flex:1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.nav svg{
+  width:24px;
+  height:24px;
+  fill:#888;
+}
+.nav .active svg{fill:#ff6a00}
+</style>
+</head>
+
+<body>
+
+<div class="profile-bar">
+  <div class="profile-avatar" id="avatar">U</div>
+  <div class="profile-meta">
+    <div id="displayName">User</div>
+    <small id="handle">@user</small>
+  </div>
+</div>
+
+<!-- SEARCH -->
+<div class="search-bar">
+  <input type="text" id="searchInput" placeholder="Search videos by title...">
+</div>
+
+<div class="upload-bar">
+  <div>Long Videos</div>
+  <button onclick="openUpload()">Upload</button>
+</div>
+
+<!-- FEED -->
+<div class="feed" id="feed"></div>
+<div id="sentinel"></div>
+
+<input type="file" id="videoInput" accept="video/*" hidden>
+
+<!-- NAV -->
+<div class="nav">
+  <div onclick="go('index.html')">
+    <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3l-10-9-10 9h3v8z"/></svg>
+  </div>
+  <div onclick="go('post.html')">
+    <svg viewBox="0 0 24 24"><path d="M19 11h-6V5h-2v6H5v2h6v6h2v-6h6z"/></svg>
+  </div>
+  <div onclick="go('p-subcription.html')">
+    <svg viewBox="0 0 24 24"><path d="M12 2l9 4.5v6c0 5-4 9.5-9 9.5s-9-4.5-9-9.5v-6z"/></svg>
+  </div>
+  <div onclick="go('watch-history.html')">
+    <svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 1 0 8.95 10h-2.02a7 7 0 1 1-1.7-5.3L15 11h6V5l-2.35 2.35A8.96 8.96 0 0 0 13 3z"/></svg>
+  </div>
+  <div class="active">
+    <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+  </div>
+</div>
+
+<script>
+const feed = document.getElementById("feed");
+const searchInput = document.getElementById("searchInput");
+const videoInput = document.getElementById("videoInput");
+const sentinel = document.getElementById("sentinel");
+
+let user = null;
+let page = 0;
+let loading = false;
+let done = false;
+let searchQuery = "";
+const PAGE_SIZE = 6;
+const params = new URLSearchParams(location.search);
+const feedUserId = params.get("uid") || "";
+const focusVideoId = params.get("focus") || "";
+const renderedVideoIds = new Set();
+let focusApplied = false;
+
+(async()=>{
+  user = await window.NOVA.requireUser();
+  const email = user.email || "User";
+  let handleText = email.split("@")[0];
+  const { data: profile } = await window.NOVA.supa
+    .from("users")
+    .select("username,full_name")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if(profile?.username) handleText = profile.username;
+
+  displayName.textContent = profile?.full_name || user.user_metadata?.full_name || handleText;
+  handle.textContent = "@" + handleText;
+  avatar.textContent = (handleText || "U")[0].toUpperCase();
+
+  if(params.get("create") === "1"){
+    openUpload();
+  }
+})();
+
+function openUpload(){
+  videoInput.click();
+}
+
+videoInput.onchange = async e => {
+  const file = e.target.files[0];
+  if(!file) return;
+
+  const meta = await window.NOVA.getVideoMeta(file);
+  const isAspectOk = window.NOVA.validateAspect(meta.width, meta.height, 16/9, 0.2);
+  if(!isAspectOk){
+    alert("Long video should be 16:9.");
+    return;
+  }
+
+  const metaInfo = await window.NOVA.askMeta();
+  const path = window.NOVA.makePath(user.id, file);
+  const videoUrl = await window.NOVA.uploadToBucket("long_videos", file, path);
+
+  await window.NOVA.supa.from("long_videos").insert({
+    user_id: user.id,
+    video_url: videoUrl,
+    thumb_url: metaInfo.thumbUrl || null,
+    title: metaInfo.title || null,
+    description: metaInfo.description || null,
+    keywords: metaInfo.keywords || null,
+    duration: Math.round(meta.duration),
+    width: meta.width,
+    height: meta.height
+  });
+
+  alert("Video uploaded");
+  location.href = "m-video.html";
+};
+
+async function loadMore(){
+  if(loading || done) return;
+  loading = true;
+
+  const from = page * PAGE_SIZE;
+  const to = from + PAGE_SIZE - 1;
+
+  let query = window.NOVA.supa
+    .from("long_videos")
+    .select("id,user_id,video_url,title,description,created_at")
+    .order("created_at", { ascending:false })
+    .range(from, to);
+  if(feedUserId){
+    query = query.eq("user_id", feedUserId);
+  }
+
+  if(searchQuery){
+    query = query.ilike("title", `%${searchQuery}%`);
+  }
+
+  const { data, error } = await query;
+  if(error){
+    console.error(error);
+    loading = false;
+    return;
+  }
+
+  if(!data || !data.length){
+    done = true;
+    loading = false;
+    return;
+  }
+
+  data.forEach(item => renderVideo(item));
+  page += 1;
+  loading = false;
+}
+
+async function renderVideo(item, options){
+  if(!item || !item.id) return;
+  if(renderedVideoIds.has(item.id)) return;
+  renderedVideoIds.add(item.id);
+
+  const opts = options || {};
+  const prepend = !!opts.prepend;
+
+  const card = document.createElement("div");
+  card.className = "video-card";
+  card.dataset.id = String(item.id || "");
+
+  card.innerHTML = `
+    <video src="${item.video_url}" controls></video>
+    <div class="video-info">
+      <h4>${item.title || "Long Video"}</h4>
+      <small>${item.description || ""}</small>
+      <div class="video-actions">
+        <button data-action="like">Like <span data-like>0</span></button>
+        <button data-action="dislike">Dislike <span data-dislike>0</span></button>
+        <button data-action="comment">Comment <span data-comment>0</span></button>
+        <button data-action="follow">Follow</button>
+        <button data-action="share">Share</button>
+        <button data-action="fullscreen">Full screen</button>
+      </div>
+    </div>
+  `;
+
+  if(prepend && feed.firstChild){
+    feed.insertBefore(card, feed.firstChild);
+  }else{
+    feed.appendChild(card);
+  }
+  if(focusVideoId && String(item.id) === String(focusVideoId)){
+    focusVideoElement(card);
+  }
+
+  const likeEl = card.querySelector("[data-like]");
+  const dislikeEl = card.querySelector("[data-dislike]");
+  const commentEl = card.querySelector("[data-comment]");
+
+  const counts = await window.NOVA.getReactionCounts("long", item.id);
+  const comments = await window.NOVA.getCommentCount("long", item.id);
+  likeEl.textContent = counts.likes;
+  dislikeEl.textContent = counts.dislikes;
+  commentEl.textContent = comments;
+
+  card.querySelector("[data-action='like']").onclick = async () => {
+    await window.NOVA.toggleReaction("long", item.id, "like");
+    const updated = await window.NOVA.getReactionCounts("long", item.id);
+    likeEl.textContent = updated.likes;
+    dislikeEl.textContent = updated.dislikes;
+  };
+  card.querySelector("[data-action='dislike']").onclick = async () => {
+    await window.NOVA.toggleReaction("long", item.id, "dislike");
+    const updated = await window.NOVA.getReactionCounts("long", item.id);
+    likeEl.textContent = updated.likes;
+    dislikeEl.textContent = updated.dislikes;
+  };
+  card.querySelector("[data-action='comment']").onclick = async () => {
+    const added = await window.NOVA.addComment("long", item.id);
+    if(added){
+      const updated = await window.NOVA.getCommentCount("long", item.id);
+      commentEl.textContent = updated;
+    }
+  };
+  card.querySelector("[data-action='follow']").onclick = async () => {
+    await window.NOVA.toggleFollow(item.user_id);
+  };
+  card.querySelector("[data-action='share']").onclick = async () => {
+    const text = item.title || "Video";
+    const shareUrl = new URL("m-video.html", location.href);
+    if(item.user_id) shareUrl.searchParams.set("uid", item.user_id);
+    shareUrl.searchParams.set("focus", item.id);
+    if(navigator.share){
+      navigator.share({ title:"NOVAGAPP", text, url: shareUrl.href }).catch(()=>{});
+    }else{
+      try{
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          await navigator.clipboard.writeText(shareUrl.href);
+          alert(text + "\nLink copied:\n" + shareUrl.href);
+          return;
+        }
+      }catch(_){}
+      try{
+        window.prompt("Copy this link", shareUrl.href);
+      }catch(_){
+        alert(text + "\n" + shareUrl.href);
+      }
+    }
+  };
+  card.querySelector("[data-action='fullscreen']").onclick = () => {
+    const video = card.querySelector("video");
+    if(video && video.requestFullscreen){
+      video.requestFullscreen().catch(()=>{});
+    }
+  };
+}
+
+function focusVideoElement(card){
+  if(!card || focusApplied) return;
+  focusApplied = true;
+  requestAnimationFrame(() => {
+    card.scrollIntoView({ behavior:"smooth", block:"center" });
+    const video = card.querySelector("video");
+    if(video){
+      video.play().catch(()=>{});
+    }
+  });
+}
+
+async function ensureFocusVideoLoaded(){
+  if(!focusVideoId || renderedVideoIds.has(focusVideoId)) return;
+
+  let query = window.NOVA.supa
+    .from("long_videos")
+    .select("id,user_id,video_url,title,description,created_at")
+    .eq("id", focusVideoId)
+    .maybeSingle();
+  if(feedUserId){
+    query = query.eq("user_id", feedUserId);
+  }
+
+  const { data, error } = await query;
+  if(error || !data || !data.id) return;
+  await renderVideo(data, { prepend:true });
+}
+
+const scrollObserver = new IntersectionObserver(entries => {
+  if(entries[0].isIntersecting){
+    loadMore();
+  }
+});
+scrollObserver.observe(sentinel);
+
+let searchTimer = null;
+searchInput.oninput = e => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    searchQuery = e.target.value.trim();
+    page = 0; done = false; feed.innerHTML = "";
+    renderedVideoIds.clear();
+    loadMore();
+  }, 300);
+};
+
+(async()=>{
+  await ensureFocusVideoLoaded();
+  loadMore();
+})();
+
+function go(p){ location.href=p; }
+</script>
+
+</body>
+</html>

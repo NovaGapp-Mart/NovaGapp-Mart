@@ -1,0 +1,2815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NOVAGAPPS Chat</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="global.js"></script>
+<script src="public-config.js"></script>
+<script src="social.js"></script>
+
+<style>
+body{margin:0;font-family:Arial;background:#f2f2f2;height:100vh;display:flex;flex-direction:column}
+.chat-header{background:#ff6a00;color:#fff;padding:10px 12px;font-weight:bold;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:20}
+.chat-title{display:flex;align-items:center;gap:10px;min-width:0}
+.chat-avatar{width:38px;height:38px;border-radius:50%;object-fit:cover;background:#fff}
+.chat-meta{display:flex;flex-direction:column;min-width:0}
+.chat-meta #chatName{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-sub{font-size:11px;font-weight:400;opacity:.85}
+.chat-header button{
+  border:none;background:#111;color:#fff;border-radius:14px;padding:6px 10px;
+  font-size:12px;cursor:pointer
+}
+.chat-actions{display:flex;align-items:center;gap:6px}
+.chat-action-btn{
+  border:none;background:rgba(0,0,0,.25);color:#fff;border-radius:14px;
+  width:30px;height:30px;display:flex;align-items:center;justify-content:center;
+  font-size:14px;cursor:pointer;padding:0
+}
+.chat-action-btn:disabled{opacity:.5;cursor:not-allowed}
+.contacts-panel{
+  background:#fff;border-bottom:1px solid #ddd;display:none
+}
+.contacts-panel.active{display:block}
+.chat-list-panel{
+  background:#fff;border-bottom:1px solid #ddd;display:none
+}
+.chat-list-panel.active{display:block}
+.chat-list-search{
+  padding:10px;border-bottom:1px solid #eee
+}
+.chat-list-search input{
+  width:100%;padding:10px;border:1px solid #ddd;border-radius:16px;font-size:13px
+}
+.chat-list{
+  max-height:320px;overflow-y:auto
+}
+.chat-item{
+  display:flex;align-items:center;gap:10px;padding:10px;border-bottom:1px solid #f1f1f1;cursor:pointer
+}
+.chat-item img{
+  width:44px;height:44px;border-radius:50%;object-fit:cover
+}
+.chat-item .chat-info{flex:1;min-width:0}
+.chat-item .chat-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-item .chat-last{font-size:11px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-item .chat-time{font-size:10px;color:#888;white-space:nowrap}
+.contacts-search{
+  padding:10px;border-bottom:1px solid #eee
+}
+.contacts-search input{
+  width:100%;padding:10px;border:1px solid #ddd;border-radius:16px;font-size:13px
+}
+.contacts-list{
+  max-height:220px;overflow-y:auto
+}
+.contact-item{
+  display:flex;align-items:center;gap:10px;padding:10px;border-bottom:1px solid #f1f1f1;cursor:pointer
+}
+.contact-item img{
+  width:36px;height:36px;border-radius:50%;object-fit:cover
+}
+.contact-name{font-size:13px;font-weight:600}
+.contact-username{font-size:11px;color:#666}
+.chat-box{flex:1;overflow-y:auto;padding:10px;scroll-behavior:smooth}
+.msg{max-width:70%;padding:8px 12px;margin:6px 0;border-radius:12px;font-size:14px}
+.msg.pending{opacity:.7}
+.msg.failed{opacity:.6;border:1px solid #e53935}
+.me{background:#ff6a00;color:#fff;margin-left:auto}
+.other{background:#e9e9eb;color:#111;margin-right:auto}
+.msg-text{white-space:pre-wrap;word-wrap:break-word}
+.msg-media{display:block;max-width:100%;border-radius:10px;margin-bottom:6px}
+.msg-media.video{max-height:320px}
+.doc-card{
+  display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;
+  background:#fff; color:#111; text-decoration:none; border:1px solid rgba(0,0,0,.08)
+}
+.doc-card .doc-icon{
+  width:36px;height:36px;border-radius:10px;background:#ff6a00;color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700
+}
+.doc-card .doc-meta{display:flex;flex-direction:column;min-width:0}
+.doc-card .doc-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.doc-card .doc-size{font-size:10px;color:#666}
+.me .doc-card{background:rgba(255,255,255,0.95)}
+.me .doc-card .doc-size{color:#555}
+small{
+  display:flex;
+  justify-content:flex-end;
+  align-items:center;
+  gap:4px;
+  font-size:10px;
+  opacity:.75;
+}
+.msg-time{display:inline-block}
+.msg-tick{
+  font-size:10px;
+  line-height:1;
+  letter-spacing:-1px;
+  color:#c6c6c6;
+}
+.msg.me.seen .msg-tick{color:#ff9f1a}
+.msg.pending .msg-tick{opacity:.45}
+.chat-input{display:flex;gap:8px;align-items:center;padding:10px;background:#fff;border-top:1px solid #ddd}
+.chat-input input{flex:1;padding:10px;border-radius:20px;border:1px solid #ccc}
+.chat-input button{background:#ff6a00;color:#fff;border:none;padding:10px 14px;border-radius:50%}
+.attach-btn{background:#111}
+.media-preview{
+  display:none;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid #eee;background:#fff
+}
+.media-preview.active{display:flex}
+.media-preview img,.media-preview video{max-height:60px;border-radius:8px}
+.media-preview .doc-card{max-width:220px}
+.media-preview .meta{font-size:12px;color:#555}
+.media-preview .remove{margin-left:auto;background:#eee;border:none;border-radius:12px;padding:4px 8px;cursor:pointer}
+.toast-stack{
+  position:fixed;top:60px;left:50%;transform:translateX(-50%);
+  display:flex;flex-direction:column;gap:8px;z-index:50;pointer-events:none
+}
+.toast{
+  background:#fff;color:#111;border-radius:14px;padding:10px 12px;min-width:220px;max-width:90vw;
+  box-shadow:0 8px 26px rgba(0,0,0,.15);display:flex;gap:10px;align-items:center
+}
+.toast img{width:32px;height:32px;border-radius:50%;object-fit:cover;background:#eee}
+.toast .toast-text{display:flex;flex-direction:column;min-width:0}
+.toast .toast-title{font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.toast .toast-body{font-size:11px;color:#555;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.chat-disabled .chat-input{display:none}
+body.chat-disabled #mediaPreview{display:none !important}
+body.chat-disabled #replyPreview{display:none !important}
+
+.msg{position:relative}
+.msg.context-selected{box-shadow:0 0 0 2px rgba(255,106,0,.35)}
+.msg.starred::after{
+  content:"★";
+  position:absolute;
+  top:6px;
+  right:8px;
+  font-size:12px;
+  color:#ffd166;
+  text-shadow:0 1px 2px rgba(0,0,0,.25)
+}
+
+.reply-preview{
+  display:none;align-items:center;gap:8px;padding:8px 10px;
+  background:#fff;border-top:1px solid #eee
+}
+.reply-preview.active{display:flex}
+.reply-preview .reply-content{
+  flex:1;min-width:0;border-left:3px solid #ff6a00;padding-left:8px
+}
+.reply-preview .reply-label{font-size:11px;color:#ff6a00;font-weight:700}
+.reply-preview .reply-text{
+  font-size:12px;color:#444;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+}
+.reply-preview .reply-close{
+  background:#f2f2f2;border:none;border-radius:12px;padding:6px 10px;cursor:pointer
+}
+
+.context-backdrop{
+  position:fixed;inset:0;background:rgba(0,0,0,.18);opacity:0;pointer-events:none;
+  transition:opacity .15s ease;z-index:90
+}
+.context-backdrop.active{opacity:1;pointer-events:auto}
+.msg-context-menu{
+  position:fixed;left:0;right:0;bottom:0;background:#fff;border-radius:16px 16px 0 0;
+  box-shadow:0 -8px 24px rgba(0,0,0,.2);padding:6px 0;transform:translateY(100%);
+  opacity:0;pointer-events:none;transition:transform .2s ease, opacity .2s ease;z-index:91
+}
+.msg-context-menu.active{transform:translateY(0);opacity:1;pointer-events:auto}
+.msg-context-menu.floating{
+  left:0;right:auto;bottom:auto;min-width:190px;max-width:80vw;border-radius:12px;
+  box-shadow:0 8px 24px rgba(0,0,0,.2);transform:none
+}
+.msg-context-menu .ctx-item{
+  width:100%;background:transparent;border:none;padding:12px 16px;display:flex;align-items:center;
+  gap:12px;font-size:14px;text-align:left;cursor:pointer
+}
+.msg-context-menu .ctx-item + .ctx-item{border-top:1px solid #eee}
+.msg-context-menu .ctx-item:active{background:#f3f3f3}
+.msg-context-menu .ctx-icon{
+  width:22px;height:22px;border-radius:11px;background:#f2f2f2;color:#111;display:flex;
+  align-items:center;justify-content:center;font-size:12px;font-weight:700
+}
+.msg-context-menu .ctx-label{flex:1}
+
+.delete-backdrop{
+  position:fixed;inset:0;background:rgba(0,0,0,.2);opacity:0;pointer-events:none;
+  transition:opacity .15s ease;z-index:92
+}
+.delete-backdrop.active{opacity:1;pointer-events:auto}
+.delete-sheet{
+  position:fixed;left:0;right:0;bottom:0;background:#fff;border-radius:16px 16px 0 0;
+  box-shadow:0 -8px 24px rgba(0,0,0,.2);padding:6px 0;transform:translateY(100%);
+  opacity:0;pointer-events:none;transition:transform .2s ease, opacity .2s ease;z-index:93
+}
+.delete-sheet.active{transform:translateY(0);opacity:1;pointer-events:auto}
+.delete-sheet .delete-option{
+  width:100%;background:transparent;border:none;padding:14px 16px;font-size:14px;text-align:left;cursor:pointer
+}
+.delete-sheet .delete-option + .delete-option{border-top:1px solid #eee}
+.delete-sheet .delete-option:disabled{opacity:.5;cursor:not-allowed}
+
+.call-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;
+  z-index:120;padding:20px
+}
+.call-overlay.active{display:flex}
+.call-card{
+  width:min(360px, 92vw);background:#fff;border-radius:16px;padding:16px;
+  display:flex;flex-direction:column;gap:12px;box-shadow:0 10px 30px rgba(0,0,0,.25)
+}
+.call-title{font-size:16px;font-weight:700}
+.call-sub{font-size:12px;color:#666}
+.call-timer{font-size:12px;color:#333;font-weight:600;margin-top:4px}
+.call-hero{
+  display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:10px
+}
+.call-avatar{
+  width:120px;height:120px;border-radius:50%;object-fit:cover;background:#222;
+  border:3px solid rgba(255,255,255,.3)
+}
+.call-name{font-size:20px;font-weight:700;color:#fff;text-align:center}
+.call-media-label{
+  position:absolute;color:#fff;background:rgba(0,0,0,.45);padding:6px 12px;border-radius:12px;
+  font-size:12px
+}
+.call-card{
+  width:100%;height:100%;border-radius:0;padding:24px;
+  background:radial-gradient(circle at top, #2a2a2a 0%, #101010 60%);
+  color:#fff;justify-content:space-between
+}
+.call-media{
+  flex:1;min-height:220px;position:relative;margin:12px 0;background:#000;border-radius:18px
+}
+.call-media audio,.call-media video{height:100%}
+.call-actions{padding-bottom:6px}
+.call-actions button{min-width:90px}
+.call-media{
+  background:#111;border-radius:12px;position:relative;overflow:hidden;min-height:180px
+}
+.call-media audio,.call-media video{
+  width:100%;height:100%;object-fit:cover;display:block;background:#111
+}
+.call-media .local-video{
+  position:absolute;right:10px;bottom:10px;width:90px;height:120px;border-radius:10px;overflow:hidden;
+  border:2px solid rgba(255,255,255,.6)
+}
+.call-actions{
+  display:flex;gap:8px;justify-content:center
+}
+.call-actions button{
+  border:none;border-radius:18px;padding:10px 14px;font-size:13px;cursor:pointer
+}
+.call-actions .accept{background:#1aa34a;color:#fff}
+.call-actions .decline,.call-actions .end{background:#e53935;color:#fff}
+</style>
+</head>
+
+<body>
+
+<div class="chat-header">
+  <div class="chat-title">
+    <img id="chatAvatar" class="chat-avatar" alt="">
+    <div class="chat-meta">
+      <div id="chatName">Chat</div>
+      <div class="chat-sub" id="chatSub"></div>
+    </div>
+  </div>
+  <div class="chat-actions">
+    <button class="chat-action-btn" id="audioCallBtn" title="Call" aria-label="Call">📞</button>
+    <button class="chat-action-btn" id="videoCallBtn" title="Video call" aria-label="Video call">🎥</button>
+    <button class="chat-action-btn" id="chatMoreBtn" title="More options" aria-label="More options">⋮</button>
+    <button id="toggleContacts">Contacts</button>
+  </div>
+</div>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<div class="contacts-panel" id="contactsPanel">
+  <div class="contacts-search">
+    <input id="contactSearch" placeholder="Search contacts">
+  </div>
+  <div class="contacts-list" id="contactsList"></div>
+</div>
+<div class="chat-list-panel" id="chatListPanel">
+  <div class="chat-list-search">
+    <input id="chatSearch" placeholder="Search chats">
+  </div>
+  <div class="chat-list" id="chatList"></div>
+</div>
+<div class="chat-box" id="chatBox"></div>
+
+<div class="media-preview" id="mediaPreview">
+  <div id="mediaThumb"></div>
+  <div class="meta" id="mediaMeta"></div>
+  <button class="remove" id="removeMediaBtn">Remove</button>
+</div>
+
+<div class="reply-preview" id="replyPreview">
+  <div class="reply-content">
+    <div class="reply-label" id="replyLabel"></div>
+    <div class="reply-text" id="replyText"></div>
+  </div>
+  <button class="reply-close" id="replyClose" type="button" aria-label="Cancel reply">&times;</button>
+</div>
+
+<div class="chat-input">
+  <input id="msgInput" placeholder="Type message">
+  <input id="mediaInput" type="file" accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.7z" hidden>
+  <button class="attach-btn" id="attachBtn" onclick="pickMedia()">+</button>
+  <button id="sendBtn" onclick="sendMsg()">➤</button>
+</div>
+
+<div class="context-backdrop" id="contextBackdrop"></div>
+<div class="msg-context-menu" id="msgContextMenu" role="menu" aria-hidden="true">
+  <button class="ctx-item" type="button" data-action="copy">
+    <span class="ctx-icon">C</span>
+    <span class="ctx-label">Copy</span>
+  </button>
+  <button class="ctx-item" type="button" data-action="star">
+    <span class="ctx-icon">★</span>
+    <span class="ctx-label">Star</span>
+  </button>
+  <button class="ctx-item" type="button" data-action="reply">
+    <span class="ctx-icon">R</span>
+    <span class="ctx-label">Reply</span>
+  </button>
+  <button class="ctx-item" type="button" data-action="delete">
+    <span class="ctx-icon">D</span>
+    <span class="ctx-label">Delete</span>
+  </button>
+</div>
+
+<div class="delete-backdrop" id="deleteBackdrop"></div>
+<div class="delete-sheet" id="deleteSheet" role="dialog" aria-hidden="true">
+  <button class="delete-option" type="button" data-delete-action="me" id="deleteForMeBtn">Delete for me</button>
+  <button class="delete-option" type="button" data-delete-action="everyone" id="deleteForEveryoneBtn">Delete for everyone</button>
+</div>
+
+<div class="call-overlay" id="callOverlay" aria-hidden="true">
+  <div class="call-card">
+    <div class="call-hero">
+      <img id="callAvatar" class="call-avatar" alt="">
+      <div class="call-name" id="callName">User</div>
+      <div class="call-title" id="callTitle">Calling...</div>
+      <div class="call-sub" id="callSub">Audio call</div>
+      <div class="call-timer" id="callTimer">00:00</div>
+    </div>
+    <div class="call-media" id="callMedia">
+      <div class="call-media-label" id="callMediaLabel">Connecting...</div>
+      <video id="remoteVideo" autoplay playsinline></video>
+      <video id="localVideo" class="local-video" autoplay playsinline muted></video>
+      <audio id="remoteAudio" autoplay></audio>
+    </div>
+    <div class="call-actions">
+      <button class="accept" id="callAcceptBtn" type="button">Answer</button>
+      <button class="decline" id="callDeclineBtn" type="button">Decline</button>
+      <button class="end" id="callEndBtn" type="button">End</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const supa = window.NOVA && window.NOVA.supa;
+const chatName = document.getElementById("chatName");
+const chatAvatar = document.getElementById("chatAvatar");
+const chatSub = document.getElementById("chatSub");
+const chatBox = document.getElementById("chatBox");
+const contactsPanel = document.getElementById("contactsPanel");
+const contactsList = document.getElementById("contactsList");
+const contactSearch = document.getElementById("contactSearch");
+const chatListPanel = document.getElementById("chatListPanel");
+const chatList = document.getElementById("chatList");
+const chatSearch = document.getElementById("chatSearch");
+const toggleContacts = document.getElementById("toggleContacts");
+const audioCallBtn = document.getElementById("audioCallBtn");
+const videoCallBtn = document.getElementById("videoCallBtn");
+const chatMoreBtn = document.getElementById("chatMoreBtn");
+const chatMenuBtn = document.getElementById("chatMenuBtn");
+const chatMenu = document.getElementById("chatMenu");
+const deleteChatBtn = document.getElementById("deleteChatBtn");
+const syncContactsBtn = document.getElementById("syncContactsBtn");
+const manualContactsBtn = document.getElementById("manualContactsBtn");
+const contactsHint = document.getElementById("contactsHint");
+const msgInput = document.getElementById("msgInput");
+const mediaInput = document.getElementById("mediaInput");
+const attachBtn = document.getElementById("attachBtn");
+const mediaPreview = document.getElementById("mediaPreview");
+const mediaThumb = document.getElementById("mediaThumb");
+const mediaMeta = document.getElementById("mediaMeta");
+const removeMediaBtn = document.getElementById("removeMediaBtn");
+const sendBtn = document.getElementById("sendBtn");
+const toastStack = document.getElementById("toastStack");
+const replyPreview = document.getElementById("replyPreview");
+const replyLabel = document.getElementById("replyLabel");
+const replyText = document.getElementById("replyText");
+const replyClose = document.getElementById("replyClose");
+const contextBackdrop = document.getElementById("contextBackdrop");
+const msgContextMenu = document.getElementById("msgContextMenu");
+const deleteBackdrop = document.getElementById("deleteBackdrop");
+const deleteSheet = document.getElementById("deleteSheet");
+const deleteForMeBtn = document.getElementById("deleteForMeBtn");
+const deleteForEveryoneBtn = document.getElementById("deleteForEveryoneBtn");
+const callOverlay = document.getElementById("callOverlay");
+const callTitle = document.getElementById("callTitle");
+const callSub = document.getElementById("callSub");
+const callTimer = document.getElementById("callTimer");
+const callAvatar = document.getElementById("callAvatar");
+const callName = document.getElementById("callName");
+const callMedia = document.getElementById("callMedia");
+const callMediaLabel = document.getElementById("callMediaLabel");
+const remoteVideo = document.getElementById("remoteVideo");
+const localVideo = document.getElementById("localVideo");
+const remoteAudio = document.getElementById("remoteAudio");
+const callAcceptBtn = document.getElementById("callAcceptBtn");
+const callDeclineBtn = document.getElementById("callDeclineBtn");
+const callEndBtn = document.getElementById("callEndBtn");
+
+let currentUser = null;
+let myUid = null;
+let myName = "";
+let myPhoto = "";
+let otherUid = new URLSearchParams(location.search).get("uid");
+let otherUsername = "";
+let allContacts = [];
+let allowedChatIds = new Set();
+let allChats = [];
+let pendingMedia = null;
+let pendingMediaKind = null;
+let pendingMediaName = "";
+let pendingMediaSize = "";
+let previewUrl = null;
+let incomingSubscription = null;
+let outgoingSubscription = null;
+let knownMessageIds = new Set();
+let pendingBySig = new Map();
+let userCache = new Map();
+let deletedAtMap = new Map();
+let presenceUnsub = null;
+let replyContext = null;
+let starredMessageMap = new Map();
+let deletedMessageMap = new Map();
+let contextTarget = null;
+let longPressTimer = null;
+let longPressStart = null;
+let deleteTarget = null;
+let callChannel = null;
+let activeCall = null;
+let rtcPeer = null;
+let localStream = null;
+let remoteStream = null;
+let pendingIce = [];
+let callTimeout = null;
+let callTimerId = null;
+let callStartedAt = null;
+let ringCtx = null;
+let ringGain = null;
+let ringOsc = null;
+let ringInterval = null;
+let callStatusTimeout = null;
+const selectCols = "id,sender_id,receiver_id,message,media_url,media_type,created_at";
+const CHAT_READ_EVENT_PREFIX = "__NOVA_READ__:";
+let otherSeenAt = "";
+let lastSentReadAt = "";
+
+function setContactsVisible(show){
+  if(!contactsPanel) return;
+  contactsPanel.classList.toggle("active", !!show);
+}
+
+function setChatListVisible(show){
+  if(!chatListPanel) return;
+  chatListPanel.classList.toggle("active", !!show);
+}
+
+function setChatActive(active){
+  document.body.classList.toggle("chat-disabled", !active);
+  if(!active){
+    clearPendingMedia();
+  }
+}
+
+function scrollToBottom(smooth){
+  if(!chatBox) return;
+  const top = chatBox.scrollHeight;
+  if(smooth && typeof chatBox.scrollTo === "function"){
+    chatBox.scrollTo({ top, behavior:"smooth" });
+  }else{
+    chatBox.scrollTop = top;
+  }
+}
+
+function formatTime(value){
+  if(!value) return "";
+  return new Date(value).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
+}
+
+function toBase64Utf8(value){
+  const utf8 = encodeURIComponent(String(value || "")).replace(/%([0-9A-F]{2})/g, (_, hex) => {
+    return String.fromCharCode(parseInt(hex, 16));
+  });
+  return btoa(utf8);
+}
+
+function fromBase64Utf8(value){
+  try{
+    const bytes = atob(String(value || ""));
+    const encoded = Array.from(bytes, ch => "%" + ch.charCodeAt(0).toString(16).padStart(2, "0")).join("");
+    return decodeURIComponent(encoded);
+  }catch(_){
+    return "";
+  }
+}
+
+function getIsoTime(value){
+  const ts = Date.parse(String(value || ""));
+  if(!Number.isFinite(ts)) return "";
+  return new Date(ts).toISOString();
+}
+
+function maxIsoTime(a, b){
+  const aTs = Date.parse(String(a || "")) || 0;
+  const bTs = Date.parse(String(b || "")) || 0;
+  if(!aTs && !bTs) return "";
+  return aTs >= bTs ? String(a || "") : String(b || "");
+}
+
+function parseChatReadEvent(messageText){
+  const raw = String(messageText || "");
+  if(!raw.startsWith(CHAT_READ_EVENT_PREFIX)) return null;
+  const encoded = raw.slice(CHAT_READ_EVENT_PREFIX.length).trim();
+  if(!encoded) return null;
+  const decoded = fromBase64Utf8(encoded);
+  if(!decoded) return null;
+  try{
+    const payload = JSON.parse(decoded);
+    if(!payload || payload.kind !== "seen") return null;
+    const seenAt = getIsoTime(payload.seen_at || payload.seenAt || "");
+    if(!seenAt) return null;
+    return {
+      kind: "seen",
+      seen_at: seenAt
+    };
+  }catch(_){
+    return null;
+  }
+}
+
+function buildChatReadEventText(seenAt){
+  const iso = getIsoTime(seenAt);
+  if(!iso) return "";
+  return CHAT_READ_EVENT_PREFIX + toBase64Utf8(JSON.stringify({
+    v: 1,
+    kind: "seen",
+    seen_at: iso
+  }));
+}
+
+function isReadEventMessage(m){
+  return !!parseChatReadEvent(m?.message || "");
+}
+
+function getSeenStorageKey(){
+  if(!myUid || !otherUid) return "";
+  return `chat_seen_${myUid}_${otherUid}`;
+}
+
+function getSentReadStorageKey(){
+  if(!myUid || !otherUid) return "";
+  return `chat_sent_read_${myUid}_${otherUid}`;
+}
+
+function loadSeenState(){
+  const key = getSeenStorageKey();
+  if(!key) return;
+  const raw = localStorage.getItem(key);
+  otherSeenAt = getIsoTime(raw || "") || "";
+}
+
+function saveSeenState(){
+  const key = getSeenStorageKey();
+  if(!key) return;
+  if(otherSeenAt){
+    localStorage.setItem(key, otherSeenAt);
+  }else{
+    localStorage.removeItem(key);
+  }
+}
+
+function loadSentReadState(){
+  const key = getSentReadStorageKey();
+  if(!key) return;
+  const raw = localStorage.getItem(key);
+  lastSentReadAt = getIsoTime(raw || "") || "";
+}
+
+function saveSentReadState(){
+  const key = getSentReadStorageKey();
+  if(!key) return;
+  if(lastSentReadAt){
+    localStorage.setItem(key, lastSentReadAt);
+  }else{
+    localStorage.removeItem(key);
+  }
+}
+
+function applySeenStateForMessageEl(el){
+  if(!el || !el.classList.contains("me")) return;
+  const createdAt = getIsoTime(el.dataset.createdAt || "");
+  const seenCutoff = getIsoTime(otherSeenAt || "");
+  const seen = !!(createdAt && seenCutoff && Date.parse(createdAt) <= Date.parse(seenCutoff));
+  el.classList.toggle("seen", seen);
+}
+
+function applySeenStateToAllMessages(){
+  if(!chatBox) return;
+  chatBox.querySelectorAll(".msg.me").forEach(el => applySeenStateForMessageEl(el));
+}
+
+function updateSeenAt(nextSeenAt){
+  const iso = getIsoTime(nextSeenAt || "");
+  if(!iso) return;
+  otherSeenAt = maxIsoTime(otherSeenAt, iso);
+  saveSeenState();
+  applySeenStateToAllMessages();
+}
+
+function processReadEventMessage(m){
+  const evt = parseChatReadEvent(m?.message || "");
+  if(!evt) return false;
+  if(!myUid || !otherUid) return true;
+  if(String(m?.sender_id || "") === String(otherUid) && String(m?.receiver_id || "") === String(myUid)){
+    updateSeenAt(evt.seen_at);
+  }
+  return true;
+}
+
+async function emitReadReceipt(seenAt){
+  if(!supa || !myUid || !otherUid) return;
+  const iso = getIsoTime(seenAt || "");
+  if(!iso) return;
+  if(lastSentReadAt && Date.parse(iso) <= Date.parse(lastSentReadAt)) return;
+
+  const eventText = buildChatReadEventText(iso);
+  if(!eventText) return;
+  const payload = {
+    sender_id: myUid,
+    receiver_id: otherUid,
+    message: eventText,
+    media_type: "text",
+    created_at: new Date().toISOString()
+  };
+
+  const { error } = await supa.from("chats").insert(payload);
+  if(error){
+    console.warn("read receipt send failed", error);
+    return;
+  }
+  lastSentReadAt = iso;
+  saveSentReadState();
+}
+
+function getInitials(name){
+  const raw = String(name || "").trim();
+  if(!raw) return "?";
+  const parts = raw.split(/\s+/);
+  const first = parts[0]?.[0] || "";
+  const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] || "") : "";
+  return (first + last).toUpperCase();
+}
+
+function makeAvatarDataUrl(name){
+  const initials = getInitials(name);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"><rect width="80" height="80" rx="40" ry="40" fill="#ff6a00"/><text x="50%" y="54%" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-size="30" font-weight="700" fill="#ffffff">${initials}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function applyAvatar(imgEl, photoUrl, name){
+  if(!imgEl) return;
+  const fallback = makeAvatarDataUrl(name);
+  imgEl.onerror = () => {
+    imgEl.onerror = null;
+    imgEl.src = fallback;
+  };
+  imgEl.src = photoUrl || fallback;
+}
+
+function updateChatSub(statusText){
+  if(!chatSub) return;
+  const parts = [];
+  if(otherUsername) parts.push("@" + otherUsername);
+  if(statusText) parts.push(statusText);
+  chatSub.textContent = parts.join(" • ");
+}
+
+function getMessagePreview(m){
+  if(!m) return "";
+  if(isReadEventMessage(m)) return "";
+  const type = normalizeMediaType(m.media_type);
+  const base = m.message || (type === "image" ? "Photo" : type === "video" ? "Video" : type === "document" ? "Document" : "Message");
+  const prefix = m.sender_id === myUid ? "You: " : "";
+  return prefix + base;
+}
+
+function formatSize(bytes){
+  const num = Number(bytes) || 0;
+  if(!num) return "";
+  const units = ["B","KB","MB","GB"];
+  let size = num;
+  let i = 0;
+  while(size >= 1024 && i < units.length - 1){
+    size /= 1024;
+    i++;
+  }
+  return `${size.toFixed(size >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function getFileExtension(name){
+  const raw = String(name || "");
+  const idx = raw.lastIndexOf(".");
+  if(idx === -1) return "";
+  return raw.slice(idx + 1).toLowerCase();
+}
+
+function getFileNameFromUrl(url){
+  if(!url) return "File";
+  try{
+    const clean = url.split("?")[0].split("#")[0];
+    const part = clean.split("/").pop() || "File";
+    return decodeURIComponent(part);
+  }catch(_){
+    return "File";
+  }
+}
+
+function getMediaKindForFile(file){
+  const type = String(file.type || "").toLowerCase();
+  const ext = getFileExtension(file.name);
+  if(type.startsWith("image/") || ["jpg","jpeg","png","gif","webp","bmp","svg"].includes(ext)){
+    return "image";
+  }
+  if(type.startsWith("video/") || ["mp4","mov","webm","ogg","mkv"].includes(ext)){
+    return "video";
+  }
+  if(type.startsWith("application/") || type.startsWith("text/") || ["pdf","doc","docx","xls","xlsx","ppt","pptx","txt","zip","rar","7z","csv","rtf"].includes(ext)){
+    return "document";
+  }
+  return "unknown";
+}
+
+function normalizeMediaType(value){
+  if(!value) return "text";
+  return value === "file" ? "document" : value;
+}
+
+function renderDocCard(url, name, size){
+  const link = document.createElement("a");
+  link.className = "doc-card";
+  link.href = url || "#";
+  link.target = "_blank";
+  link.rel = "noopener";
+  const ext = getFileExtension(name).toUpperCase() || "FILE";
+  const icon = document.createElement("div");
+  icon.className = "doc-icon";
+  icon.textContent = ext.slice(0, 4);
+  const meta = document.createElement("div");
+  meta.className = "doc-meta";
+  const title = document.createElement("div");
+  title.className = "doc-name";
+  title.textContent = name || "Document";
+  const sizeEl = document.createElement("div");
+  sizeEl.className = "doc-size";
+  sizeEl.textContent = size || "";
+  meta.appendChild(title);
+  meta.appendChild(sizeEl);
+  link.appendChild(icon);
+  link.appendChild(meta);
+  return link;
+}
+
+function showToast(title, body, avatar){
+  if(!toastStack) return;
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  const img = document.createElement("img");
+  img.alt = "";
+  applyAvatar(img, avatar, title || "User");
+  const text = document.createElement("div");
+  text.className = "toast-text";
+  const t = document.createElement("div");
+  t.className = "toast-title";
+  t.textContent = title || "New message";
+  const b = document.createElement("div");
+  b.className = "toast-body";
+  b.textContent = body || "";
+  text.appendChild(t);
+  text.appendChild(b);
+  toast.appendChild(img);
+  toast.appendChild(text);
+  toastStack.appendChild(toast);
+  setTimeout(() => {
+    toast.remove();
+  }, 4000);
+}
+
+function ensureNotificationPermission(){
+  if(!("Notification" in window)) return;
+  if(Notification.permission === "default"){
+    Notification.requestPermission().catch(()=>{});
+  }
+}
+
+function messageFlagStorageKey(kind){
+  return myUid ? `chat_${kind}_${myUid}` : `chat_${kind}_guest`;
+}
+
+function loadMessageFlagMap(kind){
+  try{
+    const raw = localStorage.getItem(messageFlagStorageKey(kind));
+    const parsed = raw ? JSON.parse(raw) : {};
+    if(parsed && typeof parsed === "object"){
+      return new Map(Object.entries(parsed));
+    }
+  }catch(_){}
+  return new Map();
+}
+
+function saveMessageFlagMap(kind, map){
+  try{
+    const entries = Array.from(map.entries())
+      .sort((a,b)=>Number(b[1]||0)-Number(a[1]||0))
+      .slice(0, 800);
+    localStorage.setItem(messageFlagStorageKey(kind), JSON.stringify(Object.fromEntries(entries)));
+  }catch(_){}
+}
+
+function initMessageFlags(){
+  starredMessageMap = loadMessageFlagMap("starred_messages");
+  deletedMessageMap = loadMessageFlagMap("deleted_messages");
+}
+
+async function getUserSummary(userId){
+  if(!userId) return { name:"User", photo:"", username:"" };
+  if(userCache.has(userId)) return userCache.get(userId);
+  const { data } = await supa
+    .from("users")
+    .select("username,full_name,photo")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const summary = {
+    name: data?.full_name || data?.username || "User",
+    photo: data?.photo || "",
+    username: data?.username || ""
+  };
+  userCache.set(userId, summary);
+  return summary;
+}
+
+async function notifyMessage(m){
+  if(!m) return;
+  if(isReadEventMessage(m)) return;
+  const sender = await getUserSummary(m.sender_id);
+  const type = normalizeMediaType(m.media_type);
+  const preview = m.message || (type === "image" ? "Photo" : type === "video" ? "Video" : type === "document" ? "Document" : "Message");
+  const icon = sender.photo || makeAvatarDataUrl(sender.name || "User");
+  const targetUid = m.sender_id === myUid ? m.receiver_id : m.sender_id;
+
+  if(document.hidden && "Notification" in window && Notification.permission === "granted"){
+    try{
+      const notif = new Notification(sender.name, { body: preview, icon, badge: icon });
+      notif.onclick = () => {
+        try{ notif.close(); }catch(_){}
+        window.focus();
+        if(targetUid){
+          location.href = "chat.html?uid=" + encodeURIComponent(targetUid);
+        }
+      };
+      return;
+    }catch(_){}
+  }
+  showToast(sender.name, preview, sender.photo || icon);
+}
+
+function setContactsHint(message){
+  if(!contactsHint) return;
+  contactsHint.textContent = message || "";
+}
+
+function hasContactPicker(){
+  return !!(navigator.contacts && typeof navigator.contacts.select === "function");
+}
+
+function savePhoneContacts(list){
+  try{
+    localStorage.setItem("phone_contacts", JSON.stringify(list || []));
+  }catch(_){}
+}
+
+function parseManualContacts(raw){
+  const items = [];
+  const entries = String(raw || "").split(",").map(s => s.trim()).filter(Boolean);
+  entries.forEach(entry => {
+    const parts = entry.split(":").map(p => p.trim()).filter(Boolean);
+    let name = "";
+    let phone = "";
+    if(parts.length >= 2){
+      name = parts[0];
+      phone = parts.slice(1).join(":");
+    }else{
+      phone = entry;
+      name = entry;
+    }
+    if(phone){
+      items.push({ name, phone_number: phone });
+    }
+  });
+  return items;
+}
+
+async function pickDeviceContacts(){
+  if(!hasContactPicker()) return [];
+  try{
+    const picked = await navigator.contacts.select(["name","tel"], { multiple:true });
+    const flattened = [];
+    (picked || []).forEach(entry => {
+      const name = Array.isArray(entry.name) ? entry.name[0] : entry.name;
+      const tels = entry.tel || entry.phone || entry.phoneNumbers || [];
+      (Array.isArray(tels) ? tels : [tels]).forEach(tel => {
+        if(tel){
+          flattened.push({ name: name || tel, phone_number: tel });
+        }
+      });
+    });
+    return flattened;
+  }catch(err){
+    console.warn("contacts picker failed", err);
+    return [];
+  }
+}
+
+async function syncContacts(){
+  let contacts = await pickDeviceContacts();
+  if(!contacts.length){
+    const fallback = prompt("Paste phone numbers separated by commas. You can use Name:Number.", "");
+    if(!fallback) return;
+    contacts = parseManualContacts(fallback);
+  }
+  if(!contacts.length){
+    setContactsHint("No contacts saved.");
+    return;
+  }
+  savePhoneContacts(contacts);
+  setContactsHint(`Synced ${contacts.length} contacts.`);
+  await loadContacts();
+  await loadChatList();
+}
+
+async function addContactsManually(){
+  const raw = prompt("Paste phone numbers separated by commas. You can use Name:Number.", "");
+  if(!raw) return;
+  const contacts = parseManualContacts(raw);
+  if(!contacts.length){
+    setContactsHint("No contacts added.");
+    return;
+  }
+  const existing = getSimulatedContacts();
+  const combined = (existing || []).concat(contacts);
+  savePhoneContacts(combined);
+  setContactsHint(`Saved ${combined.length} contacts.`);
+  await loadContacts();
+  await loadChatList();
+}
+
+async function initPresenceStatus(){
+  if(!otherUid) return;
+  if(!window.NOVA || typeof window.NOVA.ensurePresence !== "function" || typeof window.NOVA.onPresence !== "function"){
+    return;
+  }
+  await window.NOVA.ensurePresence();
+  if(presenceUnsub) presenceUnsub();
+  const update = () => {
+    const online = typeof window.NOVA.isUserOnline === "function"
+      ? window.NOVA.isUserOnline(otherUid)
+      : false;
+    updateChatSub(online ? "Online" : "Offline");
+  };
+  presenceUnsub = window.NOVA.onPresence(update);
+  update();
+}
+
+function normalizePhoneNumber(value){
+  if(!value) return "";
+  const raw = String(value).trim();
+  if(!raw) return "";
+  const cleaned = raw.replace(/[^\d+]/g, "");
+  if(cleaned.startsWith("00")){
+    return "+" + cleaned.slice(2);
+  }
+  return cleaned;
+}
+
+function coerceContact(item){
+  if(!item) return null;
+  if(typeof item === "string"){
+    const phone = normalizePhoneNumber(item);
+    if(!phone) return null;
+    return { name: item, phone_number: phone };
+  }
+  if(typeof item === "object"){
+    const phoneRaw = item.phone_number || item.phone || item.number;
+    const phone = normalizePhoneNumber(phoneRaw);
+    if(!phone) return null;
+    const name = item.name || item.full_name || item.displayName || item.username || phoneRaw || phone;
+    return { name, phone_number: phone };
+  }
+  return null;
+}
+
+function getSimulatedContacts(){
+  if(window.NOVA && Array.isArray(window.NOVA.phoneContacts)){
+    return window.NOVA.phoneContacts;
+  }
+  const stored = localStorage.getItem("phone_contacts");
+  if(stored){
+    try{
+      const parsed = JSON.parse(stored);
+      if(Array.isArray(parsed)) return parsed;
+    }catch(_){
+      return stored.split(",").map(s => s.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
+async function loadChatDeletions(){
+  if(!myUid) return;
+  const { data, error } = await supa
+    .from("chat_deletes")
+    .select("other_id,deleted_at")
+    .eq("user_id", myUid)
+    .limit(1000);
+
+  if(error){
+    console.error("loadChatDeletions error", error);
+    deletedAtMap = new Map();
+    return;
+  }
+  deletedAtMap = new Map((data || []).map(row => [row.other_id, row.deleted_at]));
+}
+
+function getDeletedAt(otherId){
+  if(!otherId) return null;
+  return deletedAtMap.get(otherId) || null;
+}
+
+function isMessageDeleted(m){
+  if(!m) return false;
+  const key = makeMessageKey(m);
+  if(!key) return false;
+  return deletedMessageMap.has(key);
+}
+
+function isMessageHidden(m){
+  if(!m) return false;
+  if(isMessageDeleted(m)) return true;
+  const otherId = m.sender_id === myUid ? m.receiver_id : m.sender_id;
+  const deletedAt = getDeletedAt(otherId);
+  if(!deletedAt) return false;
+  return new Date(m.created_at) <= new Date(deletedAt);
+}
+
+async function deleteChat(otherId){
+  if(!otherId || !myUid) return;
+  const confirmDelete = confirm("Delete this chat for you only? This will not delete messages for the other user.");
+  if(!confirmDelete) return;
+  const deletedAt = new Date().toISOString();
+  const { error } = await supa
+    .from("chat_deletes")
+    .upsert({ user_id: myUid, other_id: otherId, deleted_at: deletedAt }, { onConflict:"user_id,other_id" });
+
+  if(error){
+    console.error("deleteChat error", error);
+    alert(error.message || "Unable to delete chat.");
+    return;
+  }
+
+  deletedAtMap.set(otherId, deletedAt);
+  allChats = allChats.filter(c => c.id !== otherId);
+  renderChatList(allChats);
+
+  if(otherUid === otherId){
+    chatBox.innerHTML = "";
+    location.href = "chat.html";
+  }
+}
+
+function makeSignature(m){
+  return [
+    m.sender_id || "",
+    m.receiver_id || "",
+    m.created_at || "",
+    normalizeMediaType(m.media_type),
+    m.message || "",
+    m.media_url || ""
+  ].join("|");
+}
+
+function makeMessageKey(m){
+  if(!m) return "";
+  return [
+    m.sender_id || "",
+    m.receiver_id || "",
+    m.created_at || "",
+    normalizeMediaType(m.media_type),
+    m.message || ""
+  ].join("|");
+}
+
+function setPendingSignature(el, sig){
+  if(!el) return;
+  if(el.dataset.sig){
+    pendingBySig.delete(el.dataset.sig);
+  }
+  if(sig){
+    el.dataset.sig = sig;
+    pendingBySig.set(sig, el);
+  }
+}
+
+function clearPendingSignature(el){
+  if(!el || !el.dataset.sig) return;
+  pendingBySig.delete(el.dataset.sig);
+  delete el.dataset.sig;
+}
+
+function finalizeOptimisticMessage(el, m){
+  if(!el || !m) return;
+  clearPendingSignature(el);
+  el.classList.remove("pending");
+  if(el.dataset.tempId) delete el.dataset.tempId;
+  el.dataset.createdAt = getIsoTime(m.created_at || "") || "";
+  if(m.id){
+    const existing = chatBox.querySelector(`.msg[data-msg-id="${m.id}"]`);
+    if(existing && existing !== el){
+      if(el.dataset.localUrl){
+        URL.revokeObjectURL(el.dataset.localUrl);
+        delete el.dataset.localUrl;
+      }
+      el.remove();
+      return;
+    }
+    el.dataset.msgId = m.id;
+    knownMessageIds.add(m.id);
+  }
+
+  const mediaType = normalizeMediaType(m.media_type);
+  if((mediaType === "image" || mediaType === "video" || mediaType === "document") && m.media_url){
+    const mediaUrl = m.media_url;
+    if(mediaType === "image"){
+      let img = el.querySelector("img.msg-media");
+      if(!img){
+        img = document.createElement("img");
+        img.className = "msg-media";
+        img.alt = "image";
+        img.loading = "lazy";
+        el.insertBefore(img, el.firstChild);
+      }
+      img.src = mediaUrl;
+    }else if(mediaType === "video"){
+      let video = el.querySelector("video.msg-media");
+      if(!video){
+        video = document.createElement("video");
+        video.className = "msg-media video";
+        video.controls = true;
+        video.playsInline = true;
+        video.preload = "metadata";
+        el.insertBefore(video, el.firstChild);
+      }
+      video.src = mediaUrl;
+    }else{
+      const existing = el.querySelector(".doc-card");
+      const name = getFileNameFromUrl(mediaUrl);
+      const size = "";
+      if(existing){
+        existing.href = mediaUrl;
+        const nameEl = existing.querySelector(".doc-name");
+        if(nameEl) nameEl.textContent = name;
+      }else{
+        const card = renderDocCard(mediaUrl, name, size);
+        el.insertBefore(card, el.firstChild);
+      }
+    }
+    if(el.dataset.localUrl && el.dataset.localUrl !== mediaUrl){
+      URL.revokeObjectURL(el.dataset.localUrl);
+      delete el.dataset.localUrl;
+    }
+  }
+
+  if(m.message){
+    let text = el.querySelector(".msg-text");
+    if(!text){
+      text = document.createElement("div");
+      text.className = "msg-text";
+      el.insertBefore(text, el.querySelector("small"));
+    }
+    text.textContent = m.message;
+  }
+
+  const timeText = el.querySelector(".msg-time");
+  if(timeText){
+    timeText.textContent = formatTime(m.created_at);
+  }else{
+    const time = el.querySelector("small");
+    if(time){
+      time.textContent = formatTime(m.created_at);
+    }
+  }
+  if(el.classList.contains("me")){
+    applySeenStateForMessageEl(el);
+  }
+}
+
+function markPendingFailed(el, err){
+  if(!el) return;
+  clearPendingSignature(el);
+  el.classList.remove("pending");
+  el.classList.add("failed");
+  const timeText = el.querySelector(".msg-time");
+  if(timeText){
+    timeText.textContent = "Failed";
+  }else{
+    const time = el.querySelector("small");
+    if(time) time.textContent = "Failed";
+  }
+  if(el.dataset.localUrl){
+    URL.revokeObjectURL(el.dataset.localUrl);
+    delete el.dataset.localUrl;
+  }
+  if(err) console.error(err);
+}
+
+function messageBelongsToOpenChat(m){
+  if(!otherUid) return false;
+  return (
+    (m.sender_id === myUid && m.receiver_id === otherUid) ||
+    (m.sender_id === otherUid && m.receiver_id === myUid)
+  );
+}
+
+function ingestMessage(m){
+  if(!m) return false;
+  if(processReadEventMessage(m)) return true;
+  if(isMessageHidden(m)) return false;
+  if(!messageBelongsToOpenChat(m)) return false;
+  if(m.id && knownMessageIds.has(m.id)) return true;
+  if(m.id && chatBox.querySelector(`.msg[data-msg-id="${m.id}"]`)) return true;
+
+  const sig = makeSignature(m);
+  const pendingEl = pendingBySig.get(sig);
+  if(pendingEl){
+    finalizeOptimisticMessage(pendingEl, m);
+  }else{
+    renderMsg(m);
+    if(m.id) knownMessageIds.add(m.id);
+  }
+  if(String(m.sender_id || "") === String(otherUid || "") && String(m.receiver_id || "") === String(myUid || "")){
+    emitReadReceipt(m.created_at);
+  }
+  scrollToBottom(true);
+  return true;
+}
+
+async function upsertChatListEntry(m){
+  if(!m) return;
+  if(isReadEventMessage(m)) return;
+  if(isMessageHidden(m)) return;
+  const otherId = m.sender_id === myUid ? m.receiver_id : m.sender_id;
+  if(!otherId) return;
+  const profile = await getUserSummary(otherId);
+  const existing = allChats.find(c => c.id === otherId);
+  const entry = {
+    id: otherId,
+    name: profile.name || "User",
+    username: profile.username || "",
+    photo: profile.photo || "",
+    lastMessage: getMessagePreview(m),
+    created_at: m.created_at
+  };
+  if(existing){
+    Object.assign(existing, entry);
+  }else{
+    allChats.push(entry);
+  }
+  allChats.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  renderChatList(allChats);
+}
+
+/* ======================
+   AUTH CHECK
+====================== */
+(async ()=>{
+  if(!supa){
+    location.href="login.html";
+    return;
+  }
+  currentUser = await window.NOVA.requireUser();
+  myUid = currentUser.id;
+  initMessageFlags();
+  ensureNotificationPermission();
+  await loadChatDeletions();
+  listenRealtime();
+
+  // load my profile (public users table)
+  const { data: me } = await supa
+    .from("users")
+    .select("username,photo")
+    .eq("user_id", myUid)
+    .maybeSingle();
+
+  myName = me?.username || "User";
+  myPhoto = me?.photo || "";
+  applyAvatar(chatAvatar, myPhoto, myName);
+
+  // load other user profile (public users table)
+  if(otherUid){
+    loadSeenState();
+    loadSentReadState();
+    if(toggleContacts) toggleContacts.style.display = "inline-flex";
+    if(chatMenuBtn) chatMenuBtn.style.display = "inline-flex";
+    setContactsVisible(false);
+    setChatListVisible(false);
+    const { data: other } = await supa
+      .from("users")
+      .select("username,full_name,photo")
+      .eq("user_id", otherUid)
+      .maybeSingle();
+
+    const otherName = other?.full_name || other?.username || "Chat";
+    otherUsername = other?.username || "";
+    chatName.innerText = otherName;
+    applyAvatar(chatAvatar, other?.photo || "", otherName);
+    updateChatSub("Offline");
+    await initPresenceStatus();
+    await loadContacts();
+    msgInput.disabled = false;
+    if(attachBtn) attachBtn.disabled = false;
+    sendBtn.disabled = false;
+    setChatActive(true);
+    if(audioCallBtn) audioCallBtn.disabled = false;
+    if(videoCallBtn) videoCallBtn.disabled = false;
+    if(chatMoreBtn) chatMoreBtn.disabled = false;
+    await loadMessages();
+    await loadChatList();
+    ensureCallChannel();
+  }else{
+    otherSeenAt = "";
+    lastSentReadAt = "";
+    if(toggleContacts) toggleContacts.style.display = "inline-flex";
+    if(chatMenuBtn) chatMenuBtn.style.display = "none";
+    setContactsVisible(false);
+    setChatListVisible(true);
+    await loadContacts();
+    await loadChatList();
+    chatName.innerText = "Select a chat";
+    applyAvatar(chatAvatar, myPhoto, myName);
+    otherUsername = "";
+    updateChatSub("Chats");
+    if(presenceUnsub){
+      presenceUnsub();
+      presenceUnsub = null;
+    }
+    setChatActive(false);
+    msgInput.disabled = true;
+    if(attachBtn) attachBtn.disabled = true;
+    sendBtn.disabled = true;
+    clearPendingMedia();
+    if(audioCallBtn) audioCallBtn.disabled = true;
+    if(videoCallBtn) videoCallBtn.disabled = true;
+    if(chatMoreBtn) chatMoreBtn.disabled = true;
+    endCall(false);
+  }
+})();
+
+/* ======================
+   LOAD MESSAGES
+====================== */
+async function loadMessages(){
+  if(!otherUid) return;
+  const deletedAt = getDeletedAt(otherUid);
+  let query = supa
+    .from("chats")
+    .select(selectCols)
+    .or(`and(sender_id.eq.${myUid},receiver_id.eq.${otherUid}),and(sender_id.eq.${otherUid},receiver_id.eq.${myUid})`)
+    .order("created_at", { ascending:true });
+  if(deletedAt){
+    query = query.gt("created_at", deletedAt);
+  }
+  const { data, error } = await query;
+
+  if(error){
+    console.error("loadMessages error", error);
+    return;
+  }
+
+  knownMessageIds.clear();
+  pendingBySig.clear();
+  chatBox.innerHTML = "";
+
+  let latestIncomingAt = "";
+  (data || []).forEach(m => {
+    if(processReadEventMessage(m)) return;
+    renderMsg(m);
+    if(m.id) knownMessageIds.add(m.id);
+    if(String(m.sender_id || "") === String(otherUid || "") && String(m.receiver_id || "") === String(myUid || "")){
+      latestIncomingAt = maxIsoTime(latestIncomingAt, m.created_at);
+    }
+  });
+  applySeenStateToAllMessages();
+  scrollToBottom(false);
+  if(latestIncomingAt){
+    emitReadReceipt(latestIncomingAt);
+  }
+}
+
+/* ======================
+   REALTIME LISTENER
+====================== */
+function listenRealtime(){
+  if(incomingSubscription){
+    supa.removeChannel(incomingSubscription);
+  }
+  if(outgoingSubscription){
+    supa.removeChannel(outgoingSubscription);
+  }
+
+  incomingSubscription = supa
+    .channel("chat-in-" + myUid)
+    .on(
+      "postgres_changes",
+      { event:"INSERT", schema:"public", table:"chats", filter:`receiver_id=eq.${myUid}` },
+      payload => {
+        const m = payload.new;
+        if(!m) return;
+        if(processReadEventMessage(m)){
+          return;
+        }
+        const rendered = ingestMessage(m);
+        if(!rendered || document.hidden){
+          notifyMessage(m);
+        }
+        upsertChatListEntry(m);
+      }
+    )
+    .on(
+      "postgres_changes",
+      { event:"DELETE", schema:"public", table:"chats", filter:`receiver_id=eq.${myUid}` },
+      payload => {
+        const m = payload.old;
+        if(!m || !m.id) return;
+        removeMessageById(m.id);
+      }
+    )
+    .subscribe();
+
+  outgoingSubscription = supa
+    .channel("chat-out-" + myUid)
+    .on(
+      "postgres_changes",
+      { event:"INSERT", schema:"public", table:"chats", filter:`sender_id=eq.${myUid}` },
+      payload => {
+        const m = payload.new;
+        if(!m) return;
+        if(processReadEventMessage(m)){
+          return;
+        }
+        ingestMessage(m);
+        upsertChatListEntry(m);
+      }
+    )
+    .on(
+      "postgres_changes",
+      { event:"DELETE", schema:"public", table:"chats", filter:`sender_id=eq.${myUid}` },
+      payload => {
+        const m = payload.old;
+        if(!m || !m.id) return;
+        removeMessageById(m.id);
+      }
+    )
+    .subscribe();
+}
+
+/* ======================
+   RENDER MESSAGE
+====================== */
+function renderMsg(m, opts = {}){
+  const div = document.createElement("div");
+  const isMe = m.sender_id === myUid;
+  div.className = "msg " + (isMe ? "me" : "other");
+  if(opts.pending) div.classList.add("pending");
+  if(opts.tempId) div.dataset.tempId = opts.tempId;
+  if(m.id) div.dataset.msgId = m.id;
+  div.dataset.key = makeMessageKey(m);
+   div.dataset.createdAt = getIsoTime(m.created_at || "") || "";
+  if(div.dataset.key && starredMessageMap.has(div.dataset.key)){
+    div.classList.add("starred");
+  }
+  if(opts.localMediaUrl) div.dataset.localUrl = opts.localMediaUrl;
+  if(opts.signature) setPendingSignature(div, opts.signature);
+
+  const mediaUrl = opts.localMediaUrl || m.media_url;
+  const mediaType = normalizeMediaType(m.media_type);
+  if(mediaType === "image" && mediaUrl){
+    const img = document.createElement("img");
+    img.className = "msg-media";
+    img.src = mediaUrl;
+    img.alt = "image";
+    img.loading = "lazy";
+    div.appendChild(img);
+  }else if(mediaType === "video" && mediaUrl){
+    const video = document.createElement("video");
+    video.className = "msg-media video";
+    video.src = mediaUrl;
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    div.appendChild(video);
+  }else if(mediaType === "document" && mediaUrl){
+    const name = opts.fileName || getFileNameFromUrl(mediaUrl);
+    const size = opts.fileSize || "";
+    const card = renderDocCard(mediaUrl, name, size);
+    div.appendChild(card);
+  }
+
+  if(m.message){
+    const text = document.createElement("div");
+    text.className = "msg-text";
+    text.textContent = m.message;
+    div.appendChild(text);
+  }
+
+  const time = document.createElement("small");
+  const timeText = document.createElement("span");
+  timeText.className = "msg-time";
+  timeText.textContent = formatTime(m.created_at);
+  time.appendChild(timeText);
+  if(isMe){
+    const tick = document.createElement("span");
+    tick.className = "msg-tick";
+    tick.textContent = "✓✓";
+    time.appendChild(tick);
+  }
+  div.appendChild(time);
+  chatBox.appendChild(div);
+  if(isMe){
+    applySeenStateForMessageEl(div);
+  }
+  return div;
+}
+
+function getMessageTextFromEl(el){
+  if(!el) return "";
+  const text = el.querySelector(".msg-text");
+  return text ? text.textContent : "";
+}
+
+function getMessagePreviewFromEl(el){
+  const text = getMessageTextFromEl(el);
+  if(text) return text;
+  if(el.querySelector("img.msg-media")) return "Photo";
+  if(el.querySelector("video.msg-media")) return "Video";
+  if(el.querySelector(".doc-card")) return "Document";
+  return "Message";
+}
+
+function getMessageSenderName(el){
+  if(!el) return "User";
+  if(el.classList.contains("me")) return myName || "You";
+  return chatName ? (chatName.textContent || "User") : "User";
+}
+
+async function copyMessageText(text){
+  if(!text) return;
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    try{
+      await navigator.clipboard.writeText(text);
+      return;
+    }catch(_){}
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.style.position = "fixed";
+  area.style.left = "-9999px";
+  area.style.top = "0";
+  document.body.appendChild(area);
+  area.focus();
+  area.select();
+  try{ document.execCommand("copy"); }catch(_){}
+  area.remove();
+}
+
+function toggleStarForEl(el){
+  if(!el) return;
+  const key = el.dataset.key || "";
+  if(!key) return;
+  if(starredMessageMap.has(key)){
+    starredMessageMap.delete(key);
+    el.classList.remove("starred");
+  }else{
+    starredMessageMap.set(key, Date.now());
+    el.classList.add("starred");
+  }
+  saveMessageFlagMap("starred_messages", starredMessageMap);
+}
+
+function deleteMessageForMe(el){
+  if(!el) return;
+  const key = el.dataset.key || "";
+  if(!key) return;
+  deletedMessageMap.set(key, Date.now());
+  saveMessageFlagMap("deleted_messages", deletedMessageMap);
+  clearPendingSignature(el);
+  el.remove();
+}
+
+function setReplyFromEl(el){
+  if(!el || !replyPreview || !replyLabel || !replyText) return;
+  const sender = getMessageSenderName(el);
+  const preview = getMessagePreviewFromEl(el);
+  replyContext = { key: el.dataset.key || "", sender, text: preview };
+  replyLabel.textContent = "Replying to " + sender;
+  replyText.textContent = preview || "Message";
+  replyPreview.classList.add("active");
+  if(msgInput) msgInput.focus();
+}
+
+function clearReplyContext(){
+  replyContext = null;
+  if(replyPreview) replyPreview.classList.remove("active");
+  if(replyLabel) replyLabel.textContent = "";
+  if(replyText) replyText.textContent = "";
+}
+
+function handleContextAction(action){
+  if(!contextTarget) return;
+  if(action === "copy"){
+    copyMessageText(getMessageTextFromEl(contextTarget));
+    return;
+  }
+  if(action === "star"){
+    toggleStarForEl(contextTarget);
+    return;
+  }
+  if(action === "reply"){
+    setReplyFromEl(contextTarget);
+    return;
+  }
+  if(action === "delete"){
+    openDeleteSheet(contextTarget);
+  }
+}
+
+function openDeleteSheet(el){
+  if(!deleteSheet || !deleteBackdrop) return;
+  deleteTarget = el;
+  const isSender = !!(el && el.classList.contains("me"));
+  const hasId = !!(el && el.dataset.msgId);
+  const allowEveryone = isSender && hasId;
+  if(deleteForEveryoneBtn){
+    deleteForEveryoneBtn.disabled = !allowEveryone;
+  }
+  deleteBackdrop.classList.add("active");
+  deleteSheet.classList.add("active");
+  deleteSheet.setAttribute("aria-hidden", "false");
+}
+
+function closeDeleteSheet(){
+  if(!deleteSheet || !deleteBackdrop) return;
+  deleteTarget = null;
+  deleteBackdrop.classList.remove("active");
+  deleteSheet.classList.remove("active");
+  deleteSheet.setAttribute("aria-hidden", "true");
+}
+
+function removeMessageById(msgId){
+  if(!msgId || !chatBox) return;
+  const el = chatBox.querySelector(`.msg[data-msg-id="${msgId}"]`);
+  if(el){
+    clearPendingSignature(el);
+    el.remove();
+  }
+  if(knownMessageIds && msgId){
+    knownMessageIds.delete(msgId);
+  }
+}
+
+async function deleteMessageForEveryone(el){
+  if(!el || !supa) return;
+  const msgId = el.dataset.msgId;
+  const isSender = el.classList.contains("me");
+  if(!msgId || !isSender) return;
+  const { error } = await supa
+    .from("chats")
+    .delete()
+    .eq("id", msgId)
+    .eq("sender_id", myUid);
+  if(error){
+    alert(error.message || "Unable to delete message.");
+    return;
+  }
+  removeMessageById(msgId);
+}
+
+function positionFloatingMenu(x, y){
+  if(!msgContextMenu) return;
+  const rect = msgContextMenu.getBoundingClientRect();
+  const pad = 8;
+  let left = x;
+  let top = y;
+  if(left + rect.width > window.innerWidth - pad) left = window.innerWidth - rect.width - pad;
+  if(top + rect.height > window.innerHeight - pad) top = window.innerHeight - rect.height - pad;
+  left = Math.max(pad, left);
+  top = Math.max(pad, top);
+  msgContextMenu.style.left = left + "px";
+  msgContextMenu.style.top = top + "px";
+}
+
+function openMessageMenu(el, x, y, mode){
+  if(!el || !msgContextMenu || !contextBackdrop) return;
+  cancelLongPress();
+  closeMessageMenu();
+  contextTarget = el;
+  contextTarget.classList.add("context-selected");
+  contextBackdrop.classList.add("active");
+  msgContextMenu.classList.add("active");
+  msgContextMenu.setAttribute("aria-hidden", "false");
+  if(mode === "floating"){
+    msgContextMenu.classList.add("floating");
+    msgContextMenu.style.left = (x || 0) + "px";
+    msgContextMenu.style.top = (y || 0) + "px";
+    msgContextMenu.style.right = "auto";
+    msgContextMenu.style.bottom = "auto";
+    requestAnimationFrame(()=>positionFloatingMenu(x || 0, y || 0));
+  }else{
+    msgContextMenu.classList.remove("floating");
+    msgContextMenu.style.left = "";
+    msgContextMenu.style.top = "";
+    msgContextMenu.style.right = "";
+    msgContextMenu.style.bottom = "";
+  }
+}
+
+function closeMessageMenu(){
+  if(!msgContextMenu || !contextBackdrop) return;
+  if(contextTarget) contextTarget.classList.remove("context-selected");
+  contextTarget = null;
+  msgContextMenu.classList.remove("active");
+  msgContextMenu.classList.remove("floating");
+  msgContextMenu.setAttribute("aria-hidden", "true");
+  contextBackdrop.classList.remove("active");
+}
+
+function startLongPress(e){
+  const msg = e.target.closest(".msg");
+  if(!msg || !e.touches || e.touches.length !== 1) return;
+  const touch = e.touches[0];
+  longPressStart = { x: touch.clientX, y: touch.clientY };
+  longPressTimer = setTimeout(() => {
+    openMessageMenu(msg, 0, 0, "bottom");
+  }, 520);
+}
+
+function trackLongPressMove(e){
+  if(!longPressTimer || !longPressStart || !e.touches || !e.touches[0]) return;
+  const touch = e.touches[0];
+  const dx = Math.abs(touch.clientX - longPressStart.x);
+  const dy = Math.abs(touch.clientY - longPressStart.y);
+  if(dx > 10 || dy > 10){
+    cancelLongPress();
+  }
+}
+
+function cancelLongPress(){
+  if(longPressTimer){
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+  }
+  longPressStart = null;
+}
+
+function getCallRoomId(a, b){
+  const left = String(a || "");
+  const right = String(b || "");
+  return [left, right].sort().join("-");
+}
+
+function updateCallUiState(state){
+  if(!callOverlay || !callTitle || !callSub) return;
+  if(callStatusTimeout){
+    clearTimeout(callStatusTimeout);
+    callStatusTimeout = null;
+  }
+  callOverlay.classList.add("active");
+  callOverlay.setAttribute("aria-hidden", "false");
+  const label = activeCall && activeCall.type === "video" ? "Video call" : "Audio call";
+  callSub.textContent = label;
+  if(callTimer) callTimer.textContent = "00:00";
+  if(state === "ringing"){
+    callTitle.textContent = "Incoming call";
+    if(callAcceptBtn) callAcceptBtn.style.display = "inline-flex";
+    if(callDeclineBtn) callDeclineBtn.style.display = "inline-flex";
+    if(callEndBtn) callEndBtn.style.display = "none";
+    setCallMediaLabel("Incoming call");
+    if(remoteVideo) remoteVideo.style.opacity = "0";
+  }else if(state === "calling"){
+    callTitle.textContent = "Calling...";
+    if(callAcceptBtn) callAcceptBtn.style.display = "none";
+    if(callDeclineBtn) callDeclineBtn.style.display = "none";
+    if(callEndBtn) callEndBtn.style.display = "inline-flex";
+    setCallMediaLabel("Calling...");
+    if(remoteVideo) remoteVideo.style.opacity = "0";
+  }else if(state === "connecting"){
+    callTitle.textContent = "Connecting...";
+    if(callAcceptBtn) callAcceptBtn.style.display = "none";
+    if(callDeclineBtn) callDeclineBtn.style.display = "none";
+    if(callEndBtn) callEndBtn.style.display = "inline-flex";
+    setCallMediaLabel("Connecting...");
+    if(remoteVideo) remoteVideo.style.opacity = "0";
+  }else if(state === "connected"){
+    callTitle.textContent = "In call";
+    if(callAcceptBtn) callAcceptBtn.style.display = "none";
+    if(callDeclineBtn) callDeclineBtn.style.display = "none";
+    if(callEndBtn) callEndBtn.style.display = "inline-flex";
+    setCallMediaLabel("");
+    if(remoteVideo) remoteVideo.style.opacity = "1";
+  }else{
+    callTitle.textContent = "Call ended";
+    if(callAcceptBtn) callAcceptBtn.style.display = "none";
+    if(callDeclineBtn) callDeclineBtn.style.display = "none";
+    if(callEndBtn) callEndBtn.style.display = "none";
+    setCallMediaLabel("Call ended");
+    if(remoteVideo) remoteVideo.style.opacity = "0";
+  }
+  applyCallMediaMode();
+}
+
+function showCallStatus(message){
+  if(!callOverlay || !callTitle) return;
+  callOverlay.classList.add("active");
+  callOverlay.setAttribute("aria-hidden", "false");
+  callTitle.textContent = message || "Call ended";
+  setCallMediaLabel(message || "Call ended");
+  if(callAcceptBtn) callAcceptBtn.style.display = "none";
+  if(callDeclineBtn) callDeclineBtn.style.display = "none";
+  if(callEndBtn) callEndBtn.style.display = "none";
+  if(callStatusTimeout){
+    clearTimeout(callStatusTimeout);
+  }
+  callStatusTimeout = setTimeout(() => {
+    closeCallOverlay();
+  }, 1800);
+}
+
+function closeCallOverlay(){
+  if(!callOverlay) return;
+  if(callStatusTimeout){
+    clearTimeout(callStatusTimeout);
+    callStatusTimeout = null;
+  }
+  callOverlay.classList.remove("active");
+  callOverlay.setAttribute("aria-hidden", "true");
+}
+
+function applyCallMediaMode(){
+  const isVideo = activeCall && activeCall.type === "video";
+  if(remoteVideo) remoteVideo.style.display = isVideo ? "block" : "none";
+  if(localVideo) localVideo.style.display = isVideo ? "block" : "none";
+  if(remoteAudio) remoteAudio.style.display = isVideo ? "none" : "block";
+}
+
+function setCallMediaLabel(text){
+  if(!callMediaLabel) return;
+  callMediaLabel.textContent = text || "";
+  callMediaLabel.style.display = text ? "inline-flex" : "none";
+}
+
+async function updateCallProfile(userId){
+  if(!userId) return;
+  const profile = await getUserSummary(userId);
+  const name = profile?.name || "User";
+  if(callName) callName.textContent = name;
+  if(callAvatar) applyAvatar(callAvatar, profile?.photo || "", name);
+  if(callMedia){
+    const bg = profile?.photo ? `url("${profile.photo}")` : "";
+    callMedia.style.backgroundImage = bg;
+    callMedia.style.backgroundSize = bg ? "cover" : "";
+    callMedia.style.backgroundPosition = bg ? "center" : "";
+  }
+}
+
+function handleCallEnd(reason, statusMessage){
+  const endedCall = activeCall;
+  const wasConnected = endedCall && endedCall.connected;
+  resetCallState();
+  if(statusMessage){
+    showCallStatus(statusMessage);
+  }else{
+    closeCallOverlay();
+  }
+  if(endedCall && endedCall.isCaller && !wasConnected && (reason === "timeout" || reason === "decline" || reason === "busy")){
+    sendMissedCallMessage(endedCall);
+  }
+}
+
+async function ensureCallChannel(){
+  if(!supa || !myUid || !otherUid) return;
+  if(callChannel) return;
+  const room = getCallRoomId(myUid, otherUid);
+  callChannel = supa.channel("call-" + room, {
+    config:{ broadcast:{ self:false } }
+  });
+  callChannel.on("broadcast", { event:"signal" }, ({ payload }) => {
+    handleCallSignal(payload);
+  });
+  callChannel.subscribe();
+}
+
+function sendCallSignal(payload){
+  if(!callChannel || !payload) return;
+  try{
+    callChannel.send({ type:"broadcast", event:"signal", payload });
+  }catch(_){}
+}
+
+function resetCallState(){
+  if(callTimeout){
+    clearTimeout(callTimeout);
+    callTimeout = null;
+  }
+  if(callTimerId){
+    clearInterval(callTimerId);
+    callTimerId = null;
+  }
+  callStartedAt = null;
+  stopRingtone();
+  pendingIce = [];
+  activeCall = null;
+  if(rtcPeer){
+    try{ rtcPeer.close(); }catch(_){}
+    rtcPeer = null;
+  }
+  if(localStream){
+    localStream.getTracks().forEach(t => t.stop());
+    localStream = null;
+  }
+  if(remoteStream){
+    remoteStream.getTracks().forEach(t => t.stop());
+    remoteStream = null;
+  }
+  if(localVideo) localVideo.srcObject = null;
+  if(remoteVideo) remoteVideo.srcObject = null;
+  if(remoteAudio) remoteAudio.srcObject = null;
+  if(callMedia){
+    callMedia.style.backgroundImage = "";
+    callMedia.style.backgroundSize = "";
+    callMedia.style.backgroundPosition = "";
+  }
+  setCallMediaLabel("");
+}
+
+function formatCallDuration(ms){
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return String(mins).padStart(2, "0") + ":" + String(secs).padStart(2, "0");
+}
+
+function startCallTimer(){
+  if(callTimerId || !callTimer) return;
+  callStartedAt = Date.now();
+  callTimer.textContent = "00:00";
+  callTimerId = setInterval(() => {
+    if(!callStartedAt) return;
+    callTimer.textContent = formatCallDuration(Date.now() - callStartedAt);
+  }, 1000);
+}
+
+function startRingtone(){
+  stopRingtone();
+  try{
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if(!AudioCtx) return;
+    ringCtx = new AudioCtx();
+    ringGain = ringCtx.createGain();
+    ringGain.gain.value = 0.0001;
+    ringGain.connect(ringCtx.destination);
+    const oscA = ringCtx.createOscillator();
+    const oscB = ringCtx.createOscillator();
+    oscA.type = "sine";
+    oscB.type = "sine";
+    oscA.frequency.value = 440;
+    oscB.frequency.value = 480;
+    oscA.connect(ringGain);
+    oscB.connect(ringGain);
+    oscA.start();
+    oscB.start();
+    ringOsc = [oscA, oscB];
+    const ringCycle = () => {
+      if(!ringGain || !ringCtx) return;
+      const t = ringCtx.currentTime;
+      ringGain.gain.cancelScheduledValues(t);
+      ringGain.gain.setValueAtTime(0.0001, t);
+      ringGain.gain.linearRampToValueAtTime(0.2, t + 0.05);
+      ringGain.gain.setValueAtTime(0.2, t + 1.8);
+      ringGain.gain.linearRampToValueAtTime(0.0001, t + 2.0);
+    };
+    ringCycle();
+    ringInterval = setInterval(ringCycle, 4000);
+    if(ringCtx.state === "suspended"){
+      ringCtx.resume().catch(()=>{});
+    }
+  }catch(_){}
+}
+
+function stopRingtone(){
+  if(ringInterval){
+    clearInterval(ringInterval);
+    ringInterval = null;
+  }
+  if(ringOsc){
+    const oscList = Array.isArray(ringOsc) ? ringOsc : [ringOsc];
+    oscList.forEach(osc=>{
+      try{ osc.stop(); }catch(_){}
+      try{ osc.disconnect(); }catch(_){}
+    });
+    ringOsc = null;
+  }
+  if(ringGain){
+    try{ ringGain.disconnect(); }catch(_){}
+    ringGain = null;
+  }
+  if(ringCtx){
+    try{ ringCtx.close(); }catch(_){}
+    ringCtx = null;
+  }
+}
+
+async function sendMissedCallMessage(callInfo){
+  if(!callInfo || !supa || !myUid) return;
+  const time = new Date().toLocaleTimeString([], { hour:"numeric", minute:"2-digit" });
+  const prefix = callInfo.type === "video" ? "📹" : "📞";
+  const text = `${prefix} Missed ${callInfo.type === "video" ? "video call" : "call"} at ${time}`;
+  try{
+    await supa.from("chats").insert({
+      sender_id: myUid,
+      receiver_id: callInfo.with,
+      message: text,
+      media_url: null,
+      media_type: null,
+      created_at: new Date().toISOString()
+    });
+  }catch(_){}
+}
+
+async function setupLocalStream(kind){
+  if(localStream) return localStream;
+  const constraints = { audio:true, video: kind === "video" };
+  localStream = await navigator.mediaDevices.getUserMedia(constraints);
+  if(localVideo) localVideo.srcObject = localStream;
+  return localStream;
+}
+
+function setupPeerConnection(){
+  if(rtcPeer) return rtcPeer;
+  rtcPeer = new RTCPeerConnection({
+    iceServers:[{ urls:"stun:stun.l.google.com:19302" }]
+  });
+  rtcPeer.onicecandidate = (event) => {
+    if(event.candidate && activeCall){
+      sendCallSignal({
+        type:"ice",
+        callId: activeCall.id,
+        from: myUid,
+        to: activeCall.with,
+        candidate: event.candidate
+      });
+    }
+  };
+  rtcPeer.ontrack = (event) => {
+    const [stream] = event.streams || [];
+    if(stream){
+      remoteStream = stream;
+      if(activeCall && activeCall.type === "video"){
+        if(remoteVideo) remoteVideo.srcObject = stream;
+      }else{
+        if(remoteAudio) remoteAudio.srcObject = stream;
+      }
+      if(remoteVideo) remoteVideo.style.opacity = "1";
+      setCallMediaLabel("");
+    }
+  };
+  rtcPeer.onconnectionstatechange = () => {
+    if(!rtcPeer || !activeCall) return;
+    if(["disconnected","failed","closed"].includes(rtcPeer.connectionState)){
+      endCall(false);
+    }
+  };
+  if(localStream){
+    localStream.getTracks().forEach(track => rtcPeer.addTrack(track, localStream));
+  }
+  return rtcPeer;
+}
+
+async function startCall(kind){
+  if(!otherUid || !myUid) return;
+  if(activeCall) return;
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    alert("Calling is not supported on this device.");
+    return;
+  }
+  await ensureCallChannel();
+  const callId = "call-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+  activeCall = { id: callId, type: kind, with: otherUid, isCaller:true, state:"calling", connected:false };
+  updateCallProfile(otherUid);
+  updateCallUiState("calling");
+  try{
+    await setupLocalStream(kind);
+    setupPeerConnection();
+    const offer = await rtcPeer.createOffer();
+    await rtcPeer.setLocalDescription(offer);
+    sendCallSignal({
+      type:"call-offer",
+      callId,
+      from: myUid,
+      to: otherUid,
+      mediaType: kind,
+      sdp: rtcPeer.localDescription
+    });
+    callTimeout = setTimeout(() => {
+      endCall(true, "timeout");
+    }, 20000);
+  }catch(err){
+    alert(err.message || "Unable to start call.");
+    endCall(false, "failed");
+  }
+}
+
+async function acceptCall(){
+  if(!activeCall || !activeCall.offer) return;
+  updateCallUiState("connecting");
+  try{
+    await setupLocalStream(activeCall.type);
+    setupPeerConnection();
+    await rtcPeer.setRemoteDescription(new RTCSessionDescription(activeCall.offer));
+    const answer = await rtcPeer.createAnswer();
+    await rtcPeer.setLocalDescription(answer);
+    sendCallSignal({
+      type:"call-answer",
+      callId: activeCall.id,
+      from: myUid,
+      to: activeCall.with,
+      sdp: rtcPeer.localDescription
+    });
+    if(callTimeout){
+      clearTimeout(callTimeout);
+      callTimeout = null;
+    }
+    pendingIce.forEach(c => {
+      try{ rtcPeer.addIceCandidate(new RTCIceCandidate(c)); }catch(_){}
+    });
+    pendingIce = [];
+    activeCall.state = "connected";
+    activeCall.connected = true;
+    stopRingtone();
+    startCallTimer();
+    updateCallUiState("connected");
+  }catch(err){
+    alert(err.message || "Unable to answer call.");
+    endCall(true, "failed");
+  }
+}
+
+function declineCall(sendSignalOut){
+  if(!activeCall) return;
+  if(sendSignalOut){
+    sendCallSignal({
+      type:"call-decline",
+      callId: activeCall.id,
+      from: myUid,
+      to: activeCall.with
+    });
+  }
+  handleCallEnd("decline", "Call not answered");
+}
+
+function endCall(sendSignalOut, reason){
+  if(sendSignalOut && activeCall){
+    sendCallSignal({
+      type:"call-end",
+      callId: activeCall.id,
+      from: myUid,
+      to: activeCall.with,
+      reason: reason || "ended"
+    });
+  }
+  if(reason === "timeout"){
+    handleCallEnd("timeout", "User is not answering");
+  }else{
+    handleCallEnd(reason || "ended");
+  }
+}
+
+function handleCallSignal(payload){
+  if(!payload || payload.to !== myUid) return;
+  if(payload.type === "call-offer"){
+    if(activeCall){
+      sendCallSignal({
+        type:"call-busy",
+        callId: payload.callId,
+        from: myUid,
+        to: payload.from
+      });
+      return;
+    }
+    activeCall = {
+      id: payload.callId,
+      type: payload.mediaType || "audio",
+      with: payload.from,
+      isCaller:false,
+      state:"ringing",
+      offer: payload.sdp,
+      connected:false
+    };
+    updateCallProfile(payload.from);
+    updateCallUiState("ringing");
+    startRingtone();
+    return;
+  }
+  if(!activeCall || payload.callId !== activeCall.id) return;
+  if(payload.type === "call-answer"){
+    if(activeCall.isCaller && payload.sdp){
+      rtcPeer.setRemoteDescription(new RTCSessionDescription(payload.sdp))
+        .then(() => {
+          if(callTimeout){
+            clearTimeout(callTimeout);
+            callTimeout = null;
+          }
+          pendingIce.forEach(c => {
+            try{ rtcPeer.addIceCandidate(new RTCIceCandidate(c)); }catch(_){}
+          });
+          pendingIce = [];
+          activeCall.state = "connected";
+          activeCall.connected = true;
+          startCallTimer();
+          updateCallUiState("connected");
+        })
+        .catch(() => {
+          endCall(true, "failed");
+        });
+    }
+    return;
+  }
+  if(payload.type === "ice"){
+    if(payload.candidate){
+      if(rtcPeer && rtcPeer.remoteDescription){
+        try{ rtcPeer.addIceCandidate(new RTCIceCandidate(payload.candidate)); }catch(_){}
+      }else{
+        pendingIce.push(payload.candidate);
+      }
+    }
+    return;
+  }
+  if(payload.type === "call-decline"){
+    handleCallEnd("decline", "Call not answered");
+    return;
+  }
+  if(payload.type === "call-busy"){
+    handleCallEnd("busy", "User is busy on another call");
+    return;
+  }
+  if(payload.type === "call-end"){
+    const reason = payload.reason || "ended";
+    if(reason === "timeout"){
+      const status = activeCall && activeCall.isCaller ? "User is not answering" : "Call not answered";
+      handleCallEnd("timeout", status);
+    }else{
+      handleCallEnd(reason, "Call ended");
+    }
+  }
+}
+
+/* ======================
+   SEND MESSAGE
+====================== */
+async function sendMsg(){
+  const text = msgInput.value.trim();
+  if(!text && !pendingMedia) return;
+  if(!otherUid) return;
+
+  const mediaFile = pendingMedia;
+  const mediaKind = pendingMediaKind || (mediaFile ? getMediaKindForFile(mediaFile) : null);
+  const clientCreatedAt = new Date().toISOString();
+  const tempId = `tmp-${clientCreatedAt}-${Math.random().toString(36).slice(2,8)}`;
+  const localPreviewUrl = mediaFile ? URL.createObjectURL(mediaFile) : null;
+
+  const optimisticMessage = {
+    sender_id: myUid,
+    receiver_id: otherUid,
+    message: text || null,
+    media_url: localPreviewUrl,
+    media_type: mediaFile ? mediaKind : null,
+    created_at: clientCreatedAt
+  };
+
+  const tempSig = makeSignature(optimisticMessage);
+  const pendingEl = renderMsg(optimisticMessage, {
+    pending:true,
+    tempId,
+    localMediaUrl: localPreviewUrl,
+    signature: tempSig,
+    fileName: pendingMediaName,
+    fileSize: pendingMediaSize
+  });
+
+  scrollToBottom(true);
+  msgInput.value = "";
+  clearPendingMedia();
+
+  let mediaUrl = null;
+  let mediaType = null;
+
+  try{
+    if(mediaFile){
+      if(!window.NOVA || typeof window.NOVA.uploadToBucket !== "function" || typeof window.NOVA.makePath !== "function"){
+        throw new Error("Upload helper not available");
+      }
+      const path = window.NOVA.makePath(myUid, mediaFile);
+      mediaUrl = await window.NOVA.uploadToBucket("chat_media", mediaFile, path);
+      mediaType = mediaKind || "document";
+    }
+  }catch(err){
+    markPendingFailed(pendingEl, err);
+    alert(err.message || "Failed to upload media");
+    return;
+  }
+
+  const newMessage = {
+    sender_id: myUid,
+    receiver_id: otherUid,
+    message: text || null,
+    media_url: mediaUrl,
+    media_type: mediaType,
+    created_at: clientCreatedAt
+  };
+
+  const sig = makeSignature(newMessage);
+  setPendingSignature(pendingEl, sig);
+
+  const { data, error } = await supa
+    .from("chats")
+    .insert(newMessage)
+    .select(selectCols)
+    .single();
+
+  if(error || !data){
+    markPendingFailed(pendingEl, error);
+    alert(error?.message || "Message failed");
+    return;
+  }
+
+  finalizeOptimisticMessage(pendingEl, data);
+  scrollToBottom(true);
+}
+
+msgInput.addEventListener("keypress",e=>{
+  if(e.key==="Enter") sendMsg();
+});
+
+function pickMedia(){
+  if(mediaInput) mediaInput.click();
+}
+
+function clearPendingMedia(){
+  pendingMedia = null;
+  pendingMediaKind = null;
+  pendingMediaName = "";
+  pendingMediaSize = "";
+  if(previewUrl){
+    URL.revokeObjectURL(previewUrl);
+    previewUrl = null;
+  }
+  if(mediaThumb) mediaThumb.innerHTML = "";
+  if(mediaMeta) mediaMeta.textContent = "";
+  if(mediaPreview) mediaPreview.classList.remove("active");
+  if(mediaInput) mediaInput.value = "";
+}
+
+mediaInput.addEventListener("change", ()=>{
+  const file = mediaInput.files && mediaInput.files[0] ? mediaInput.files[0] : null;
+  if(!file) return;
+  const kind = getMediaKindForFile(file);
+  if(kind === "unknown"){
+    alert("Unsupported file type");
+    clearPendingMedia();
+    return;
+  }
+  const limits = { image:20, video:80, document:30 };
+  const maxBytes = (limits[kind] || 20) * 1024 * 1024;
+  if(file.size > maxBytes){
+    alert("File too large");
+    clearPendingMedia();
+    return;
+  }
+
+  pendingMedia = file;
+  pendingMediaKind = kind;
+  pendingMediaName = file.name || "File";
+  pendingMediaSize = formatSize(file.size);
+  if(previewUrl){
+    URL.revokeObjectURL(previewUrl);
+    previewUrl = null;
+  }
+  if(mediaThumb) mediaThumb.innerHTML = "";
+  previewUrl = URL.createObjectURL(file);
+  if(kind === "image"){
+    const img = document.createElement("img");
+    img.src = previewUrl;
+    mediaThumb.appendChild(img);
+  }else if(kind === "video"){
+    const video = document.createElement("video");
+    video.src = previewUrl;
+    video.muted = true;
+    video.playsInline = true;
+    video.loop = true;
+    video.autoplay = true;
+    mediaThumb.appendChild(video);
+  }else{
+    const card = renderDocCard(previewUrl, pendingMediaName, pendingMediaSize);
+    mediaThumb.appendChild(card);
+  }
+  if(mediaMeta) mediaMeta.textContent = `${pendingMediaName} • ${pendingMediaSize || ""}`;
+  if(mediaPreview) mediaPreview.classList.add("active");
+});
+
+removeMediaBtn.addEventListener("click", clearPendingMedia);
+
+if(replyClose){
+  replyClose.addEventListener("click", clearReplyContext);
+}
+
+if(contextBackdrop){
+  contextBackdrop.addEventListener("click", closeMessageMenu);
+}
+
+if(msgContextMenu){
+  msgContextMenu.addEventListener("click", (e)=>{
+    const item = e.target.closest(".ctx-item");
+    if(!item) return;
+    handleContextAction(item.dataset.action);
+    closeMessageMenu();
+  });
+}
+
+if(deleteBackdrop){
+  deleteBackdrop.addEventListener("click", closeDeleteSheet);
+}
+
+if(deleteForMeBtn){
+  deleteForMeBtn.addEventListener("click", ()=>{
+    if(deleteTarget) deleteMessageForMe(deleteTarget);
+    closeDeleteSheet();
+  });
+}
+
+if(deleteForEveryoneBtn){
+  deleteForEveryoneBtn.addEventListener("click", async ()=>{
+    if(deleteTarget) await deleteMessageForEveryone(deleteTarget);
+    closeDeleteSheet();
+  });
+}
+
+if(chatBox){
+  chatBox.addEventListener("contextmenu", (e)=>{
+    const msg = e.target.closest(".msg");
+    if(!msg) return;
+    e.preventDefault();
+    openMessageMenu(msg, e.clientX, e.clientY, "floating");
+  });
+  chatBox.addEventListener("touchstart", startLongPress, { passive:true });
+  chatBox.addEventListener("touchmove", trackLongPressMove, { passive:true });
+  chatBox.addEventListener("touchend", cancelLongPress);
+  chatBox.addEventListener("touchcancel", cancelLongPress);
+  chatBox.addEventListener("scroll", closeMessageMenu);
+}
+
+document.addEventListener("keydown", (e)=>{
+  if(e.key === "Escape"){
+    closeMessageMenu();
+    closeDeleteSheet();
+  }
+});
+
+if(audioCallBtn){
+  audioCallBtn.addEventListener("click", ()=> startCall("audio"));
+}
+
+if(videoCallBtn){
+  videoCallBtn.addEventListener("click", ()=> startCall("video"));
+}
+
+if(chatMoreBtn){
+  chatMoreBtn.addEventListener("click", (e)=> e.stopPropagation());
+}
+
+if(callAcceptBtn){
+  callAcceptBtn.addEventListener("click", acceptCall);
+}
+
+if(callDeclineBtn){
+  callDeclineBtn.addEventListener("click", ()=> declineCall(true));
+}
+
+if(callEndBtn){
+  callEndBtn.addEventListener("click", ()=> endCall(true));
+}
+
+if(chatMenuBtn){
+  chatMenuBtn.addEventListener("click", (e)=>{
+    e.stopPropagation();
+    if(chatMenu) chatMenu.classList.toggle("active");
+  });
+}
+
+if(deleteChatBtn){
+  deleteChatBtn.addEventListener("click", (e)=>{
+    e.stopPropagation();
+    if(chatMenu) chatMenu.classList.remove("active");
+    if(otherUid) deleteChat(otherUid);
+  });
+}
+
+document.addEventListener("click", ()=>{
+  if(chatMenu) chatMenu.classList.remove("active");
+});
+
+toggleContacts.addEventListener("click", ()=>{
+  if(!contactsPanel) return;
+  const isActive = contactsPanel.classList.contains("active");
+  const nextState = !isActive;
+  setContactsVisible(nextState);
+  if(!otherUid){
+    setChatListVisible(!nextState);
+  }
+});
+
+if(syncContactsBtn){
+  syncContactsBtn.textContent = hasContactPicker() ? "Sync contacts" : "Import numbers";
+  syncContactsBtn.addEventListener("click", syncContacts);
+}
+
+if(manualContactsBtn){
+  manualContactsBtn.addEventListener("click", addContactsManually);
+}
+
+contactSearch.addEventListener("input", ()=>{
+  const q = contactSearch.value.trim().toLowerCase();
+  const filtered = allContacts.filter(c =>
+    (c.name || "").toLowerCase().includes(q) ||
+    (c.username || "").toLowerCase().includes(q) ||
+    (c.phone || "").toLowerCase().includes(q)
+  );
+  renderContacts(filtered);
+});
+
+if(chatSearch){
+  chatSearch.addEventListener("input", ()=>{
+    const q = chatSearch.value.trim().toLowerCase();
+    const filtered = allChats.filter(c =>
+      (c.name || "").toLowerCase().includes(q) ||
+      (c.username || "").toLowerCase().includes(q)
+    );
+    renderChatList(filtered);
+  });
+}
+
+async function loadContacts(){
+  const deviceContacts = getSimulatedContacts();
+  const normalizedContacts = (deviceContacts || [])
+    .map(coerceContact)
+    .filter(Boolean);
+
+  const phoneMap = new Map();
+  const numbers = [];
+  normalizedContacts.forEach(c => {
+    const phone = normalizePhoneNumber(c.phone_number);
+    if(!phone) return;
+    if(!phoneMap.has(phone)){
+      numbers.push(phone);
+    }
+    phoneMap.set(phone, c.name || phone);
+  });
+
+  if(!numbers.length){
+    allContacts = [];
+    allowedChatIds = new Set();
+    renderContacts(allContacts);
+    setContactsHint(hasContactPicker() ? "Sync contacts to find friends on NOVAGAPPS." : "Add phone numbers to find friends on NOVAGAPPS.");
+    return;
+  }
+
+  const { data, error } = await supa
+    .from("users")
+    .select("user_id,username,full_name,photo,phone_number")
+    .in("phone_number", numbers)
+    .neq("user_id", myUid)
+    .order("username", { ascending:true })
+    .limit(300);
+
+  if(error){
+    console.error("loadContacts error", error);
+    allContacts = [];
+    allowedChatIds = new Set();
+    renderContacts(allContacts);
+    setContactsHint("Unable to load contacts right now.");
+    return;
+  }
+
+  allContacts = (data || [])
+    .filter(u => u.user_id !== myUid)
+    .map(u => {
+      const normalizedPhone = normalizePhoneNumber(u.phone_number);
+      const contactName = phoneMap.get(normalizedPhone);
+      return {
+        id: u.user_id,
+        username: u.username || "",
+        name: contactName || u.full_name || u.username || "User",
+        phone: u.phone_number || "",
+        photo: u.photo || ""
+      };
+    })
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+  allowedChatIds = new Set(allContacts.map(c => c.id));
+  renderContacts(allContacts);
+  if(!allContacts.length){
+    setContactsHint("No contacts on NOVAGAPPS yet.");
+  }else{
+    setContactsHint(`Showing ${allContacts.length} contacts on NOVAGAPPS.`);
+  }
+}
+
+async function loadChatList(){
+  if(!myUid) return;
+  const { data, error } = await supa
+    .from("chats")
+    .select(selectCols)
+    .or(`sender_id.eq.${myUid},receiver_id.eq.${myUid}`)
+    .order("created_at", { ascending:false })
+    .limit(400);
+
+  if(error){
+    console.error("loadChatList error", error);
+    allChats = [];
+    renderChatList(allChats);
+    return;
+  }
+
+  const convoMap = new Map();
+  const hiddenIds = new Set();
+  (data || []).forEach(m => {
+    if(isReadEventMessage(m)) return;
+    const otherId = m.sender_id === myUid ? m.receiver_id : m.sender_id;
+    if(!otherId) return;
+    if(hiddenIds.has(otherId) || convoMap.has(otherId)) return;
+    const deletedAt = getDeletedAt(otherId);
+    if(deletedAt && new Date(m.created_at) <= new Date(deletedAt)){
+      hiddenIds.add(otherId);
+      return;
+    }
+    if(!convoMap.has(otherId)){
+      convoMap.set(otherId, m);
+    }
+  });
+
+  const ids = Array.from(convoMap.keys());
+  if(!ids.length){
+    allChats = [];
+    renderChatList(allChats);
+    return;
+  }
+
+  const { data: users, error: userError } = await supa
+    .from("users")
+    .select("user_id,username,full_name,photo")
+    .in("user_id", ids)
+    .limit(400);
+
+  if(userError){
+    console.error("loadChatList users error", userError);
+  }
+
+  const userMap = new Map();
+  (users || []).forEach(u => {
+    userMap.set(u.user_id, u);
+    userCache.set(u.user_id, {
+      name: u.full_name || u.username || "User",
+      photo: u.photo || "",
+      username: u.username || ""
+    });
+  });
+
+  allChats = ids.map(id => {
+    const m = convoMap.get(id);
+    const u = userMap.get(id) || {};
+    return {
+      id,
+      name: u.full_name || u.username || "User",
+      username: u.username || "",
+      photo: u.photo || "",
+      lastMessage: getMessagePreview(m),
+      created_at: m.created_at
+    };
+  }).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  renderChatList(allChats);
+}
+
+function renderContacts(list){
+  contactsList.innerHTML = "";
+  if(!list.length){
+    contactsList.innerHTML = "<div style='padding:10px;color:#777;font-size:12px'>No contacts found.</div>";
+    return;
+  }
+  list.forEach(c => {
+    const row = document.createElement("div");
+    row.className = "contact-item";
+    const img = document.createElement("img");
+    img.alt = "";
+    applyAvatar(img, c.photo, c.name || c.username || "User");
+    const info = document.createElement("div");
+    const name = document.createElement("div");
+    name.className = "contact-name";
+    name.textContent = c.name || "User";
+    const username = document.createElement("div");
+    username.className = "contact-username";
+    username.textContent = c.username || c.phone || "";
+    info.appendChild(name);
+    info.appendChild(username);
+    row.appendChild(img);
+    row.appendChild(info);
+    row.onclick = () => {
+      location.href = "chat.html?uid=" + encodeURIComponent(c.id);
+    };
+    contactsList.appendChild(row);
+  });
+}
+
+function renderChatList(list){
+  if(!chatList) return;
+  chatList.innerHTML = "";
+  if(!list.length){
+    chatList.innerHTML = "<div style='padding:10px;color:#777;font-size:12px'>No chats yet.</div>";
+    return;
+  }
+  list.forEach(c => {
+    const row = document.createElement("div");
+    row.className = "chat-item";
+    const img = document.createElement("img");
+    img.alt = "";
+    applyAvatar(img, c.photo, c.name || c.username || "User");
+    const info = document.createElement("div");
+    info.className = "chat-info";
+    const name = document.createElement("div");
+    name.className = "chat-name";
+    name.textContent = c.name || "User";
+    const last = document.createElement("div");
+    last.className = "chat-last";
+    last.textContent = c.lastMessage || "Message";
+    info.appendChild(name);
+    info.appendChild(last);
+    const time = document.createElement("div");
+    time.className = "chat-time";
+    time.textContent = c.created_at ? formatTime(c.created_at) : "";
+    const delBtn = document.createElement("button");
+    delBtn.className = "chat-delete";
+    delBtn.textContent = "Delete";
+    delBtn.onclick = (e) => {
+      e.stopPropagation();
+      deleteChat(c.id);
+    };
+    row.appendChild(img);
+    row.appendChild(info);
+    row.appendChild(time);
+    row.appendChild(delBtn);
+    row.onclick = () => {
+      location.href = "chat.html?uid=" + encodeURIComponent(c.id);
+    };
+    chatList.appendChild(row);
+  });
+}
+</script>
+
+</body>
+</html>

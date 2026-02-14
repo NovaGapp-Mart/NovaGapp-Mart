@@ -1,0 +1,837 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Fluence-The virtual E cart-Home</title>
+
+  <link rel="stylesheet" href="style.css">
+  <script src="global.js"></script>
+
+  <!-- âœ… SUPABASE SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+  <script>
+    window.supa = window.supa || supabase.createClient(
+      window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+      window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+    );
+  </script>
+
+  <style>
+    html, body {
+      height:auto;
+      overflow-y:auto!important;
+      margin:0;
+      padding-bottom:160px;
+      background:#f5f5f5;
+      font-family:sans-serif
+    }
+    .products{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:10px;
+      padding:10px
+    }
+    .product{
+      border:1px solid #ddd;
+      border-radius:12px;
+      overflow:hidden;
+      background:#fff;
+      display:flex;
+      flex-direction:column;
+      position:relative
+    }
+    .discount-badge{
+      position:absolute;
+      top:8px;
+      left:8px;
+      background:#1aa34a;
+      color:#fff;
+      font-size:12px;
+      font-weight:bold;
+      padding:4px 6px;
+      border-radius:6px
+    }
+    .seller-badge{
+      position:absolute;
+      top:8px;
+      right:8px;
+      background:linear-gradient(135deg,#f7d774,#d6a21f);
+      color:#4a3300;
+      font-size:11px;
+      font-weight:bold;
+      padding:4px 6px;
+      border-radius:6px;
+      box-shadow:0 2px 6px rgba(0,0,0,.18)
+    }
+    .product img{
+      width:100%;
+      height:160px;
+      object-fit:cover
+    }
+    .product-info{padding:10px}
+    .name{
+      font-weight:bold;
+      font-size:14px;
+      color:#333;
+      height:35px;
+      overflow:hidden
+    }
+    .seller-name{
+      font-size:12px;
+      color:#666;
+      margin-top:4px
+    }
+    .price b{color:#ff6a00;font-size:16px}
+    .low-stock{
+      font-size:12px;color:#d14;margin-top:6px;font-weight:bold
+    }
+    .out-stock{
+      font-size:12px;
+      color:#666;
+      margin-top:6px;
+      font-weight:bold;
+      display:inline-block;
+      background:#efefef;
+      padding:4px 9px;
+      border-radius:999px
+    }
+    .price del{font-size:12px;color:#888;margin-right:5px}
+    .add-btn{
+      width:90%;
+      margin:5px auto 10px;
+      background:#ff6a00;
+      color:#fff;
+      border:none;
+      padding:12px;
+      border-radius:8px;
+      font-weight:bold
+    }
+    .add-btn:disabled{
+      background:#b7b7b7;
+      color:#f7f7f7;
+      cursor:not-allowed
+    }
+    .upgrade-box{
+      position:fixed;
+      bottom:70px;
+      left:50%;
+      transform:translateX(-50%);
+      z-index:999;
+      background:#fff;
+      padding:14px 20px;
+      border-radius:40px;
+      box-shadow:0 10px 25px rgba(0,0,0,.15)
+    }
+    .upgrade-box button{
+      background:#ff6a00;
+      color:#fff;
+      border:none;
+      padding:14px 26px;
+      border-radius:30px;
+      font-weight:bold;
+      font-size:15px
+    }
+    .search-box{
+      display:flex;
+      align-items:center;
+      gap:8px
+    }
+    .search-btn{
+      border:none;
+      background:#ff6a00;
+      color:#fff;
+      padding:8px 10px;
+      border-radius:8px;
+      cursor:pointer;
+      font-size:14px;
+      width:36px;
+      height:36px;
+      display:flex;
+      align-items:center;
+      justify-content:center
+    }
+    .banner{
+      cursor:pointer
+    }
+    .notif-bar{
+      display:flex;align-items:center;gap:6px;
+      margin-left:auto;cursor:pointer;position:relative;
+      font-size:13px;color:#fff
+    }
+    .notif-bar .bell{font-size:16px}
+    .notif-count{
+      min-width:18px;
+      height:18px;
+      border-radius:10px;
+      padding:0 6px;
+      background:#ff3b3b;
+      color:#fff;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      font-size:11px;
+      font-weight:bold
+    }
+    .contest-poster-overlay{
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,.68);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      z-index:3000;
+      padding:16px
+    }
+    .contest-poster-overlay.active{
+      display:flex
+    }
+    .contest-poster-card{
+      width:min(92vw, 420px);
+      background:#fff;
+      border-radius:14px;
+      padding:14px;
+      position:relative;
+      box-shadow:0 16px 32px rgba(0,0,0,.28)
+    }
+    .contest-poster-close{
+      position:absolute;
+      top:10px;
+      right:10px;
+      width:30px;
+      height:30px;
+      border:none;
+      border-radius:50%;
+      background:#111;
+      color:#fff;
+      font-size:18px;
+      cursor:pointer
+    }
+    .contest-poster-image{
+      width:100%;
+      aspect-ratio:1 / 1;
+      object-fit:cover;
+      border-radius:12px;
+      background:#f2f2f2;
+      display:block
+    }
+    .contest-poster-dots{
+      margin-top:10px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px
+    }
+    .contest-poster-dot{
+      width:8px;
+      height:8px;
+      border-radius:50%;
+      background:#d4d4d4;
+      border:none;
+      padding:0;
+      cursor:pointer
+    }
+    .contest-poster-dot.active{
+      background:#ff6a00
+    }
+    .contest-poster-vote{
+      margin-top:12px;
+      width:100%;
+      border:none;
+      border-radius:10px;
+      padding:12px;
+      background:#ff6a00;
+      color:#fff;
+      font-weight:bold;
+      font-size:15px;
+      cursor:pointer
+    }
+  </style>
+</head>
+
+<body>
+
+<header class="top">
+  <img src="images/logo.png" class="logo">
+  <span class="company-name">NovaGapp Mart</span>
+  <div class="notif-bar" id="notifBar" onclick="location.href='notifications.html'">
+    <span class="bell">&#128276;</span>
+    <span>Notifications</span>
+    <span class="notif-count" id="homeNotifCount">0</span>
+  </div>
+</header>
+
+<div class="search-box">
+  <input type="text" id="searchInput" placeholder="Search products...">
+  <button class="search-btn" id="searchBtn">&#128269;</button>
+</div>
+
+<div class="banner">
+  <div class="banner-text">
+    <h2 id="bannerTitle"></h2>
+    <p id="bannerSub"></p>
+  </div>
+  <img src="images/main.jpg" class="banner-img">
+</div>
+
+<h3 class="section-title" id="recommendTitle" style="padding:15px 0 0 15px;"></h3>
+<div class="products" id="products"></div>
+
+<div class="upgrade-box">
+  <button onclick="location.href='subscription.html'">Upgrade &#128640;</button>
+</div>
+
+<div class="contest-poster-overlay" id="contestPosterOverlay" aria-hidden="true">
+  <div class="contest-poster-card">
+    <button type="button" class="contest-poster-close" id="contestPosterClose" aria-label="Close">×</button>
+    <img class="contest-poster-image" id="contestPosterImage" src="Images/rolls-royce.png" alt="Contest Poster">
+    <div class="contest-poster-dots" id="contestPosterDots"></div>
+    <button type="button" class="contest-poster-vote" id="contestPosterVoteBtn">Vote Now</button>
+  </div>
+</div>
+
+<div class="bottom-nav">
+  <div class="nav-item active" onclick="go('index.html')">
+    <img src="https://img.icons8.com/ios-filled/24/ff6a00/home.png"/>
+    <span>Home</span>
+  </div>
+  <div class="nav-item" onclick="go('categories.html')">
+    <img src="https://img.icons8.com/ios-filled/24/000000/grid.png"/>
+    <span>Categories</span>
+  </div>
+  <div class="nav-item" onclick="go('reel.html')">
+    <img src="https://img.icons8.com/ios-filled/24/000000/circled-play.png"/>
+    <span>Reels</span>
+  </div>
+  <div class="nav-item" onclick="go('account.html')">
+    <img src="https://img.icons8.com/ios-filled/24/000000/user.png"/>
+    <span>Account</span>
+  </div>
+  <div class="nav-item" onclick="go('cart.html')">
+    <img src="https://img.icons8.com/ios-filled/24/000000/shopping-cart.png"/>
+    <span>Cart</span>
+  </div>
+</div>
+
+<script>
+/* ? SUPABASE CLIENT */
+const supa = window.supa;
+const CONTEST_POSTER_IMAGES = [
+  "Images/rolls-royce.png",
+  "Images/bmw.jpg",
+  "Images/many.jpg",
+  "Images/main.jpg"
+];
+let contestPosterIndex = 0;
+
+/* UI TEXT (safe) */
+if (window.t) {
+  bannerTitle.innerText = t("banner");
+  bannerSub.innerText = t("bannerSub");
+  recommendTitle.innerText = t("rec");
+}
+
+/* NAV */
+function go(p){ location.href = p }
+
+function renderContestPoster(){
+  const overlay = document.getElementById("contestPosterOverlay");
+  const image = document.getElementById("contestPosterImage");
+  const dotsWrap = document.getElementById("contestPosterDots");
+  if(!overlay || !image || !dotsWrap) return;
+  if(!Array.isArray(CONTEST_POSTER_IMAGES) || !CONTEST_POSTER_IMAGES.length) return;
+
+  const safeIndex = ((contestPosterIndex % CONTEST_POSTER_IMAGES.length) + CONTEST_POSTER_IMAGES.length) % CONTEST_POSTER_IMAGES.length;
+  contestPosterIndex = safeIndex;
+  image.src = CONTEST_POSTER_IMAGES[safeIndex];
+
+  dotsWrap.innerHTML = "";
+  CONTEST_POSTER_IMAGES.forEach((_, idx) => {
+    const dot = document.createElement("button");
+    dot.type = "button";
+    dot.className = "contest-poster-dot" + (idx === safeIndex ? " active" : "");
+    dot.setAttribute("aria-label", "Poster " + (idx + 1));
+    dot.addEventListener("click", () => {
+      contestPosterIndex = idx;
+      renderContestPoster();
+    });
+    dotsWrap.appendChild(dot);
+  });
+}
+
+function openContestPosterPopup(){
+  const overlay = document.getElementById("contestPosterOverlay");
+  if(!overlay) return;
+  if(!Array.isArray(CONTEST_POSTER_IMAGES) || !CONTEST_POSTER_IMAGES.length) return;
+  contestPosterIndex = 0;
+  renderContestPoster();
+  overlay.classList.add("active");
+  overlay.setAttribute("aria-hidden", "false");
+}
+
+function closeContestPosterPopup(){
+  const overlay = document.getElementById("contestPosterOverlay");
+  if(!overlay) return;
+  overlay.classList.remove("active");
+  overlay.setAttribute("aria-hidden", "true");
+}
+
+function advanceContestPoster(){
+  if(!Array.isArray(CONTEST_POSTER_IMAGES) || !CONTEST_POSTER_IMAGES.length){
+    closeContestPosterPopup();
+    return;
+  }
+  if(contestPosterIndex < CONTEST_POSTER_IMAGES.length - 1){
+    contestPosterIndex += 1;
+    renderContestPoster();
+    return;
+  }
+  closeContestPosterPopup();
+}
+
+function initContestPosterPopup(){
+  const overlay = document.getElementById("contestPosterOverlay");
+  const closeBtn = document.getElementById("contestPosterClose");
+  const voteBtn = document.getElementById("contestPosterVoteBtn");
+  if(!overlay || !closeBtn || !voteBtn) return;
+
+  closeBtn.addEventListener("click", advanceContestPoster);
+  overlay.addEventListener("click", (e) => {
+    if(e.target === overlay){
+      advanceContestPoster();
+    }
+  });
+  voteBtn.addEventListener("click", () => {
+    location.href = "contest.html";
+  });
+  openContestPosterPopup();
+}
+
+/* ?? REAL E-COMMERCE PRODUCT LOADER */
+async function renderProducts(searchText = ""){
+  const box = document.getElementById("products");
+
+  // show loading ONLY while query runs
+  box.innerHTML = "<p style='padding:20px'>Loading products...</p>";
+
+  let query = supa
+    .from("products")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  // ?? SEARCH (Flipkart / Amazon style)
+  if (searchText.trim() !== "") {
+    const q = searchText.trim();
+    query = query.or(`name.ilike.%${q}%,keywords.ilike.%${q}%`);
+  }
+
+  const { data, error } = await query;
+
+  // query finished ? clear loading
+  box.innerHTML = "";
+
+  if (error) {
+    console.error(error);
+    box.innerHTML = "<p style='padding:20px'>Something went wrong</p>";
+    return;
+  }
+
+  // ? NO PRODUCTS CASE
+  if (!data || data.length === 0) {
+    box.innerHTML = "<p style='padding:20px'>No products found</p>";
+    return;
+  }
+
+  const sellerMap = await getSellerBadgeMap(data);
+  const sellerNameMap = await getSellerNameMap(data);
+
+  // ? SHOW PRODUCTS
+  data.forEach(p => {
+
+    // safe JSON image handling
+    let image = "images/no-image.png";
+    if (Array.isArray(p.images) && p.images.length > 0) {
+      image = p.images[0];
+    } else if (typeof p.images === "string") {
+      image = p.images;
+    }
+
+    let discount = "";
+    if (p.mrp && p.mrp > p.price) {
+      discount = Math.round(((p.mrp - p.price) / p.mrp) * 100);
+    }
+
+    const card = document.createElement("div");
+    card.className = "product";
+
+    const showSellerBadge = sellerMap[p.owner_id] === true;
+    const sellerName =
+      sellerNameMap[p.owner_id] ||
+      "Seller";
+
+    const rawQty = p.quantity;
+    const parsedQty = (rawQty === null || rawQty === undefined || rawQty === "")
+      ? NaN
+      : Number(rawQty);
+    const hasQty = Number.isFinite(parsedQty);
+    const remainingQty = hasQty ? Math.max(0, parsedQty) : 9999;
+    const isOutOfStock = hasQty && remainingQty <= 0;
+    const stockHtml = isOutOfStock
+      ? `<div class="out-stock">Out of stock</div>`
+      : (hasQty && remainingQty < 1000
+        ? `<div class="low-stock">Only ${remainingQty} left</div>`
+        : "");
+
+    card.dataset.id = p.id || "";
+    card.dataset.name = p.name || "";
+    card.dataset.price = p.price || 0;
+    card.dataset.currency = p.currency || "USD";
+    card.dataset.image = image || "";
+    card.dataset.ownerId = p.owner_id || "";
+    card.dataset.ownerName = sellerName || "";
+    card.dataset.quantity = hasQty ? String(remainingQty) : "";
+
+    card.innerHTML = `
+      ${discount ? `<div class="discount-badge">${discount}% OFF</div>` : ""}
+      ${showSellerBadge ? `<div class="seller-badge">? Seller</div>` : ""}
+      <img src="${image}">
+      <div class="product-info">
+        <p class="name">${translateProductName(p.name)}</p>
+        <div class="seller-name">by ${sellerName}</div>
+        <div class="price">
+          ${p.mrp ? `<del>${formatPrice(p.mrp, p.currency)}</del>` : ""}
+          <b>${formatPrice(p.price, p.currency)}</b>
+        </div>
+        ${stockHtml}
+      </div>
+      <button class="add-btn" ${isOutOfStock ? "disabled" : ""}>${isOutOfStock ? "Out of stock" : "Add to cart"}</button>
+    `;
+
+    box.appendChild(card);
+  });
+}
+
+function openProduct(id){
+  localStorage.setItem("selectedProductId", id);
+  location.href = "product-details.html?id=" + encodeURIComponent(id);
+}
+
+function formatPrice(amount, currency){
+  if(typeof window.moneyTag === "function"){
+    return moneyTag(amount, currency || "USD");
+  }
+  const val = Number(amount) || 0;
+  return "$" + val;
+}
+
+async function getSellerBadgeMap(products){
+  const ownerIds = [...new Set(products.map(p=>p.owner_id).filter(Boolean))];
+  if(ownerIds.length === 0) return {};
+
+  const { data, error } = await supa
+    .from("sellers")
+    .select("user_id,show_badge,is_paid")
+    .in("user_id", ownerIds);
+
+  if(error){
+    console.error(error);
+    return {};
+  }
+
+  const map = {};
+  (data || []).forEach(s=>{
+    if(s.is_paid && s.show_badge) map[s.user_id] = true;
+  });
+  return map;
+}
+
+async function getSellerNameMap(products){
+  const map = {};
+
+  const ownerIds = [...new Set(
+    (products || [])
+      .map(p=>p.owner_id)
+      .filter(Boolean)
+  )];
+
+  if(ownerIds.length === 0) return map;
+
+  const { data, error } = await supa
+    .from("users")
+    .select("user_id,username")
+    .in("user_id", ownerIds);
+
+  if(error){
+    console.error(error);
+    return map;
+  }
+
+  (data || []).forEach(u=>{
+    if(u.username) map[u.user_id] = u.username;
+  });
+
+  return map;
+}
+
+/* TOAST */
+function showToast(message){
+  if(!message) return;
+  const toast = document.createElement("div");
+  toast.innerText = message;
+  toast.style.position = "fixed";
+  toast.style.left = "50%";
+  toast.style.bottom = "110px";
+  toast.style.transform = "translateX(-50%)";
+  toast.style.background = "#222";
+  toast.style.color = "#fff";
+  toast.style.padding = "10px 14px";
+  toast.style.borderRadius = "10px";
+  toast.style.fontSize = "13px";
+  toast.style.zIndex = "2000";
+  toast.style.boxShadow = "0 6px 16px rgba(0,0,0,.2)";
+  toast.style.opacity = "0";
+  toast.style.transition = "opacity .2s ease";
+  document.body.appendChild(toast);
+  requestAnimationFrame(()=>{ toast.style.opacity = "1"; });
+  setTimeout(()=>{
+    toast.style.opacity = "0";
+    setTimeout(()=>{ toast.remove(); }, 200);
+  }, 1600);
+}
+
+/* ?? CART */
+function addToCart(id,name,price,image,ownerId,currency,stockQty){
+  const rawQty = String(stockQty ?? "").trim();
+  const parsedQty = rawQty === "" ? NaN : Number(rawQty);
+  const hasStockCap = Number.isFinite(parsedQty) && parsedQty >= 0;
+  const maxQty = hasStockCap ? parsedQty : null;
+  if(hasStockCap && maxQty <= 0){
+    showToast("Out of stock");
+    return false;
+  }
+
+  let cart = JSON.parse(localStorage.getItem("cart")) || [];
+  let item = cart.find(i => i.id === id);
+
+  if(item){
+    if(hasStockCap && item.qty >= maxQty){
+      showToast("Out of stock");
+      return false;
+    }
+    item.qty++;
+  }
+  else cart.push({
+    id,
+    name,
+    price,
+    currency: currency || "USD",
+    images:[image],
+    qty:1,
+    owner_id: ownerId || ""
+  });
+
+  localStorage.setItem("cart", JSON.stringify(cart));
+  showToast("Your product added to cart");
+  return true;
+}
+
+function bindProductEvents(){
+  const box = document.getElementById("products");
+  if(!box || box.dataset.bound === "1") return;
+  box.dataset.bound = "1";
+
+  box.addEventListener("click", (e)=>{
+    const addBtn = e.target.closest(".add-btn");
+    if(addBtn){
+      e.preventDefault();
+      e.stopPropagation();
+      const card = addBtn.closest(".product");
+      if(!card) return;
+      addToCart(
+        card.dataset.id,
+        card.dataset.name,
+        Number(card.dataset.price || 0),
+        card.dataset.image,
+        card.dataset.ownerId,
+        card.dataset.currency,
+        card.dataset.quantity
+      );
+      return;
+    }
+
+    const card = e.target.closest(".product");
+    if(card && card.dataset.id){
+      openProduct(card.dataset.id);
+    }
+  });
+}
+
+let INDEX_USER = null;
+let indexNotifChannel = null;
+let indexOrderChannel = null;
+let indexIsSellerPaid = false;
+
+function updateHomeNotifBadge(count){
+  const badge = document.getElementById("homeNotifCount");
+  if(!badge) return;
+  if(Number(count || 0) > 0){
+    badge.style.display = "inline-flex";
+    badge.textContent = Number(count || 0);
+  }else{
+    badge.style.display = "none";
+  }
+}
+
+function pushSeenKey(){
+  return INDEX_USER ? `sellerPushSeen_${INDEX_USER.id}` : "sellerPushSeen_guest";
+}
+
+function loadPushSeenMap(){
+  try{
+    return JSON.parse(localStorage.getItem(pushSeenKey()) || "{}");
+  }catch(_){
+    return {};
+  }
+}
+
+function markPushSeen(id){
+  if(!id) return;
+  const map = loadPushSeenMap();
+  map[id] = Date.now();
+  const entries = Object.entries(map).sort((a,b)=>Number(b[1]||0)-Number(a[1]||0)).slice(0, 300);
+  localStorage.setItem(pushSeenKey(), JSON.stringify(Object.fromEntries(entries)));
+}
+
+async function fetchSellerNotificationRows(userId){
+  const bySellerId = await supa
+    .from("notifications")
+    .select("*")
+    .eq("seller_id", userId)
+    .order("created_at", { ascending:false });
+
+  if(!bySellerId.error && (bySellerId.data || []).length > 0) return bySellerId.data || [];
+
+  const byReceiver = await supa
+    .from("notifications")
+    .select("*")
+    .eq("receiver_user_id", userId)
+    .order("created_at", { ascending:false });
+
+  if(byReceiver.error) return bySellerId.data || [];
+
+  const seen = new Set();
+  return [...(bySellerId.data || []), ...(byReceiver.data || [])].filter(r=>{
+    const key = r.id || `${r.order_id || ""}_${r.product_id || ""}_${r.created_at || ""}`;
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function maybeShowSellerPush(row){
+  if(!("Notification" in window)) return;
+  if(Notification.permission !== "granted") return;
+  if(!row || !row.id) return;
+
+  const seen = loadPushSeenMap();
+  if(seen[row.id]) return;
+
+  const title = row.title || "New Seller Order";
+  const body =
+    `Buyer: ${row.buyer_name || "Customer"} | Product: ${row.product_name || "Product"} | Qty: ${Number(row.qty || 0)} | Payment: ${row.payment_method || "Cash on Delivery"}`;
+
+  const notif = new Notification(title, { body });
+  notif.onclick = ()=>{
+    window.focus();
+    location.href =
+      "seller-notif-details.html?order_id=" +
+      encodeURIComponent(row.order_id || "") +
+      "&notif_id=" +
+      encodeURIComponent(row.id || "");
+  };
+
+  markPushSeen(row.id);
+}
+
+async function refreshHomeSellerNotifications(){
+  if(!INDEX_USER || !indexIsSellerPaid) return;
+  const rows = await fetchSellerNotificationRows(INDEX_USER.id);
+  const active = rows.filter(r=>!r.is_deleted);
+  const unread = active.filter(r=>!r.is_read);
+  updateHomeNotifBadge(unread.length);
+
+  unread.slice(0, 2).forEach(maybeShowSellerPush);
+}
+
+function subscribeHomeSellerNotifications(){
+  if(indexNotifChannel) supa.removeChannel(indexNotifChannel);
+  if(indexOrderChannel) supa.removeChannel(indexOrderChannel);
+
+  indexNotifChannel = supa
+    .channel("index-notif-" + INDEX_USER.id)
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "notifications" },
+      () => refreshHomeSellerNotifications()
+    )
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "notifications" },
+      () => refreshHomeSellerNotifications()
+    )
+    .subscribe();
+
+  indexOrderChannel = supa
+    .channel("index-orders-" + INDEX_USER.id)
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "orders" },
+      () => refreshHomeSellerNotifications()
+    )
+    .subscribe();
+}
+
+async function initHomeNotificationSystem(){
+  if(!supa?.auth) return;
+  const { data } = await supa.auth.getSession();
+  INDEX_USER = data?.session?.user || null;
+  if(!INDEX_USER){
+    updateHomeNotifBadge(0);
+    return;
+  }
+
+  const { data: seller } = await supa
+    .from("sellers")
+    .select("is_paid")
+    .eq("user_id", INDEX_USER.id)
+    .maybeSingle();
+  indexIsSellerPaid = !!seller?.is_paid;
+  if(!indexIsSellerPaid){
+    updateHomeNotifBadge(0);
+    return;
+  }
+
+  if("Notification" in window && Notification.permission === "default"){
+    Notification.requestPermission().catch(()=>{});
+  }
+
+  await refreshHomeSellerNotifications();
+  subscribeHomeSellerNotifications();
+}
+
+document.addEventListener("DOMContentLoaded", ()=>{
+  bindProductEvents();
+  renderProducts();
+  initContestPosterPopup();
+  initHomeNotificationSystem();
+  document.getElementById("searchBtn").addEventListener("click", () => {
+    renderProducts(document.getElementById("searchInput").value);
+  });
+  document.querySelector(".banner").addEventListener("click", () => {
+    location.href = "contest.html";
+  });
+});
+</script>
+
+</body>
+</html>

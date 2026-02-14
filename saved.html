@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Saved</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- SUPABASE -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="global.js"></script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial}
+body{background:#fff;color:#000}
+
+/* HEADER */
+.header{
+  display:flex;
+  align-items:center;
+  padding:14px;
+  border-bottom:1px solid #eee;
+}
+.header svg{
+  width:22px;
+  height:22px;
+  margin-right:10px;
+  cursor:pointer
+}
+.header h2{font-size:18px}
+
+/* EMPTY STATE */
+.empty{
+  height:80vh;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  color:#666;
+}
+.empty svg{
+  width:80px;
+  height:80px;
+  fill:#bbb;
+  margin-bottom:12px;
+}
+.empty h3{
+  font-size:18px;
+  margin-bottom:6px;
+  color:#000
+}
+.empty p{font-size:14px}
+
+.saved-list{max-width:640px;margin:12px auto;padding:0 12px;display:none}
+.saved-card{border-bottom:1px solid #eee;padding-bottom:12px;margin-bottom:12px}
+.saved-card video{width:100%;border-radius:12px;background:#000}
+.saved-meta{padding:6px 2px;font-size:14px}
+.saved-meta small{color:#666}
+</style>
+</head>
+
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <svg onclick="history.back()" viewBox="0 0 24 24">
+    <path d="M15 18l-6-6 6-6"/>
+  </svg>
+  <h2>Saved</h2>
+</div>
+
+<div class="saved-list" id="savedList"></div>
+
+<!-- EMPTY STATE -->
+<div class="empty" id="empty">
+  <svg viewBox="0 0 24 24">
+    <path d="M6 4h12v16l-6-4-6 4z"/>
+  </svg>
+  <h3>No saved items</h3>
+  <p>Save posts, videos or products to see them here.</p>
+</div>
+
+<script>
+/* 🔐 AUTH CHECK (SUPABASE) */
+(async ()=>{
+  const { data, error } = await supabase.auth.getUser();
+
+  if(error || !data?.user){
+    location.href = "login.html";
+    return;
+  }
+
+  // User is authenticated
+  // Saved items will appear automatically once table exists
+})();
+</script>
+
+<script>
+(function(){
+  const listEl = document.getElementById("savedList");
+  const emptyEl = document.getElementById("empty");
+  try{
+    const raw = localStorage.getItem("nova_saved_reels");
+    const items = raw ? JSON.parse(raw) : [];
+    if(items && items.length){
+      listEl.style.display = "block";
+      emptyEl.style.display = "none";
+      items.forEach(item => {
+        const card = document.createElement("div");
+        card.className = "saved-card";
+        card.innerHTML = `
+          <video src="${item.video_url}" controls></video>
+          <div class="saved-meta">
+            <div><strong>${item.title || "Reel"}</strong></div>
+            <small>${item.creator_name || "User"}</small>
+          </div>
+        `;
+        listEl.appendChild(card);
+      });
+    }
+  }catch(_){}
+})();
+</script>
+
+</body>
+</html>

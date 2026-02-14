@@ -1,0 +1,143 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Read More</title>
+<script src="global.js"></script>
+<style>
+:root{
+  --bg:#ffffff;
+  --card:#fff;
+  --line:#ffbf86;
+  --ink:#2d1908;
+  --muted:#6f3d14;
+  --orange-dark:#bf4300;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:Arial,sans-serif;background:var(--bg);color:var(--ink)}
+.top-strip{background:var(--orange-dark);color:#fff;padding:10px 0}
+.top-inner{width:min(920px,94vw);margin:0 auto;display:grid;grid-template-columns:44px 1fr 70px;align-items:center;gap:8px}
+.brand-logo{width:40px;height:40px;object-fit:contain;background:#fff;border-radius:8px;padding:3px;border:1px solid rgba(255,255,255,.4)}
+.sale-name{font-weight:800;letter-spacing:.04em;text-align:center;font-size:14px}
+.back-link{display:inline-block;text-decoration:none;color:#fff;font-weight:700;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.32);border-radius:999px;padding:7px 10px;text-align:center;font-size:12px}
+.page{width:min(920px,94vw);margin:0 auto;padding:12px 0 26px;display:grid;gap:12px}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 4px 10px rgba(0,0,0,.04)}
+h1,h2,p{margin:0}
+p{color:var(--muted);line-height:1.45}
+.list{margin-top:10px;padding-left:18px;display:grid;gap:8px;color:#5f3310;line-height:1.45}
+</style>
+</head>
+<body>
+<header class="top-strip">
+  <div class="top-inner">
+    <img class="brand-logo" src="images/logo.png" alt="Logo">
+    <div class="sale-name" id="saleName">BIG LAUNCHING DAYS SALE</div>
+    <a class="back-link" href="contest.html" id="backBtn">Back</a>
+  </div>
+</header>
+
+<main class="page">
+  <section class="card">
+    <h1 id="pageTitle">Read More</h1>
+    <p style="margin-top:8px" id="pageSub">Detailed rules and winner logic are listed below.</p>
+  </section>
+
+  <section class="card">
+    <h2 id="rule1Title">Result Rule</h2>
+    <ul class="list">
+      <li id="rule1a">Results are announced only after total users cross 5,000,000.</li>
+      <li id="rule1b">Final winner list will be published after the milestone is completed.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2 id="rule2Title">Winning Chance Rule</h2>
+    <ul class="list">
+      <li id="rule2a">Users with stronger sharing activity get higher winning chances.</li>
+      <li id="rule2b">Referral points are counted only when referred users vote.</li>
+      <li id="rule2c">One user can win multiple prizes.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2 id="rule3Title">Referral Rule</h2>
+    <ul class="list">
+      <li id="rule3a">Every user gets a unique referral code.</li>
+      <li id="rule3b">Users can share the referral code with others.</li>
+      <li id="rule3c">When a referred user votes, referral credit is counted.</li>
+    </ul>
+  </section>
+</main>
+
+<script>
+const I18N = {
+  en:{
+    saleName:"BIG LAUNCHING DAYS SALE",
+    backBtn:"Back",
+    pageTitle:"Read More",
+    pageSub:"Detailed rules and winner logic are listed below.",
+    rule1Title:"Result Rule",
+    rule1a:"Results are announced only after total users cross 5,000,000.",
+    rule1b:"Final winner list will be published after the milestone is completed.",
+    rule2Title:"Winning Chance Rule",
+    rule2a:"Users with stronger sharing activity get higher winning chances.",
+    rule2b:"Referral points are counted only when referred users vote.",
+    rule2c:"One user can win multiple prizes.",
+    rule3Title:"Referral Rule",
+    rule3a:"Every user gets a unique referral code.",
+    rule3b:"Users can share the referral code with others.",
+    rule3c:"When a referred user votes, referral credit is counted."
+  },
+  hi:{
+    saleName:"बिग लॉन्चिंग डेज़ सेल",
+    backBtn:"वापस",
+    pageTitle:"और पढ़ें",
+    pageSub:"विस्तृत नियम और विजेता लॉजिक नीचे दिए गए हैं।",
+    rule1Title:"रिज़ल्ट नियम",
+    rule1a:"रिज़ल्ट तभी घोषित होंगे जब कुल यूज़र 50 लाख से ऊपर होंगे।",
+    rule1b:"माइलस्टोन पूरा होने के बाद अंतिम विजेता सूची प्रकाशित की जाएगी।",
+    rule2Title:"जीतने की संभावना नियम",
+    rule2a:"जिन यूज़र्स की शेयरिंग अधिक होगी, उनके जीतने के चांस अधिक होंगे।",
+    rule2b:"रेफरल पॉइंट्स तभी जुड़ेंगे जब रेफर्ड यूज़र वोट करेगा।",
+    rule2c:"एक यूज़र कई प्राइज जीत सकता है।",
+    rule3Title:"रेफरल नियम",
+    rule3a:"हर यूज़र को एक यूनिक रेफरल कोड मिलता है।",
+    rule3b:"यूज़र यह रेफरल कोड दूसरे लोगों के साथ शेयर कर सकता है।",
+    rule3c:"जब रेफर्ड यूज़र वोट करता है, तब रेफरल क्रेडिट जुड़ता है।"
+  }
+};
+
+function resolveLang(){
+  const raw = String(window.USER_LANG || localStorage.getItem("lang") || "en").toLowerCase();
+  if(I18N[raw]) return raw;
+  const short = raw.split("-")[0];
+  return I18N[short] ? short : "en";
+}
+
+function withQuery(path){
+  const params = new URLSearchParams(window.location.search);
+  const qs = params.toString();
+  return qs ? (path + "?" + qs) : path;
+}
+
+function applyLanguage(){
+  const lang = resolveLang();
+  document.documentElement.lang = lang;
+  const map = I18N[lang] || I18N.en;
+  Object.keys(map).forEach(key => {
+    const el = document.getElementById(key);
+    if(el) el.textContent = map[key];
+  });
+  const backBtn = document.getElementById("backBtn");
+  if(backBtn){
+    backBtn.setAttribute("href", withQuery("contest.html"));
+  }
+}
+
+applyLanguage();
+document.addEventListener("languageUpdated", applyLanguage);
+</script>
+</body>
+</html>

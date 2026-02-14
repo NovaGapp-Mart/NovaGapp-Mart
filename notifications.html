@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Notifications - NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body{margin:0;font-family:Arial,sans-serif;background:#f5f5f5}
+.header{background:#ff6a00;color:#fff;padding:12px 15px;font-size:18px;font-weight:bold}
+.tabs{display:flex;background:#fff;border-bottom:1px solid #eee}
+.tab{flex:1;padding:12px;text-align:center;font-size:14px;cursor:pointer}
+.tab.active{font-weight:bold;background:#fff7f0}
+.panel{padding:10px}
+.list{background:#fff;border-radius:12px;overflow:hidden}
+.item{padding:12px;border-bottom:1px solid #f1f1f1;font-size:13px;cursor:pointer}
+.item b{color:#222}
+.item:last-child{border-bottom:none}
+.actions{display:flex;gap:8px;margin-top:8px}
+.actions button{flex:1;border:none;padding:6px;border-radius:6px;font-size:12px;cursor:pointer}
+.mark-read{background:#2d8cff;color:#fff}
+.delete-notif{background:#ff3b3b;color:#fff}
+.empty{padding:15px;text-align:center;color:#777}
+.section-title{font-size:13px;color:#555;margin:12px 4px}
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<script src="global.js"></script>
+</head>
+<body>
+
+<div class="header">Notifications</div>
+<div class="tabs" id="tabs"></div>
+
+<div class="panel">
+  <div id="normalPanel">
+    <div class="section-title">Normal Notifications</div>
+    <div style="text-align:right;margin:4px 0 10px">
+      <button class="delete-notif" onclick="clearNormalNotificationHistory()">Clear notification history</button>
+    </div>
+    <div class="list" id="normalList"></div>
+
+    <div class="section-title">Notification History</div>
+    <div class="list" id="normalHistory"></div>
+  </div>
+
+  <div id="sellerPanel" style="display:none">
+    <div class="section-title">Seller Notifications</div>
+    <div style="text-align:right;margin:4px 0 10px">
+      <button class="delete-notif" onclick="clearSellerNotificationHistory()">Clear notification history</button>
+    </div>
+    <div class="list" id="sellerList"></div>
+
+    <div class="section-title">Notification History</div>
+    <div class="list" id="sellerHistory"></div>
+  </div>
+</div>
+
+<script>
+const supa =
+  window.supa ||
+  window.supabase?.createClient(
+    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+  );
+
+let CURRENT_USER = null;
+let IS_SELLER = false;
+let normalChannel = null;
+let sellerChannel = null;
+
+(async function init(){
+  const { data } = await supa.auth.getSession();
+  if(!data?.session){
+    location.href = "login.html";
+    return;
+  }
+  CURRENT_USER = data.session.user;
+
+  const { data: seller } = await supa
+    .from("sellers")
+    .select("is_paid")
+    .eq("user_id", CURRENT_USER.id)
+    .maybeSingle();
+  IS_SELLER = !!seller?.is_paid;
+
+  buildTabs();
+  await loadNormalNotifications();
+  if(IS_SELLER) await loadSellerNotifications();
+
+  subscribeNormal();
+  if(IS_SELLER) subscribeSeller();
+})();
+
+function buildTabs(){
+  const tabs = document.getElementById("tabs");
+  tabs.innerHTML = "";
+
+  const normal = document.createElement("div");
+  normal.className = "tab active";
+  normal.textContent = "Normal Notifications";
+  normal.onclick = ()=>selectTab("normal");
+  tabs.appendChild(normal);
+
+  if(IS_SELLER){
+    const seller = document.createElement("div");
+    seller.className = "tab";
+    seller.textContent = "Seller Notifications";
+    seller.onclick = ()=>selectTab("seller");
+    tabs.appendChild(seller);
+  }
+}
+
+function selectTab(tab){
+  const tabEls = [...document.querySelectorAll(".tab")];
+  tabEls.forEach(t=>t.classList.remove("active"));
+  tabEls.find(t=>t.textContent.includes(tab === "normal" ? "Normal" : "Seller"))?.classList.add("active");
+
+  document.getElementById("normalPanel").style.display = tab === "normal" ? "block" : "none";
+  document.getElementById("sellerPanel").style.display = tab === "seller" ? "block" : "none";
+}
+
+async function loadNormalNotifications(){
+  const list = document.getElementById("normalList");
+  const history = document.getElementById("normalHistory");
+  list.innerHTML = "<div class='empty'>Loading...</div>";
+  history.innerHTML = "<div class='empty'>Loading...</div>";
+
+  const { data, error } = await supa
+    .from("notifications")
+    .select("*")
+    .eq("receiver_user_id", CURRENT_USER.id)
+    .neq("type", "new_order")
+    .neq("type", "review_comment")
+    .order("created_at", { ascending:false });
+
+  if(error){
+    console.error(error);
+    list.innerHTML = "<div class='empty'>Failed to load</div>";
+    history.innerHTML = "<div class='empty'>Failed to load</div>";
+    return;
+  }
+
+  const rows = data || [];
+  const active = rows.filter(r=>!r.is_deleted);
+  const deleted = rows.filter(r=>r.is_deleted);
+
+  list.innerHTML = active.length ? "" : "<div class='empty'>No notifications</div>";
+  history.innerHTML = deleted.length ? "" : "<div class='empty'>No history</div>";
+
+  active.forEach(r=>list.appendChild(renderNotif(r, false, "normal")));
+  deleted.forEach(r=>history.appendChild(renderNotif(r, true, "normal")));
+}
+
+async function loadSellerNotifications(){
+  const list = document.getElementById("sellerList");
+  const history = document.getElementById("sellerHistory");
+  list.innerHTML = "<div class='empty'>Loading...</div>";
+  history.innerHTML = "<div class='empty'>Loading...</div>";
+
+  const { data, error } = await supa
+    .from("notifications")
+    .select("*")
+    .eq("receiver_user_id", CURRENT_USER.id)
+    .in("type", ["new_order", "review_comment", "wallet_credit", "wallet_debit", "cod_pending"])
+    .order("created_at", { ascending:false });
+
+  if(error){
+    console.error(error);
+    list.innerHTML = "<div class='empty'>Failed to load</div>";
+    history.innerHTML = "<div class='empty'>Failed to load</div>";
+    return;
+  }
+
+  const rows = data || [];
+  const active = rows.filter(r=>!r.is_deleted);
+  const deleted = rows.filter(r=>r.is_deleted);
+
+  list.innerHTML = active.length ? "" : "<div class='empty'>No notifications</div>";
+  history.innerHTML = deleted.length ? "" : "<div class='empty'>No history</div>";
+
+  active.forEach(r=>list.appendChild(renderNotif(r, false, "seller")));
+  deleted.forEach(r=>history.appendChild(renderNotif(r, true, "seller")));
+}
+
+function renderNotif(r, isHistory, mode){
+  const div = document.createElement("div");
+  div.className = "item";
+
+  if(r.type === "new_order"){
+    div.onclick = ()=>openSellerOrderFromNotif(r.id, r.order_id);
+  }else if(mode === "normal" && r.order_id){
+    div.onclick = ()=>openBuyerOrderFromNotif(r.id, r.order_id);
+  }
+
+  const date = r.created_at ? new Date(r.created_at).toLocaleString() : "";
+  const body = r.type === "new_order"
+    ? `
+      <div><b>Order</b> ${r.order_id || ""}</div>
+      <div>Buyer: ${r.buyer_name || "-"}</div>
+      <div>Phone: ${r.buyer_phone || "-"}</div>
+      <div>Address: ${r.buyer_address || "-"}</div>
+      <div>Product: ${translateProductName(r.product_name || "-")}</div>
+      <div>Qty: ${Number(r.qty || 0)}</div>
+      <div>Payment: ${r.payment_method || "Pending Payment"}</div>
+      <div style="color:#777;margin-top:4px">${date}</div>
+    `
+    : (r.type === "wallet_credit" || r.type === "wallet_debit" || r.type === "cod_pending")
+    ? `
+      <div><b>${r.title || "Wallet Update"}</b></div>
+      <div>${r.message || "-"}</div>
+      <div style="color:#777;margin-top:4px">${date}</div>
+    `
+    : `
+      <div><b>${r.title || "Notification"}</b></div>
+      <div>${r.message || "-"}</div>
+      ${r.product_name ? `<div>Product: ${translateProductName(r.product_name)}</div>` : ""}
+      ${r.buyer_name ? `<div>Buyer: ${r.buyer_name}</div>` : ""}
+      ${r.order_id ? `<div>Order: ${r.order_id}</div>` : ""}
+      <div style="color:#777;margin-top:4px">${date}</div>
+    `;
+
+  div.innerHTML = `
+    ${body}
+    ${isHistory ? "" : `
+      <div class="actions">
+        <button class="mark-read">Mark Read</button>
+        <button class="delete-notif">Delete</button>
+      </div>
+    `}
+  `;
+
+  if(!isHistory){
+    const markBtn = div.querySelector(".mark-read");
+    const deleteBtn = div.querySelector(".delete-notif");
+
+    if(markBtn){
+      markBtn.addEventListener("click", async (e)=>{
+        e.stopPropagation();
+        await supa.from("notifications").update({ is_read: true }).eq("id", r.id);
+        if(mode === "seller") await loadSellerNotifications();
+        else await loadNormalNotifications();
+      });
+    }
+
+    if(deleteBtn){
+      deleteBtn.addEventListener("click", async (e)=>{
+        e.stopPropagation();
+        await supa.from("notifications").update({ is_deleted: true }).eq("id", r.id);
+        if(mode === "seller") await loadSellerNotifications();
+        else await loadNormalNotifications();
+      });
+    }
+  }
+
+  return div;
+}
+
+function openBuyerOrderFromNotif(notifId, orderId){
+  if(!orderId) return;
+  const q = new URLSearchParams();
+  q.set("order_id", String(orderId || ""));
+  q.set("notif_id", String(notifId || ""));
+  location.href = "order-details.html?" + q.toString();
+}
+
+function openSellerOrderFromNotif(notifId, orderId){
+  if(!orderId) return;
+  const q = new URLSearchParams();
+  q.set("order_id", String(orderId || ""));
+  q.set("notif_id", String(notifId || ""));
+  location.href = "seller-notif-details.html?" + q.toString();
+}
+
+async function clearNormalNotificationHistory(){
+  await supa
+    .from("notifications")
+    .update({ is_deleted: true })
+    .eq("receiver_user_id", CURRENT_USER.id)
+    .neq("type", "new_order")
+    .neq("type", "review_comment");
+  await loadNormalNotifications();
+}
+
+async function clearSellerNotificationHistory(){
+  await supa
+    .from("notifications")
+    .update({ is_deleted: true })
+    .eq("receiver_user_id", CURRENT_USER.id)
+    .in("type", ["new_order", "review_comment"]);
+  await loadSellerNotifications();
+}
+
+function subscribeNormal(){
+  if(normalChannel) supa.removeChannel(normalChannel);
+  normalChannel = supa
+    .channel("notif-user-" + CURRENT_USER.id)
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "notifications", filter: `receiver_user_id=eq.${CURRENT_USER.id}` },
+      () => loadNormalNotifications()
+    )
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "notifications", filter: `receiver_user_id=eq.${CURRENT_USER.id}` },
+      () => loadNormalNotifications()
+    )
+    .subscribe();
+}
+
+function subscribeSeller(){
+  if(sellerChannel) supa.removeChannel(sellerChannel);
+  sellerChannel = supa
+    .channel("notif-seller-" + CURRENT_USER.id)
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "notifications", filter: `receiver_user_id=eq.${CURRENT_USER.id}` },
+      () => loadSellerNotifications()
+    )
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "notifications", filter: `receiver_user_id=eq.${CURRENT_USER.id}` },
+      () => loadSellerNotifications()
+    )
+    .subscribe();
+}
+</script>
+</body>
+</html>

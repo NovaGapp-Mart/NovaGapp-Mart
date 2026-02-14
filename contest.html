@@ -1,0 +1,1074 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BIG LAUNCHING DAYS SALE</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<script src="global.js"></script>
+<style>
+:root{
+  --bg:#ffffff;
+  --card:#ffffff;
+  --line:#ffbf86;
+  --ink:#2d1908;
+  --muted:#6f3d14;
+  --orange:#ff6a00;
+  --orange-dark:#bf4300;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:Arial,sans-serif;background:var(--bg);color:var(--ink)}
+.top-strip{background:var(--orange-dark);color:#fff;padding:10px 0}
+.top-inner{
+  width:min(920px,94vw);
+  margin:0 auto;
+  display:grid;
+  grid-template-columns:44px 1fr auto;
+  align-items:center;
+  gap:8px;
+}
+.brand-logo{width:40px;height:40px;object-fit:contain;background:#fff;border-radius:8px;padding:3px;border:1px solid rgba(255,255,255,.4)}
+.sale-name{font-weight:800;letter-spacing:.04em;text-align:center;font-size:14px}
+.back-link{
+  text-decoration:none;
+  color:#fff;
+  border:1px solid rgba(255,255,255,.6);
+  border-radius:999px;
+  padding:6px 11px;
+  font-size:12px;
+  font-weight:700;
+  line-height:1;
+}
+.back-link:hover{background:rgba(255,255,255,.16)}
+.page{width:min(920px,94vw);margin:0 auto;padding:12px 0 26px;display:grid;gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 4px 10px rgba(0,0,0,.04)}
+.slider-wrap{
+  padding:8px 10px;
+  position:sticky;
+  top:8px;
+  align-self:start;
+  z-index:40
+}
+.slider{
+  position:relative;
+  width:100%;
+  max-width:420px;
+  margin:0 auto;
+  aspect-ratio:16/9;
+  border:1px solid #ffb977;
+  border-radius:12px;
+  overflow:hidden;
+  background:#ffe3c5
+}
+.slide{position:absolute;inset:0;opacity:0;transition:opacity .45s ease}
+.slide.active{opacity:1}
+.slide img{width:100%;height:100%;object-fit:cover;display:block}
+.slide-overlay{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:flex-end;padding:10px 12px;background:linear-gradient(180deg,rgba(0,0,0,.14),rgba(0,0,0,.66))}
+.slide-overlay h3{margin:0;font-size:15px;line-height:1.2;color:#fff}
+.slide-overlay p{margin:3px 0 0;font-size:12px;color:#ffd8b3;font-weight:700}
+.slider-dots{margin-top:8px;display:flex;justify-content:center;gap:6px}
+.slider-dot{width:7px;height:7px;border-radius:999px;background:#ffc187;opacity:.55}
+.slider-dot.active{background:var(--orange);opacity:1}
+.poster-wrap{
+  width:min(640px,100%);
+  aspect-ratio:1/1;
+  margin:0 auto;
+  border:1px solid #ffb977;
+  border-radius:12px;
+  overflow:hidden;
+  background:#ffd2a6
+}
+.poster-wrap img{width:100%;height:100%;object-fit:cover;display:block}
+.status-grid{display:grid;grid-template-columns:repeat(3,minmax(140px,1fr));gap:10px}
+.status-item{border:1px solid var(--line);border-radius:11px;padding:10px;background:#fff}
+.status-item small{display:block;color:var(--muted);font-size:11px}
+.status-item strong{display:block;margin-top:4px;font-size:15px}
+.main-actions{margin-top:10px;display:grid;grid-template-columns:repeat(2,minmax(140px,1fr));gap:8px}
+button{border:none;background:var(--orange);color:#fff;font-weight:700;border-radius:10px;padding:11px 12px;cursor:pointer}
+button:hover{background:var(--orange-dark)}
+button.secondary{background:#fff;color:#fa7508;border:1px solid var(--line)}
+button.ghost{background:#fff7ee;color:#f1720a;border:1px solid var(--line)}
+.must-read h2{margin:0}
+.must-read ul{margin:10px 0 0;padding-left:18px;display:grid;gap:7px;color:#5f3310;line-height:1.4}
+.extra-actions{margin-top:12px;display:grid;grid-template-columns:repeat(2,minmax(140px,1fr));gap:8px}
+.muted{margin-top:6px;color:var(--muted);font-size:13px;line-height:1.4}
+.hidden{display:none !important}
+.referral-panel input{margin-top:10px;width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 11px;font-weight:600;color:#5e300c;background:#fffdfb}
+.referral-actions{margin-top:10px;display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:8px}
+.notice{margin-top:8px;font-size:12px;color:var(--muted)}
+.notice.ok{color:#1f8b4b}
+.notice.warn{color:#f85f07}
+.toast{position:fixed;right:14px;bottom:14px;max-width:320px;border-radius:9px;padding:10px 12px;color:#fff;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:90}
+.toast.show{opacity:1}
+.toast.ok{background:#1f8b4b}
+.toast.err{background:#ecb708}
+@media (max-width:640px){
+  .slider-wrap{top:6px}
+  .slider{max-width:340px}
+  .status-grid{grid-template-columns:1fr}
+  .slide-overlay h3{font-size:13px}
+  .main-actions,.extra-actions,.referral-actions{grid-template-columns:1fr}
+  button{width:100%}
+  .sale-name{font-size:12px}
+}
+</style>
+</head>
+<body>
+<header class="top-strip">
+  <div class="top-inner">
+    <img class="brand-logo" src="Images/logo.png" alt="Logo">
+    <div class="sale-name" id="saleName">BIG LAUNCHING DAYS SALE</div>
+    <a class="back-link" id="backBtn" href="index.html">Back</a>
+  </div>
+</header>
+
+<main class="page">
+  <section class="card slider-wrap">
+    <div class="slider" id="heroSlider">
+      <article class="slide active" data-slide="0">
+        <img src="Images/rolls-royce.png" alt="Rolls-Royce Cullinan Custom Edition">
+        <div class="slide-overlay">
+          <h3 id="slide1Title">Rolls-Royce Cullinan Custom Edition</h3>
+          <p id="slide1Sub">With INR 1.5 Crore Cash Prize</p>
+        </div>
+      </article>
+      <article class="slide" data-slide="1">
+        <img src="Images/bmw.jpg" alt="BMW M5 and Disneyland Entry">
+        <div class="slide-overlay">
+          <h3 id="slide2Title">BMW M5 Grand Reward</h3>
+          <p id="slide2Sub">Plus Complimentary Disneyland Entry</p>
+        </div>
+      </article>
+      <article class="slide" data-slide="2">
+        <img src="Images/many.jpg" alt="Many more prizes">
+        <div class="slide-overlay">
+          <h3 id="slide3Title">Win Many More Premium Prizes</h3>
+          <p id="slide3Sub">Multiple surprise rewards across contest rounds</p>
+        </div>
+      </article>
+    </div>
+    <div class="slider-dots" id="heroSliderDots">
+      <span class="slider-dot active"></span>
+      <span class="slider-dot"></span>
+      <span class="slider-dot"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="poster-wrap">
+      <img src="Images/main.jpg" alt="Contest Poster">
+    </div>
+    <div class="main-actions">
+      <button class="secondary" id="haveReferralBtn">Do You Have Referral Code? (Optional)</button>
+      <button id="voteNowBtn">Vote Now</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="status-grid">
+      <article class="status-item">
+        <small id="metricDownloadLabel">Download Gate</small>
+        <strong id="downloadsValue">0 / 5,000,000</strong>
+      </article>
+      <article class="status-item">
+        <small id="metricResultLabel">Result Status</small>
+        <strong id="resultStatus">Locked until 5M</strong>
+      </article>
+      <article class="status-item">
+        <small id="metricGatewayLabel">Gateway</small>
+        <strong id="gatewayStatus">Pending</strong>
+      </article>
+    </div>
+  </section>
+
+  <section class="card must-read">
+    <h2 id="mustReadTitle">Must Be Read</h2>
+    <ul>
+      <li id="mustRead1">Choose your favorite contest and vote fairly.</li>
+      <li id="mustRead2">The more someone shares, the higher the winning chances.</li>
+      <li id="mustRead3">One person can win multiple prizes.</li>
+      <li id="mustRead4">Prizes are listed as per contest rules. Click for full details.</li>
+      <li id="mustRead5">Referral points are counted only for unique visits and verified installs.</li>
+    </ul>
+    <div class="extra-actions">
+      <button class="ghost" id="readMoreBtn">Read More</button>
+      <button id="refersAnyoneBtn">Reffers Anyone</button>
+    </div>
+  </section>
+
+  <section class="card referral-panel hidden" id="referralPanel">
+    <h2 id="refPanelTitle">Enter Referral Code</h2>
+    <p class="muted" id="refPanelDesc">Enter a valid referral code to connect referral tracking.</p>
+    <input id="referralInput" type="text" placeholder="Type referral code">
+    <div class="referral-actions">
+      <button id="applyReferralBtn">Apply</button>
+      <button class="secondary" id="closeReferralBtn">Close</button>
+    </div>
+    <p class="notice" id="referralNotice"></p>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SUPABASE_URL = window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "";
+const SUPABASE_ANON_KEY = window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || "";
+const supa = window.supa || createSupabaseClientSafe();
+if(supa && !window.supa) window.supa = supa;
+
+function createSupabaseClientSafe(){
+  if(!window.supabase?.createClient) return null;
+  const url = String(SUPABASE_URL || "").trim();
+  const anonKey = String(SUPABASE_ANON_KEY || "").trim();
+  if(!url || !anonKey) return null;
+  try{
+    return window.supabase.createClient(url, anonKey);
+  }catch(err){
+    console.warn("contest_supabase_init_failed", err?.message || err);
+    return null;
+  }
+}
+
+const I18N = {
+  en: {
+    saleName: "BIG LAUNCHING DAYS SALE",
+    backBtn: "Back",
+    slide1Title: "Rolls-Royce Cullinan Custom Edition",
+    slide1Sub: "With INR 1.5 Crore Cash Prize",
+    slide2Title: "BMW M5 Grand Reward",
+    slide2Sub: "Plus Complimentary Disneyland Entry",
+    slide3Title: "Win Many More Premium Prizes",
+    slide3Sub: "Multiple surprise rewards across contest rounds",
+    metricDownloadLabel: "Download Gate",
+    metricResultLabel: "Result Status",
+    metricGatewayLabel: "Gateway",
+    resultLocked: "Locked until 5M",
+    resultOpen: "Unlocked",
+    gatewayOnline: "Online",
+    gatewayPending: "Pending",
+    gatewayOffline: "Disconnected",
+    haveReferralBtn: "Do You Have Referral Code? (Optional)",
+    voteNowBtn: "Vote Now",
+    mustReadTitle: "Must Be Read",
+    mustRead1: "Choose your favorite contest and vote fairly.",
+    mustRead2: "The more someone shares, the higher the winning chances.",
+    mustRead3: "One person can win multiple prizes.",
+    mustRead4: "Prizes are listed as per contest rules. Click for full details.",
+    mustRead5: "Referral points are counted only for unique visits and verified installs.",
+    readMoreBtn: "Read More",
+    refersAnyoneBtn: "Reffers Anyone",
+    refPanelTitle: "Enter Referral Code",
+    refPanelDesc: "Enter a valid referral code to connect referral tracking.",
+    refPlaceholder: "Type referral code",
+    applyReferralBtn: "Apply",
+    closeReferralBtn: "Close",
+    notifTitle: "New Referral Joined",
+    notifMessage: "{name} used your referral code {code}.",
+    errEnterCode: "Please enter a valid referral code.",
+    checkingCode: "Checking referral code...",
+    appliedCode: "Referral code applied successfully.",
+    toastApplied: "Referral code applied.",
+    errInvalid: "Referral code invalid.",
+    errSelf: "You cannot use your own referral code.",
+    errNetwork: "Referral server is not reachable right now.",
+    errGeneral: "Referral code validation failed.",
+    toastLinkCopied: "Referral link copied.",
+    toastCopyFailed: "Copy failed. Link shown in popup.",
+    toastLoginRequired: "Login required to get your referral code.",
+    toastUnavailable: "Referral code unavailable right now.",
+    promptLink: "Your unique referral link:",
+    toastPageFail: "Contest page failed to load."
+  },
+  hi: {
+    saleName: "बिग लॉन्चिंग डेज़ सेल",
+    backBtn: "वापस",
+    slide1Title: "रोल्स-रॉयस कुलिनन कस्टम एडिशन",
+    slide1Sub: "साथ में 1.5 करोड़ रुपये कैश प्राइज",
+    slide2Title: "बीएमडब्ल्यू एम5 ग्रैंड रिवॉर्ड",
+    slide2Sub: "साथ में डिज़नीलैंड फ्री एंट्री",
+    slide3Title: "कई और प्रीमियम प्राइज जीतें",
+    slide3Sub: "कॉन्टेस्ट राउंड्स में और भी सरप्राइज़ रिवॉर्ड्स",
+    metricDownloadLabel: "डाउनलोड गेट",
+    metricResultLabel: "रिजल्ट स्टेटस",
+    metricGatewayLabel: "गेटवे",
+    resultLocked: "5M तक लॉक्ड",
+    resultOpen: "अनलॉक",
+    gatewayOnline: "ऑनलाइन",
+    gatewayPending: "पेंडिंग",
+    gatewayOffline: "कनेक्शन नहीं है",
+    haveReferralBtn: "क्या आपके पास रेफरल कोड है? (वैकल्पिक)",
+    voteNowBtn: "अभी वोट करें",
+    mustReadTitle: "जरूर पढ़ें",
+    mustRead1: "अपना पसंदीदा कॉन्टेस्ट चुनें और निष्पक्ष वोट करें।",
+    mustRead2: "जो सबसे ज्यादा शेयर करेगा, उसके जीतने के चांस उतने ज्यादा होंगे।",
+    mustRead3: "एक व्यक्ति कई प्राइज जीत सकता है।",
+    mustRead4: "प्राइज कॉन्टेस्ट नियमों के अनुसार दिए गए हैं। पूरी जानकारी के लिए क्लिक करें।",
+    mustRead5: "रेफरल पॉइंट्स सिर्फ यूनिक विज़िट और वेरिफाइड इंस्टॉल पर ही जुड़ेंगे।",
+    readMoreBtn: "और पढ़ें",
+    refersAnyoneBtn: "किसी को रेफर करें",
+    refPanelTitle: "रेफरल कोड दर्ज करें",
+    refPanelDesc: "रेफरल ट्रैकिंग के लिए मान्य रेफरल कोड दर्ज करें।",
+    refPlaceholder: "रेफरल कोड लिखें",
+    applyReferralBtn: "लागू करें",
+    closeReferralBtn: "बंद करें",
+    notifTitle: "नया रेफरल जुड़ा",
+    notifMessage: "{name} ने आपका रेफरल कोड {code} इस्तेमाल किया।",
+    errEnterCode: "कृपया मान्य रेफरल कोड दर्ज करें।",
+    checkingCode: "रेफरल कोड जांचा जा रहा है...",
+    appliedCode: "रेफरल कोड सफलतापूर्वक लागू हो गया।",
+    toastApplied: "रेफरल कोड लागू हो गया।",
+    errInvalid: "रेफरल कोड अमान्य है।",
+    errSelf: "आप अपना खुद का रेफरल कोड इस्तेमाल नहीं कर सकते।",
+    errNetwork: "अभी रेफरल सर्वर उपलब्ध नहीं है।",
+    errGeneral: "रेफरल कोड सत्यापन विफल रहा।",
+    toastLinkCopied: "रेफरल लिंक कॉपी हो गया।",
+    toastCopyFailed: "कॉपी विफल। लिंक पॉपअप में दिखाया गया है।",
+    toastLoginRequired: "रेफरल कोड पाने के लिए लॉगिन जरूरी है।",
+    toastUnavailable: "अभी रेफरल कोड उपलब्ध नहीं है।",
+    promptLink: "आपका यूनिक रेफरल लिंक:",
+    toastPageFail: "कॉन्टेस्ट पेज लोड नहीं हो सका।"
+  }
+};
+
+const state = {
+  lang: "en",
+  userId: "",
+  userName: "",
+  userEmail: "",
+  visitorId: "",
+  incomingRef: "",
+  accountRegisterDone: false,
+  apiBase: "",
+  sliderIndex: 0,
+  metricsRetryTimer: 0,
+  metricsRetryBusy: false,
+  metrics: {
+    downloads: null,
+    target: 5000000,
+    resultsReady: false,
+    gateway: "pending"
+  }
+};
+
+const dom = {
+  saleName: document.getElementById("saleName"),
+  backBtn: document.getElementById("backBtn"),
+  slide1Title: document.getElementById("slide1Title"),
+  slide1Sub: document.getElementById("slide1Sub"),
+  slide2Title: document.getElementById("slide2Title"),
+  slide2Sub: document.getElementById("slide2Sub"),
+  slide3Title: document.getElementById("slide3Title"),
+  slide3Sub: document.getElementById("slide3Sub"),
+  metricDownloadLabel: document.getElementById("metricDownloadLabel"),
+  metricResultLabel: document.getElementById("metricResultLabel"),
+  metricGatewayLabel: document.getElementById("metricGatewayLabel"),
+  downloadsValue: document.getElementById("downloadsValue"),
+  resultStatus: document.getElementById("resultStatus"),
+  gatewayStatus: document.getElementById("gatewayStatus"),
+  heroSlider: document.getElementById("heroSlider"),
+  heroSliderDots: document.getElementById("heroSliderDots"),
+  haveReferralBtn: document.getElementById("haveReferralBtn"),
+  voteNowBtn: document.getElementById("voteNowBtn"),
+  mustReadTitle: document.getElementById("mustReadTitle"),
+  mustRead1: document.getElementById("mustRead1"),
+  mustRead2: document.getElementById("mustRead2"),
+  mustRead3: document.getElementById("mustRead3"),
+  mustRead4: document.getElementById("mustRead4"),
+  mustRead5: document.getElementById("mustRead5"),
+  readMoreBtn: document.getElementById("readMoreBtn"),
+  refersAnyoneBtn: document.getElementById("refersAnyoneBtn"),
+  referralPanel: document.getElementById("referralPanel"),
+  refPanelTitle: document.getElementById("refPanelTitle"),
+  refPanelDesc: document.getElementById("refPanelDesc"),
+  referralInput: document.getElementById("referralInput"),
+  applyReferralBtn: document.getElementById("applyReferralBtn"),
+  closeReferralBtn: document.getElementById("closeReferralBtn"),
+  referralNotice: document.getElementById("referralNotice"),
+  toast: document.getElementById("toast")
+};
+
+function resolveLang(){
+  const raw = String(window.USER_LANG || localStorage.getItem("lang") || "en").toLowerCase();
+  if(I18N[raw]) return raw;
+  const short = raw.split("-")[0];
+  return I18N[short] ? short : "en";
+}
+
+function tr(key){
+  const map = I18N[state.lang] || I18N.en;
+  return map[key] || I18N.en[key] || key;
+}
+
+function applyLanguage(){
+  state.lang = resolveLang();
+  document.documentElement.lang = state.lang;
+  dom.saleName.textContent = tr("saleName");
+  dom.backBtn.textContent = tr("backBtn");
+  dom.slide1Title.textContent = tr("slide1Title");
+  dom.slide1Sub.textContent = tr("slide1Sub");
+  dom.slide2Title.textContent = tr("slide2Title");
+  dom.slide2Sub.textContent = tr("slide2Sub");
+  dom.slide3Title.textContent = tr("slide3Title");
+  dom.slide3Sub.textContent = tr("slide3Sub");
+  dom.metricDownloadLabel.textContent = tr("metricDownloadLabel");
+  dom.metricResultLabel.textContent = tr("metricResultLabel");
+  dom.metricGatewayLabel.textContent = tr("metricGatewayLabel");
+  dom.haveReferralBtn.textContent = tr("haveReferralBtn");
+  dom.voteNowBtn.textContent = tr("voteNowBtn");
+  dom.mustReadTitle.textContent = tr("mustReadTitle");
+  dom.mustRead1.textContent = tr("mustRead1");
+  dom.mustRead2.textContent = tr("mustRead2");
+  dom.mustRead3.textContent = tr("mustRead3");
+  dom.mustRead4.textContent = tr("mustRead4");
+  dom.mustRead5.textContent = tr("mustRead5");
+  dom.readMoreBtn.textContent = tr("readMoreBtn");
+  dom.refersAnyoneBtn.textContent = tr("refersAnyoneBtn");
+  dom.refPanelTitle.textContent = tr("refPanelTitle");
+  dom.refPanelDesc.textContent = tr("refPanelDesc");
+  dom.referralInput.placeholder = tr("refPlaceholder");
+  dom.applyReferralBtn.textContent = tr("applyReferralBtn");
+  dom.closeReferralBtn.textContent = tr("closeReferralBtn");
+  renderContestMetrics();
+}
+
+function showToast(message, isError){
+  if(!message) return;
+  dom.toast.textContent = message;
+  dom.toast.className = "toast show " + (isError ? "err" : "ok");
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => {
+    dom.toast.className = "toast";
+  }, 2400);
+}
+
+function renderSlider(index){
+  if(!dom.heroSlider) return;
+  const slides = [...dom.heroSlider.querySelectorAll(".slide")];
+  if(!slides.length) return;
+  const dots = dom.heroSliderDots ? [...dom.heroSliderDots.querySelectorAll(".slider-dot")] : [];
+  const safe = ((Number(index) || 0) % slides.length + slides.length) % slides.length;
+  state.sliderIndex = safe;
+  slides.forEach((slide, idx) => slide.classList.toggle("active", idx === safe));
+  dots.forEach((dot, idx) => dot.classList.toggle("active", idx === safe));
+}
+
+function startSlider(){
+  if(!dom.heroSlider) return;
+  const slides = [...dom.heroSlider.querySelectorAll(".slide")];
+  if(!slides.length) return;
+  clearInterval(startSlider._timer);
+  renderSlider(0);
+}
+
+function safeInt(value){
+  const n = Number(value || 0);
+  if(!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.floor(n));
+}
+
+function formatInt(value){
+  return new Intl.NumberFormat("en-US").format(safeInt(value));
+}
+
+function renderContestMetrics(){
+  const target = safeInt(state.metrics.target) || 5000000;
+  if(state.metrics.downloads === null || typeof state.metrics.downloads === "undefined"){
+    dom.downloadsValue.textContent = "-- / " + formatInt(target);
+  }else{
+    const downloads = safeInt(state.metrics.downloads);
+    dom.downloadsValue.textContent = formatInt(downloads) + " / " + formatInt(target);
+  }
+  dom.resultStatus.textContent = state.metrics.resultsReady ? tr("resultOpen") : tr("resultLocked");
+  if(state.metrics.gateway === "online"){
+    dom.gatewayStatus.textContent = tr("gatewayOnline");
+    return;
+  }
+  if(state.metrics.gateway === "pending"){
+    dom.gatewayStatus.textContent = tr("gatewayPending");
+    return;
+  }
+  dom.gatewayStatus.textContent = tr("gatewayOffline");
+}
+
+async function loadContestMetrics(){
+  state.metrics = {
+    downloads: null,
+    target: 5000000,
+    resultsReady: false,
+    gateway: "pending"
+  };
+  renderContestMetrics();
+
+  try{
+    const payload = await fetchJson(apiUrl("/api/contest/dashboard"), { method:"GET" });
+    const data = payload?.data || {};
+    state.metrics.downloads = safeInt(data.current_downloads);
+    state.metrics.target = safeInt(data.download_target) || 5000000;
+    state.metrics.resultsReady = Boolean(data.results_ready);
+    state.metrics.gateway = data.razorpay_ready ? "online" : "pending";
+  }catch(_){
+    state.metrics.gateway = "offline";
+  }
+  renderContestMetrics();
+}
+
+function bindMetricsAutoRetry(){
+  if(bindMetricsAutoRetry._bound) return;
+  bindMetricsAutoRetry._bound = true;
+
+  const retry = async () => {
+    if(state.metricsRetryBusy) return;
+    if(document.visibilityState === "hidden") return;
+    if(state.metrics.gateway !== "offline") return;
+    state.metricsRetryBusy = true;
+    try{
+      await loadContestMetrics();
+    }catch(_){ }
+    state.metricsRetryBusy = false;
+  };
+
+  state.metricsRetryTimer = setInterval(retry, 5000);
+  document.addEventListener("visibilitychange", () => {
+    if(document.visibilityState === "visible"){
+      retry();
+    }
+  });
+  window.addEventListener("beforeunload", () => {
+    if(state.metricsRetryTimer){
+      clearInterval(state.metricsRetryTimer);
+      state.metricsRetryTimer = 0;
+    }
+  }, { once:true });
+}
+
+function normalizeReferralCode(raw){
+  return String(raw || "")
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9@_-]/g, "")
+    .slice(0, 36);
+}
+
+function shortUserId(raw){
+  const v = String(raw || "").trim();
+  if(!v) return "";
+  if(v.length <= 10) return v;
+  return v.slice(0, 4) + "..." + v.slice(-4);
+}
+
+function referralActorName(){
+  if(state.userName) return state.userName;
+  if(state.userEmail) return String(state.userEmail).split("@")[0] || "New User";
+  return shortUserId(state.userId) || "New User";
+}
+
+function normalizeApiBase(raw){
+  return String(raw || "").trim().replace(/\/+$/g, "");
+}
+
+function isLoopbackBase(raw){
+  const normalized = normalizeApiBase(raw);
+  if(!normalized) return false;
+  try{
+    const host = String(new URL(normalized).hostname || "").toLowerCase();
+    return host === "127.0.0.1" || host === "localhost";
+  }catch(_){
+    return false;
+  }
+}
+
+function clearStoredApiBase(){
+  try{
+    localStorage.removeItem("contest_api_base");
+    localStorage.removeItem("api_base");
+  }catch(_){ }
+}
+
+function canUseRelativeApiPath(){
+  return String(window.location.port || "") === "3000";
+}
+
+function allowLoopbackApiBase(){
+  if(canUseRelativeApiPath()) return true;
+  const host = String(window.location.hostname || "").toLowerCase();
+  if(window.location.protocol === "file:" || host === "localhost" || host === "127.0.0.1"){
+    return true;
+  }
+  const params = new URLSearchParams(window.location.search);
+  const raw = String(
+    params.get("allow_local_api") ||
+    params.get("force_local_api") ||
+    params.get("local_api") ||
+    ""
+  ).trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
+function resolveApiBase(){
+  const params = new URLSearchParams(window.location.search);
+  const queryRaw = String(params.get("api_base") || "").trim();
+  const allowLoopback = allowLoopbackApiBase();
+  const fromQuery = normalizeApiBase(queryRaw);
+  if(fromQuery){
+    if(!(isLoopbackBase(fromQuery) && !allowLoopback)){
+      try{
+        localStorage.setItem("contest_api_base", fromQuery);
+        localStorage.setItem("api_base", fromQuery);
+      }catch(_){ }
+      return fromQuery;
+    }
+    clearStoredApiBase();
+  }
+
+  let fromStorage = "";
+  try{
+    fromStorage = normalizeApiBase(localStorage.getItem("contest_api_base") || localStorage.getItem("api_base") || "");
+  }catch(_){ }
+  if(fromStorage){
+    const skipStoredLoopback = !allowLoopback && isLoopbackBase(fromStorage);
+    if(skipStoredLoopback){
+      clearStoredApiBase();
+    }else{
+      return fromStorage;
+    }
+  }
+
+  const fromGlobal = normalizeApiBase(window.CONTEST_API_BASE || window.API_BASE || "");
+  if(fromGlobal && !(isLoopbackBase(fromGlobal) && !allowLoopback)){
+    return fromGlobal;
+  }
+  if(window.location.protocol === "file:") return "http://127.0.0.1:3000";
+  const host = String(window.location.hostname || "").toLowerCase();
+  if((host === "localhost" || host === "127.0.0.1") && !canUseRelativeApiPath()){
+    return "http://127.0.0.1:3000";
+  }
+  if(canUseRelativeApiPath()) return "";
+  return "";
+}
+
+function apiUrl(path){
+  if(!String(path).startsWith("/")) throw new Error("Invalid API path");
+  return state.apiBase ? state.apiBase + path : path;
+}
+
+async function fetchJson(url, options){
+  const res = await fetch(url, options);
+  const data = await res.json().catch(() => ({}));
+  if(!res.ok || !data?.ok){
+    const msg = data?.message || data?.error || ("Request failed: " + res.status);
+    const err = new Error(msg);
+    err.payload = data;
+    throw err;
+  }
+  return data;
+}
+
+function postJson(path, payload){
+  return fetchJson(apiUrl(path), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {})
+  });
+}
+
+function getStoredUser(){
+  try{
+    const raw = JSON.parse(localStorage.getItem("user") || "{}");
+    return raw && typeof raw === "object" ? raw : {};
+  }catch(_){
+    return {};
+  }
+}
+
+function getUserFromSupabaseStorage(){
+  try{
+    for(let i = 0; i < localStorage.length; i += 1){
+      const key = String(localStorage.key(i) || "");
+      if(!key.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
+      const value = localStorage.getItem(key);
+      if(!value) continue;
+      const parsed = JSON.parse(value);
+      const user = parsed?.user || parsed?.currentSession?.user || parsed?.session?.user || null;
+      if(user?.id) return user;
+    }
+  }catch(_){ }
+  return null;
+}
+
+async function initUser(){
+  const stored = getStoredUser();
+  if(stored?.uid){
+    state.userId = String(stored.uid || "");
+    state.userName = String(stored.name || "");
+    state.userEmail = String(stored.email || "");
+  }
+
+  if(supa?.auth){
+    try{
+      const sessionRes = await supa.auth.getSession();
+      const sessionUser = sessionRes?.data?.session?.user || null;
+      if(sessionUser?.id){
+        state.userId = sessionUser.id || state.userId;
+        state.userEmail = sessionUser.email || state.userEmail;
+        state.userName = sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || state.userName || "";
+      }
+    }catch(_){ }
+
+    if(!state.userId){
+      try{
+        const userRes = await supa.auth.getUser();
+        const user = userRes?.data?.user || null;
+        if(user?.id){
+          state.userId = user.id || state.userId;
+          state.userEmail = user.email || state.userEmail;
+          state.userName = user.user_metadata?.full_name || user.user_metadata?.name || state.userName || "";
+        }
+      }catch(_){ }
+    }
+  }
+
+  if(!state.userId){
+    const storageUser = getUserFromSupabaseStorage();
+    if(storageUser?.id){
+      state.userId = storageUser.id || state.userId;
+      state.userEmail = storageUser.email || state.userEmail;
+      state.userName = storageUser.user_metadata?.full_name || storageUser.user_metadata?.name || state.userName || "";
+    }
+  }
+
+  if(!state.userName && state.userEmail){
+    state.userName = String(state.userEmail.split("@")[0] || "").trim();
+  }
+
+  if(state.userId){
+    try{
+      localStorage.setItem("user", JSON.stringify({
+        uid: state.userId,
+        name: state.userName || "",
+        email: state.userEmail || ""
+      }));
+    }catch(_){ }
+  }
+}
+
+async function registerContestAccountForSession(){
+  if(!state.userId) return false;
+  if(state.accountRegisterDone) return true;
+  try{
+    await postJson("/api/contest/account/register", {
+      user_id: state.userId,
+      user_name: state.userName || "",
+      email: state.userEmail || ""
+    });
+    state.accountRegisterDone = true;
+    return true;
+  }catch(_){
+    return false;
+  }
+}
+
+function ensureVisitorId(){
+  let id = String(localStorage.getItem("contest_visitor_id") || "").trim();
+  if(!id){
+    id = "v_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-6);
+    localStorage.setItem("contest_visitor_id", id);
+  }
+  state.visitorId = id;
+}
+
+function parseIncomingRef(){
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = normalizeReferralCode(params.get("ref") || "");
+  if(fromQuery){
+    state.incomingRef = fromQuery;
+    try{ localStorage.setItem("contest_last_ref_code", fromQuery); }catch(_){ }
+    return;
+  }
+  state.incomingRef = normalizeReferralCode(localStorage.getItem("contest_last_ref_code") || "");
+}
+
+function referralAutoApplyStorageKey(userId, code){
+  return "contest_ref_applied_" + String(userId || "").trim() + "_" + String(code || "").trim().toUpperCase();
+}
+
+function wasReferralAutoApplied(userId, code){
+  const key = referralAutoApplyStorageKey(userId, code);
+  if(!key) return false;
+  try{
+    return localStorage.getItem(key) === "1";
+  }catch(_){
+    return false;
+  }
+}
+
+function markReferralAutoApplied(userId, code){
+  const key = referralAutoApplyStorageKey(userId, code);
+  if(!key) return;
+  try{
+    localStorage.setItem(key, "1");
+  }catch(_){ }
+}
+
+function msgTemplate(key, vars){
+  let text = tr(key);
+  Object.keys(vars || {}).forEach(name => {
+    text = text.replace("{" + name + "}", String(vars[name]));
+  });
+  return text;
+}
+
+async function sendReferralSuccessNotification(refUserId, referralCode){
+  if(!supa || !refUserId) return;
+  const actor = referralActorName();
+  const row = {
+    receiver_user_id: refUserId,
+    type: "referral_join",
+    title: tr("notifTitle"),
+    message: msgTemplate("notifMessage", { name: actor, code: referralCode }),
+    buyer_name: actor,
+    is_read: false,
+    is_deleted: false
+  };
+  const { error } = await supa.from("notifications").insert([row]);
+  if(error) console.error("referral_notification_error", error);
+}
+
+async function applyReferralCode(){
+  const code = normalizeReferralCode(dom.referralInput.value);
+  if(!state.userId){
+    const msg = tr("toastLoginRequired");
+    dom.referralNotice.textContent = msg;
+    dom.referralNotice.className = "notice warn";
+    showToast(msg, true);
+    return;
+  }
+  if(!code){
+    dom.referralNotice.textContent = tr("errEnterCode");
+    dom.referralNotice.className = "notice warn";
+    return;
+  }
+
+  dom.applyReferralBtn.disabled = true;
+  dom.referralNotice.textContent = tr("checkingCode");
+  dom.referralNotice.className = "notice";
+
+  try{
+    const visitPayload = await postJson("/api/contest/share/visit", {
+      ref_code: code,
+      visitor_user_id: state.userId || "",
+      visitor_user_name: state.userName || "",
+      visitor_id: state.visitorId
+    });
+
+    if(String(visitPayload?.reason || "").toLowerCase() === "self_referral"){
+      throw new Error("self_referral");
+    }
+
+    const installPayload = await postJson("/api/contest/install", {
+      user_id: state.userId || "",
+      user_name: state.userName || "",
+      ref_code: code,
+      source: "contest_referral_manual",
+      device_id: state.visitorId
+    });
+
+    state.incomingRef = code;
+    try{ localStorage.setItem("contest_last_ref_code", code); }catch(_){ }
+    markReferralAutoApplied(state.userId, code);
+
+    const refUserId = String(installPayload?.ref_user_id || visitPayload?.ref_user_id || "").trim();
+    const isNewCredit = Boolean(installPayload?.credited) && !Boolean(installPayload?.duplicate_install);
+    if(isNewCredit && refUserId){
+      await sendReferralSuccessNotification(refUserId, code);
+    }
+
+    dom.referralNotice.textContent = tr("appliedCode");
+    dom.referralNotice.className = "notice ok";
+    showToast(tr("toastApplied"), false);
+    await loadContestMetrics();
+    setTimeout(() => { dom.referralPanel.classList.add("hidden"); }, 700);
+  }catch(err){
+    const raw = String(err?.message || err?.payload?.error || "").toLowerCase();
+    let msg = tr("errGeneral");
+    if(raw.includes("ref_code_not_found")) msg = tr("errInvalid");
+    if(raw.includes("self_referral")) msg = tr("errSelf");
+    if(raw.includes("failed") || raw.includes("fetch") || raw.includes("network")) msg = tr("errNetwork");
+    dom.referralNotice.textContent = msg;
+    dom.referralNotice.className = "notice warn";
+    showToast(msg, true);
+  }finally{
+    dom.applyReferralBtn.disabled = false;
+  }
+}
+
+async function autoApplyIncomingReferral(){
+  const code = normalizeReferralCode(state.incomingRef);
+  if(!code || !state.userId || !state.visitorId) return false;
+  if(wasReferralAutoApplied(state.userId, code)) return true;
+  try{
+    const visitPayload = await postJson("/api/contest/share/visit", {
+      ref_code: code,
+      visitor_user_id: state.userId,
+      visitor_user_name: state.userName || "",
+      visitor_id: state.visitorId
+    });
+    if(String(visitPayload?.reason || "").toLowerCase() === "self_referral"){
+      markReferralAutoApplied(state.userId, code);
+      return false;
+    }
+
+    const installPayload = await postJson("/api/contest/install", {
+      user_id: state.userId,
+      user_name: state.userName || "",
+      ref_code: code,
+      source: "contest_referral_auto",
+      device_id: state.visitorId
+    });
+
+    const refUserId = String(installPayload?.ref_user_id || visitPayload?.ref_user_id || "").trim();
+    const isNewCredit = Boolean(installPayload?.credited) && !Boolean(installPayload?.duplicate_install);
+    if(isNewCredit && refUserId){
+      await sendReferralSuccessNotification(refUserId, code);
+    }
+    markReferralAutoApplied(state.userId, code);
+    return true;
+  }catch(_){
+    return false;
+  }
+}
+
+async function getReferralCode(){
+  if(!state.userId) throw new Error("login_required");
+  const qp = new URLSearchParams();
+  qp.set("user_id", state.userId);
+  if(state.userName) qp.set("user_name", state.userName);
+  const payload = await fetchJson(apiUrl("/api/contest/dashboard?" + qp.toString()), { method:"GET" });
+  const code = String(payload?.data?.user_stats?.referral_code || "").trim();
+  if(!code) throw new Error("referral_unavailable");
+  return code;
+}
+
+function makeShareUrl(refCode){
+  const base = window.location.protocol === "file:"
+    ? "http://127.0.0.1:3000/contest.html"
+    : (window.location.origin + window.location.pathname);
+  const url = new URL(base);
+  url.searchParams.set("ref", refCode);
+  return url.toString();
+}
+
+function withNavQuery(path){
+  const params = new URLSearchParams(window.location.search);
+  if(state.apiBase){
+    params.set("api_base", state.apiBase);
+  }
+  const qs = params.toString();
+  return qs ? (path + "?" + qs) : path;
+}
+
+async function handleRefersAnyone(){
+  try{
+    const code = await getReferralCode();
+    const link = makeShareUrl(code);
+
+    try{
+      await navigator.clipboard.writeText(link);
+      showToast(tr("toastLinkCopied"), false);
+    }catch(_){
+      showToast(tr("toastCopyFailed"), true);
+    }
+
+    try{
+      await postJson("/api/contest/share/action", {
+        user_id: state.userId,
+        user_name: state.userName || "",
+        action: "copy_link"
+      });
+    }catch(_){ }
+
+    window.prompt(tr("promptLink"), link);
+  }catch(err){
+    const raw = String(err?.message || "").toLowerCase();
+    if(raw.includes("login_required")){
+      showToast(tr("toastLoginRequired"), true);
+      window.location.href = "login.html";
+      return;
+    }
+    showToast(tr("toastUnavailable"), true);
+  }
+}
+
+function bindEvents(){
+  dom.backBtn.href = withNavQuery("index.html");
+  dom.backBtn.addEventListener("click", event => {
+    event.preventDefault();
+    if(window.history.length > 1){
+      window.history.back();
+      return;
+    }
+    window.location.href = withNavQuery("index.html");
+  });
+
+  dom.haveReferralBtn.addEventListener("click", () => {
+    dom.referralPanel.classList.remove("hidden");
+    dom.referralInput.value = state.incomingRef || "";
+    dom.referralNotice.textContent = "";
+    dom.referralNotice.className = "notice";
+    dom.referralPanel.scrollIntoView({ behavior:"smooth", block:"start" });
+  });
+
+  dom.closeReferralBtn.addEventListener("click", () => {
+    dom.referralPanel.classList.add("hidden");
+  });
+
+  dom.referralInput.addEventListener("input", () => {
+    dom.referralInput.value = normalizeReferralCode(dom.referralInput.value);
+  });
+
+  dom.applyReferralBtn.addEventListener("click", applyReferralCode);
+
+  dom.voteNowBtn.addEventListener("click", () => {
+    window.location.href = withNavQuery("vote.html");
+  });
+
+  dom.readMoreBtn.addEventListener("click", () => {
+    window.location.href = withNavQuery("readmore.html");
+  });
+
+  dom.refersAnyoneBtn.addEventListener("click", () => {
+    handleRefersAnyone();
+  });
+
+  document.addEventListener("languageUpdated", () => {
+    applyLanguage();
+  });
+}
+
+async function init(){
+  if(window.__contestInitDone) return;
+  window.__contestInitDone = true;
+
+  applyLanguage();
+  state.apiBase = resolveApiBase();
+  bindMetricsAutoRetry();
+  ensureVisitorId();
+  parseIncomingRef();
+  startSlider();
+  bindEvents();
+  await initUser();
+  await registerContestAccountForSession();
+  await autoApplyIncomingReferral();
+  await loadContestMetrics();
+}
+
+if(!window.__contestInitPromise){
+  window.__contestInitPromise = init().catch(err => {
+    console.error("contest_init_error", err);
+    showToast(tr("toastPageFail"), true);
+  });
+}
+</script>
+</body>
+</html>

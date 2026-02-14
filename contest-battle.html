@@ -1,0 +1,2229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NOVAGAPP Contest Battle</title>
+<script>
+(() => {
+  const src = new URLSearchParams(location.search);
+  const host = String(location.hostname || "").toLowerCase();
+  const isLocalHost = host === "127.0.0.1" || host === "localhost";
+  const onLiveServer = String(location.port || "") === "5500";
+  const explicitBase = String(src.get("api_base") || "").trim().replace(/\/+$/g, "");
+  if(!explicitBase){
+    if(isLocalHost && onLiveServer){
+      window.CONTEST_API_BASE = "http://127.0.0.1:3000";
+    }
+    return;
+  }
+  let loopback = false;
+  try{
+    const host = String(new URL(explicitBase).hostname || "").toLowerCase();
+    loopback = host === "127.0.0.1" || host === "localhost";
+  }catch(_){
+    return;
+  }
+  const rawFlag = String(
+    src.get("allow_local_api") ||
+    src.get("force_local_api") ||
+    src.get("local_api") ||
+    ""
+  ).trim().toLowerCase();
+  const allowLocal = rawFlag === "1" || rawFlag === "true" || rawFlag === "yes";
+  const canUseRelative = String(location.port || "") === "3000";
+  if(loopback && !(allowLocal || canUseRelative || isLocalHost)){
+    return;
+  }
+  window.CONTEST_API_BASE = explicitBase;
+})();
+</script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f1f4fb;
+  --panel:#ffffff;
+  --ink:#121826;
+  --muted:#58637a;
+  --line:#e2e8f5;
+  --orange:#ff7a14;
+  --orange-dark:#dd5500;
+  --lime:#86de50;
+  --pink:#ffe4eb;
+  --black:#050505;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:"Manrope",system-ui,sans-serif;
+  color:var(--ink);
+  background:
+    radial-gradient(circle at 8% -8%, rgba(255,130,0,.32) 0%, transparent 34%),
+    radial-gradient(circle at 92% 5%, rgba(0,163,255,.18) 0%, transparent 28%),
+    linear-gradient(180deg,#f7f9ff 0%, var(--bg) 100%);
+}
+body.compact-mode .prize-card{
+  max-height:0;
+  padding-top:0;
+  padding-bottom:0;
+  margin-top:0;
+  margin-bottom:0;
+  opacity:0;
+  border-width:0;
+  pointer-events:none;
+  transform:translateY(-14px);
+}
+body.compact-mode .hero .row,
+body.compact-mode .hero .muted,
+body.compact-mode .metrics{
+  display:none;
+}
+body.compact-mode .hero{
+  padding-top:10px;
+  padding-bottom:10px;
+}
+.page{
+  width:min(1120px,96vw);
+  margin:0 auto;
+  padding:0 0 34px;
+  display:grid;
+  gap:14px;
+}
+.card{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:20px;
+  padding:16px;
+  box-shadow:0 14px 30px rgba(17,28,45,.08);
+}
+.hero{
+  position:sticky;
+  top:0;
+  z-index:45;
+  background:var(--black);
+  color:#fff;
+  border:0;
+  border-radius:0 0 18px 18px;
+  padding:8px 12px 10px;
+  box-shadow:0 16px 26px rgba(0,0,0,.34);
+}
+.hero-shell{
+  display:grid;
+  grid-template-columns:auto 1fr;
+  gap:12px;
+  align-items:center;
+}
+.hero-avatar{
+  width:72px;
+  height:72px;
+  border-radius:50%;
+  border:2px solid #efefef;
+  background:radial-gradient(circle at 30% 30%, #fff 0%, #e2e2e2 74%);
+  flex-shrink:0;
+}
+.hero-meta{
+  min-width:0;
+  display:grid;
+  gap:4px;
+}
+.hero .row{
+  justify-content:space-between;
+  align-items:center;
+}
+.back-link,.mini-link{
+  display:inline-block;
+  text-decoration:none;
+  font-weight:800;
+  border-radius:999px;
+  padding:6px 10px;
+}
+.back-link{
+  color:#090909;
+  background:#fff;
+  border:1px solid #d9d9d9;
+}
+.mini-link{
+  color:#fff;
+  background:rgba(255,255,255,.18);
+  border:1px solid rgba(255,255,255,.3);
+}
+.chip{
+  font-size:11px;
+  font-weight:900;
+  letter-spacing:.07em;
+  text-transform:uppercase;
+  color:#1f1f1f;
+  background:#ffe2c5;
+  border-radius:999px;
+  padding:7px 10px;
+}
+h1,h2,h3,p{margin:0}
+h1{
+  font-family:"Space Grotesk",sans-serif;
+  font-size:clamp(20px,3.2vw,44px);
+  line-height:1.07;
+  letter-spacing:.01em;
+}
+h2{
+  font-family:"Space Grotesk",sans-serif;
+  font-size:clamp(20px,2.4vw,33px);
+  line-height:1.1;
+}
+.muted{
+  margin-top:2px;
+  color:var(--muted);
+  font-size:14px;
+  line-height:1.5;
+}
+.hero .muted{
+  color:#dbdbdb;
+  font-size:12px;
+  display:-webkit-box;
+  -webkit-line-clamp:1;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+}
+.metrics{
+  margin-top:8px;
+  display:grid;
+  grid-template-columns:repeat(4,minmax(150px,1fr));
+  gap:6px;
+}
+.metric{
+  background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.2);
+  border-radius:10px;
+  padding:8px;
+}
+.metric small{
+  display:block;
+  color:#f0ceb2;
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.03em;
+}
+.metric strong{
+  display:block;
+  margin-top:4px;
+  font-size:13px;
+  color:#fff;
+}
+.prize-card{
+  background:linear-gradient(140deg,#ffc992 0%, #ff9a3d 74%);
+  color:#1b1209;
+  border:0;
+  border-radius:24px;
+  padding:34px 28px;
+  max-height:420px;
+  overflow:hidden;
+  transition:max-height .35s ease, padding .35s ease, margin .35s ease, opacity .35s ease, transform .35s ease;
+}
+.prize-card .mini-link{
+  background:rgba(255,255,255,.55);
+  border-color:rgba(60,32,7,.25);
+  color:#281506;
+}
+.prize-card h2{
+  color:#140c04;
+  font-family:"Space Grotesk",sans-serif;
+  font-size:clamp(24px,3vw,40px);
+  letter-spacing:.01em;
+}
+.prize-list{
+  margin:16px 0 0;
+  padding-left:22px;
+  display:grid;
+  gap:9px;
+  color:#2e1807;
+  line-height:1.45;
+  font-size:15px;
+  font-weight:700;
+}
+.prize-card .notice{
+  color:#2c1707;
+  font-weight:700;
+  margin-top:14px;
+}
+.battle-card{
+  background:transparent;
+  border:0;
+  box-shadow:none;
+  padding:0;
+}
+.battle{
+  margin-top:14px;
+  display:grid;
+  grid-template-columns:1fr 140px 1fr;
+  gap:14px;
+  align-items:stretch;
+}
+.fighter{
+  border:8px solid #ecf1f9;
+  border-radius:8px;
+  background:var(--lime);
+  padding:10px;
+  display:grid;
+  gap:10px;
+  align-content:center;
+}
+.fighter img{
+  width:100%;
+  max-height:420px;
+  aspect-ratio:3/4;
+  border-radius:8px;
+  border:2px solid rgba(0,0,0,.08);
+  background:rgba(255,255,255,.35);
+  object-fit:cover;
+}
+.fighter h3{
+  font-size:18px;
+  line-height:1.2;
+  text-align:center;
+}
+.vs{
+  position:relative;
+  width:100%;
+  min-height:320px;
+  border-radius:10px;
+  border:8px solid #ecf1f9;
+  background:linear-gradient(180deg,#f6f8fc 0%, #e7ecf7 100%);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:#ffd400;
+  text-shadow:4px 4px 0 #000;
+  font-family:"Space Grotesk",sans-serif;
+  font-weight:900;
+  font-size:76px;
+  z-index:1;
+}
+.vs::before{
+  content:"";
+  position:absolute;
+  width:52px;
+  height:240px;
+  background:#e40000;
+  clip-path:polygon(56% 0, 100% 0, 64% 51%, 88% 51%, 14% 100%, 40% 56%, 12% 56%);
+  z-index:-1;
+}
+.bars{
+  margin-top:14px;
+  display:grid;
+  gap:10px;
+  padding:0 4px;
+}
+.bar small{
+  display:flex;
+  justify-content:space-between;
+  font-size:12px;
+  color:#3f3f3f;
+  font-weight:800;
+}
+.track{
+  margin-top:5px;
+  height:10px;
+  background:#f4d7be;
+  border-radius:999px;
+  overflow:hidden;
+}
+.track span{
+  display:block;
+  height:100%;
+  background:linear-gradient(90deg,#f8a253,#ff6a00);
+}
+.vote-card{
+  background:linear-gradient(180deg,#ffffff 0%, #f6f9ff 100%);
+  border-radius:16px;
+}
+.side-row,.pack-row{
+  margin-top:12px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+}
+.side-btn,.pack-btn{
+  border-radius:7px;
+  border:1px solid #e3d7dc;
+  color:#181818;
+  background:#fff;
+  font-size:14px;
+  font-weight:900;
+  cursor:pointer;
+  transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.side-btn{
+  padding:10px 14px;
+}
+.pack-btn{
+  flex:1 1 180px;
+  min-height:68px;
+  text-align:left;
+  padding:10px 12px;
+  display:grid;
+  align-content:center;
+  gap:2px;
+  background:var(--pink);
+}
+.pack-btn:hover,.side-btn:hover{
+  transform:translateY(-1px);
+  box-shadow:0 10px 18px rgba(20,35,60,.12);
+  border-color:#ffc696;
+}
+.pack-label{
+  font-size:12px;
+  color:#3f3f3f;
+}
+.pack-price{
+  font-size:28px;
+  line-height:1;
+  font-family:"Space Grotesk",sans-serif;
+}
+.pack-tag{
+  justify-self:start;
+  font-size:10px;
+  font-weight:900;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  background:rgba(0,0,0,.08);
+  color:#262626;
+  border-radius:999px;
+  padding:2px 7px;
+}
+.side-btn.active,.pack-btn.active{
+  background:linear-gradient(150deg,#ff7c20 0%,#ff5f00 100%);
+  color:#fff;
+  border-color:#ff5f00;
+}
+.side-btn.active .pack-label,.pack-btn.active .pack-label{
+  color:#ffeada;
+}
+.side-btn.active .pack-tag,.pack-btn.active .pack-tag{
+  background:rgba(255,255,255,.22);
+  color:#fff;
+}
+#payBtn{
+  margin-top:14px;
+  width:100%;
+  border:0;
+  border-radius:12px;
+  background:linear-gradient(135deg,var(--orange) 0%, var(--orange-dark) 100%);
+  color:#fff;
+  font-family:"Space Grotesk",sans-serif;
+  font-size:clamp(30px,4.2vw,58px);
+  font-weight:900;
+  letter-spacing:.02em;
+  padding:18px 14px;
+  cursor:pointer;
+  position:sticky;
+  bottom:10px;
+  box-shadow:0 16px 24px rgba(255,106,0,.32);
+  transition:transform .15s ease, box-shadow .15s ease, filter .15s ease;
+}
+#payBtn:hover:not(:disabled){
+  transform:translateY(-1px);
+  filter:brightness(1.03);
+}
+#payBtn:disabled{
+  opacity:.56;
+  cursor:not-allowed;
+  box-shadow:none;
+}
+.selection-summary{
+  margin-top:12px;
+  border:1px solid #e5ebf7;
+  background:#fbfdff;
+  border-radius:8px;
+  padding:11px 12px;
+  font-size:13px;
+  font-weight:700;
+  color:#2e3c55;
+  line-height:1.45;
+}
+.state-pills{
+  margin-top:10px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.pill{
+  border-radius:999px;
+  font-size:11px;
+  font-weight:900;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  padding:6px 10px;
+  border:1px solid #cecece;
+  background:#fff;
+  color:#353535;
+}
+.pill.good{
+  border-color:#8fd0ab;
+  background:#edfff4;
+  color:#146238;
+}
+.pill.bad{
+  border-color:#efac9f;
+  background:#fff2ef;
+  color:#8f2914;
+}
+.insight-card{
+  background:linear-gradient(180deg,#fbfbfb 0%, #f0f0f0 100%);
+}
+.insight-grid{
+  margin-top:12px;
+  display:grid;
+  grid-template-columns:repeat(2,minmax(220px,1fr));
+  gap:10px;
+}
+.mini-panel{
+  border:1px solid #e4ebf7;
+  border-radius:12px;
+  background:#fff;
+  padding:11px;
+}
+.mini-panel h3{
+  font-size:14px;
+  margin:0;
+}
+.mini-metrics{
+  margin-top:8px;
+  display:grid;
+  gap:6px;
+  font-size:13px;
+  color:#3f3f3f;
+}
+.mini-metrics strong{
+  color:#171717;
+  font-size:15px;
+  font-family:"Space Grotesk",sans-serif;
+}
+.leader-list{
+  margin:8px 0 0;
+  padding-left:20px;
+  display:grid;
+  gap:6px;
+  color:#2d2d2d;
+  font-size:13px;
+}
+.leader-list li{
+  display:flex;
+  justify-content:space-between;
+  gap:8px;
+}
+.leader-name{
+  font-weight:700;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.leader-score{
+  font-weight:800;
+  color:#df5b00;
+}
+.notice{
+  margin-top:10px;
+  font-size:13px;
+  color:var(--muted);
+  line-height:1.45;
+}
+.notice.warn{color:#b2381f}
+.toast{
+  position:fixed;
+  right:16px;
+  bottom:16px;
+  padding:10px 12px;
+  border-radius:10px;
+  font-size:13px;
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .2s ease;
+  color:#fff;
+  z-index:90;
+}
+.toast.show{opacity:1}
+.toast.err{background:#b23622}
+.toast.ok{background:#1f8b4b}
+@media (max-width:980px){
+  .metrics{grid-template-columns:repeat(2,minmax(140px,1fr))}
+  .battle{grid-template-columns:1fr}
+  .vs{
+    min-height:170px;
+    font-size:58px;
+  }
+  .vs::before{
+    height:120px;
+    width:36px;
+  }
+  .insight-grid{grid-template-columns:1fr}
+}
+@media (max-width:620px){
+  .hero-shell{
+    grid-template-columns:72px 1fr;
+    gap:10px;
+  }
+  .hero-avatar{
+    width:72px;
+    height:72px;
+  }
+  .metrics{grid-template-columns:1fr}
+  .prize-card{padding:24px 18px}
+  .fighter{min-height:auto}
+  .pack-btn{flex:1 1 140px}
+}
+</style>
+</head>
+<body>
+<main class="page">
+  <section class="card hero">
+    <div class="hero-shell">
+      <div class="hero-avatar" id="heroAvatar" aria-hidden="true"></div>
+      <div class="hero-meta">
+        <div class="row">
+          <a class="back-link" id="backLink" href="contest.html">Back to Contest List</a>
+          <span class="chip" id="chipText">NOVAGAPP VS BATTLE</span>
+        </div>
+        <h1 id="battleTitle">Contest Battle</h1>
+        <p class="muted" id="battleSubtitle">Loading...</p>
+      </div>
+    </div>
+    <div class="metrics">
+      <article class="metric"><small id="metricDownloadLabel">Download Gate</small><strong id="downloadsValue">0 / 5,000,000</strong></article>
+      <article class="metric"><small id="metricResultLabel">Result Status</small><strong id="resultStatus">Locked</strong></article>
+      <article class="metric"><small id="metricGatewayLabel">Gateway</small><strong id="gatewayStatus">Checking...</strong></article>
+      <article class="metric"><small id="metricSupabaseLabel">Supabase Sync</small><strong id="supabaseStatus">Checking...</strong></article>
+    </div>
+  </section>
+
+  <section class="card prize-card">
+    <div class="row">
+      <h2 id="prizeTitle">Contest Prizes and Rules</h2>
+      <a class="mini-link" id="shareLinkBtn" href="contest.html">Share Dashboard</a>
+    </div>
+    <ul class="prize-list" id="prizeList"></ul>
+    <p class="notice" id="ruleLine"></p>
+  </section>
+
+  <section class="card battle-card">
+    <h2 id="battleSectionTitle">Left Side vs Right Side</h2>
+    <div class="battle">
+      <article class="fighter">
+        <img id="leftImage" alt="Left">
+        <h3 id="leftName">Left</h3>
+      </article>
+      <div class="vs">VS</div>
+      <article class="fighter">
+        <img id="rightImage" alt="Right">
+        <h3 id="rightName">Right</h3>
+      </article>
+    </div>
+    <div class="bars" id="bars"></div>
+  </section>
+
+  <section class="card vote-card">
+    <h2 id="voteTitle">Voting and Pricing</h2>
+    <p class="muted" id="priceInfo">1 Vote = $5, 7 Votes = $25, 20 Votes = $50</p>
+    <div class="side-row" id="sideRow"></div>
+    <div class="pack-row" id="packRow"></div>
+    <div class="selection-summary" id="selectionSummary">Select side and pack to continue checkout.</div>
+    <div class="state-pills">
+      <span class="pill" id="apiPill">API: Checking</span>
+      <span class="pill" id="gatewayPill">Gateway: Checking</span>
+    </div>
+    <button id="payBtn" type="button">Pay and Vote</button>
+    <p class="notice" id="payNotice">Select side and pack to open Razorpay payment.</p>
+  </section>
+
+  <section class="card insight-card">
+    <h2 id="insightTitle">Live Contest Insights</h2>
+    <div class="insight-grid">
+      <article class="mini-panel">
+        <h3 id="myStatsTitle">My Participation</h3>
+        <div class="mini-metrics">
+          <div><span id="myPaidVotesLabel">Paid votes</span>: <strong id="myPaidVotesValue">0</strong></div>
+          <div><span id="myWeightedLabel">Weighted entries</span>: <strong id="myWeightedValue">0</strong></div>
+          <div><span id="mySharesLabel">Share actions</span>: <strong id="mySharesValue">0</strong></div>
+        </div>
+      </article>
+      <article class="mini-panel">
+        <h3 id="leaderboardTitle">Top Supporters</h3>
+        <ol class="leader-list" id="leaderboardList"></ol>
+      </article>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SUPABASE_URL = window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "";
+const SUPABASE_ANON_KEY = window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || "";
+const RAZORPAY_SDK_URL = "https://checkout.razorpay.com/v1/checkout.js";
+const PENDING_VERIFY_STORAGE_KEY = "contest_pending_verify_v1";
+const supa = window.supa || createSupabaseClientSafe();
+if(supa && !window.supa) window.supa = supa;
+
+function createSupabaseClientSafe(){
+  if(!window.supabase?.createClient) return null;
+  const url = String(SUPABASE_URL || "").trim();
+  const anonKey = String(SUPABASE_ANON_KEY || "").trim();
+  if(!url || !anonKey) return null;
+  try{
+    return window.supabase.createClient(url, anonKey);
+  }catch(err){
+    console.warn("contest_battle_supabase_init_failed", err?.message || err);
+    return null;
+  }
+}
+
+const CONTEST_SIDE_POSTERS = {
+  contest_1: { left: "Images/messi.png", right: "Images/cr.png" },
+  contest_2: { left: "Images/ind.jpg", right: "Images/pkr.jpg" },
+  contest_3: { left: "Images/TWS.jpg", right: "Images/BTS.jpg" },
+  contest_4: { left: "Images/app.jpg", right: "Images/sam.png" },
+  contest_5: { left: "Images/iron.jpg", right: "Images/dc.jpg" },
+  contest_6: { left: "Images/dr.jpg", right: "Images/ft.jpg" }
+};
+
+const state = {
+  apiBase:"",
+  apiError:"",
+  contestId:"",
+  data:null,
+  userId:"",
+  userName:"",
+  userEmail:"",
+  selectedSide:"",
+  selectedPack:"",
+  paymentBusy:false,
+  checkoutActive:false,
+  refreshPauseUntil:0,
+  accountRegisterDone:false,
+  supabaseSessionReady:false,
+  pendingVerifications:[],
+  realtimeChannel:null,
+  realtimeContestId:"",
+  realtimeRefreshTimer:0,
+  apiRetryTimer:0,
+  apiRetryBusy:false,
+  compactMode:false
+};
+
+const dom = {
+  heroAvatar:document.getElementById("heroAvatar"),
+  backLink:document.getElementById("backLink"),
+  chipText:document.getElementById("chipText"),
+  battleTitle:document.getElementById("battleTitle"),
+  battleSubtitle:document.getElementById("battleSubtitle"),
+  battleSectionTitle:document.getElementById("battleSectionTitle"),
+  metricDownloadLabel:document.getElementById("metricDownloadLabel"),
+  metricResultLabel:document.getElementById("metricResultLabel"),
+  metricGatewayLabel:document.getElementById("metricGatewayLabel"),
+  metricSupabaseLabel:document.getElementById("metricSupabaseLabel"),
+  downloadsValue:document.getElementById("downloadsValue"),
+  resultStatus:document.getElementById("resultStatus"),
+  gatewayStatus:document.getElementById("gatewayStatus"),
+  supabaseStatus:document.getElementById("supabaseStatus"),
+  leftImage:document.getElementById("leftImage"),
+  rightImage:document.getElementById("rightImage"),
+  leftName:document.getElementById("leftName"),
+  rightName:document.getElementById("rightName"),
+  sideRow:document.getElementById("sideRow"),
+  bars:document.getElementById("bars"),
+  packRow:document.getElementById("packRow"),
+  voteTitle:document.getElementById("voteTitle"),
+  priceInfo:document.getElementById("priceInfo"),
+  selectionSummary:document.getElementById("selectionSummary"),
+  apiPill:document.getElementById("apiPill"),
+  gatewayPill:document.getElementById("gatewayPill"),
+  payBtn:document.getElementById("payBtn"),
+  payNotice:document.getElementById("payNotice"),
+  insightTitle:document.getElementById("insightTitle"),
+  myStatsTitle:document.getElementById("myStatsTitle"),
+  myPaidVotesLabel:document.getElementById("myPaidVotesLabel"),
+  myWeightedLabel:document.getElementById("myWeightedLabel"),
+  mySharesLabel:document.getElementById("mySharesLabel"),
+  myPaidVotesValue:document.getElementById("myPaidVotesValue"),
+  myWeightedValue:document.getElementById("myWeightedValue"),
+  mySharesValue:document.getElementById("mySharesValue"),
+  leaderboardTitle:document.getElementById("leaderboardTitle"),
+  leaderboardList:document.getElementById("leaderboardList"),
+  prizeTitle:document.getElementById("prizeTitle"),
+  prizeList:document.getElementById("prizeList"),
+  ruleLine:document.getElementById("ruleLine"),
+  shareLinkBtn:document.getElementById("shareLinkBtn"),
+  toast:document.getElementById("toast")
+};
+
+function getLangCode(){
+  const raw = String(window.USER_LANG || localStorage.getItem("lang") || "en").toLowerCase();
+  if(raw.startsWith("hi")) return "hi";
+  if(raw.startsWith("it")) return "it";
+  return "en";
+}
+
+let LANG_CODE = getLangCode();
+
+const I18N = {
+  en: {
+    back_to_contest:"Back to Contest List",
+    chip:"NOVAGAPP VS BATTLE",
+    loading:"Loading...",
+    metric_download:"Download Gate",
+    metric_result:"Result Status",
+    metric_gateway:"Gateway",
+    metric_supabase:"Supabase Sync",
+    result_locked:"Locked until 5M",
+    result_open:"Unlocked",
+    gateway_online:"Online",
+    gateway_test:"Test Mode",
+    gateway_pending:"Pending",
+    gateway_offline:"Disconnected",
+    supabase_online:"Connected",
+    supabase_live:"Connected + Live",
+    supabase_offline:"Disconnected",
+    supabase_local:"Local only",
+    battle_section_title:"Left Side vs Right Side",
+    vote_title:"Voting and Pricing",
+    pricing_line:"1 Vote = $5, 7 Votes = $25, 20 Votes = $50",
+    pay_now:"Pay and Vote",
+    pay_processing:"Processing payment...",
+    pay_ready_notice:"Real Razorpay payment will open after side and pack selection.",
+    gateway_not_ready_notice:"Razorpay live keys are not configured on the server.",
+    gateway_live_required_notice:"Razorpay is in test mode. Set live keys before publish.",
+    api_offline_notice:"Contest server connection failed. Check live API base.",
+    api_connect_hint:"API not connected. Start backend on",
+    offline_preview_notice:"Live server unavailable. Showing offline preview data. Payment is locked for safety.",
+    prizes_title:"Rules and prizes",
+    share_dashboard:"Share Dashboard",
+    result_rule_line:"Result will be announced only after app downloads reach 5,000,000.",
+    votes_label:"votes",
+    api_order_block:"Payment blocked because live contest API is unreachable.",
+    razorpay_missing:"Razorpay not loaded",
+    login_required_notice:"Please login first to pay and vote.",
+    select_side_pack:"Select side and vote pack",
+    vote_success:"Vote success",
+    verify_failed:"Payment verify failed: ",
+    payment_failed:"Payment failed",
+    order_failed:"Order creation failed: ",
+    order_retrying:"Rechecking contest API and retrying payment...",
+    no_contest:"Contest data unavailable",
+    open_from_list:"Open from contest list",
+    selection_prompt:"Select side and pack to continue checkout.",
+    selection_need_both:"Choose side and vote pack before payment.",
+    selection_need_side:"Choose a side before payment.",
+    selection_need_pack:"Choose a vote pack before payment.",
+    selection_ready:"Ready to pay",
+    payment_cancelled:"Payment window closed.",
+    verify_retry_notice:"Payment received. Vote verification will retry automatically.",
+    pending_verify_notice:"Pending payment verification in progress...",
+    live_connected:"Live contest server connected",
+    api_pill_online:"API Online",
+    api_pill_offline:"API Offline",
+    gateway_pill_online:"Gateway Ready",
+    gateway_pill_pending:"Gateway Pending",
+    gateway_pill_offline:"Gateway Offline",
+    insight_title:"Live Contest Insights",
+    my_stats_title:"My Participation",
+    my_paid_votes:"Paid votes",
+    my_weighted_entries:"Weighted entries",
+    my_share_actions:"Share actions",
+    leaderboard_title:"Top Supporters",
+    no_supporters:"No supporters yet",
+    best_value:"Best Value",
+    most_popular:"Most Popular"
+  },
+  hi: {
+    back_to_contest:"Contest list par wapas",
+    chip:"NOVAGAPP VS BATTLE",
+    loading:"Load ho raha hai...",
+    metric_download:"Download Gate",
+    metric_result:"Result Status",
+    metric_gateway:"Gateway",
+    metric_supabase:"Supabase Sync",
+    result_locked:"5M tak locked",
+    result_open:"Unlocked",
+    gateway_online:"Online",
+    gateway_test:"Test Mode",
+    gateway_pending:"Pending",
+    gateway_offline:"Connection nahi hai",
+    supabase_online:"Connected",
+    supabase_live:"Connected + Live",
+    supabase_offline:"Disconnected",
+    supabase_local:"Local only",
+    battle_section_title:"Left side vs Right side",
+    vote_title:"Voting aur Pricing",
+    pricing_line:"1 Vote = $5, 7 Votes = $25, 20 Votes = $50",
+    pay_now:"Pay aur Vote",
+    pay_processing:"Payment process ho raha hai...",
+    pay_ready_notice:"Side aur pack select karte hi real Razorpay payment open hoga.",
+    gateway_not_ready_notice:"Server par Razorpay live keys set nahi hain.",
+    gateway_live_required_notice:"Razorpay test mode me hai. Publish se pehle live keys set karo.",
+    api_offline_notice:"Contest server connection fail hua. Live API base check karo.",
+    api_connect_hint:"API connected nahi hai. Backend start karo",
+    offline_preview_notice:"Live server unavailable hai. Offline preview dikh raha hai. Safety ke liye payment lock hai.",
+    prizes_title:"Rules and prizes",
+    share_dashboard:"Share Dashboard",
+    result_rule_line:"Result tab announce hoga jab app downloads 5,000,000 complete honge.",
+    votes_label:"votes",
+    api_order_block:"Live contest API unreachable hai, payment blocked hai.",
+    razorpay_missing:"Razorpay load nahi hua",
+    login_required_notice:"Pay aur vote karne se pehle login karo.",
+    select_side_pack:"Pehle side aur vote pack select karo",
+    vote_success:"Vote successful",
+    verify_failed:"Payment verify fail: ",
+    payment_failed:"Payment failed",
+    order_failed:"Order creation fail: ",
+    order_retrying:"Contest API dobara check karke payment retry ho raha hai...",
+    no_contest:"Contest data available nahi hai",
+    open_from_list:"Contest list se open karo",
+    selection_prompt:"Checkout continue karne ke liye side aur pack select karo.",
+    selection_need_both:"Payment se pehle side aur vote pack choose karo.",
+    selection_need_side:"Payment se pehle side choose karo.",
+    selection_need_pack:"Payment se pehle vote pack choose karo.",
+    selection_ready:"Payment ready",
+    payment_cancelled:"Payment window close ho gayi.",
+    verify_retry_notice:"Payment mil gaya. Vote verification auto retry hoga.",
+    pending_verify_notice:"Pending payment verification chal raha hai...",
+    live_connected:"Live contest server connect ho gaya",
+    api_pill_online:"API Online",
+    api_pill_offline:"API Offline",
+    gateway_pill_online:"Gateway Ready",
+    gateway_pill_pending:"Gateway Pending",
+    gateway_pill_offline:"Gateway Offline",
+    insight_title:"Live Contest Insights",
+    my_stats_title:"Meri Participation",
+    my_paid_votes:"Paid votes",
+    my_weighted_entries:"Weighted entries",
+    my_share_actions:"Share actions",
+    leaderboard_title:"Top Supporters",
+    no_supporters:"Abhi supporters nahi hain",
+    best_value:"Best Value",
+    most_popular:"Most Popular"
+  },
+  it: {
+    back_to_contest:"Torna alla lista contest",
+    chip:"NOVAGAPP VS BATTLE",
+    loading:"Caricamento...",
+    metric_download:"Download Gate",
+    metric_result:"Stato Risultato",
+    metric_gateway:"Gateway",
+    metric_supabase:"Sync Supabase",
+    result_locked:"Bloccato fino a 5M",
+    result_open:"Sbloccato",
+    gateway_online:"Online",
+    gateway_test:"Modalita Test",
+    gateway_pending:"In attesa",
+    gateway_offline:"Connessione assente",
+    supabase_online:"Connesso",
+    supabase_live:"Connesso + Live",
+    supabase_offline:"Disconnesso",
+    supabase_local:"Solo locale",
+    battle_section_title:"Lato sinistro vs lato destro",
+    vote_title:"Votazione e Prezzi",
+    pricing_line:"1 voto = $5, 7 voti = $25, 20 voti = $50",
+    pay_now:"Paga e vota",
+    pay_processing:"Pagamento in corso...",
+    pay_ready_notice:"Il pagamento Razorpay reale si apre dopo aver scelto lato e pacchetto.",
+    gateway_not_ready_notice:"Le chiavi live Razorpay non sono configurate sul server.",
+    gateway_live_required_notice:"Razorpay e in modalita test. Imposta chiavi live prima della pubblicazione.",
+    api_offline_notice:"Connessione al server contest fallita. Verifica API base live.",
+    api_connect_hint:"API non connessa. Avvia il backend su",
+    offline_preview_notice:"Server live non disponibile. Mostro anteprima offline. Pagamento bloccato per sicurezza.",
+    prizes_title:"Rules and prizes",
+    share_dashboard:"Dashboard Share",
+    result_rule_line:"Il risultato sara annunciato solo dopo 5.000.000 download.",
+    votes_label:"voti",
+    api_order_block:"Pagamento bloccato: API contest live non raggiungibile.",
+    razorpay_missing:"Razorpay non caricato",
+    login_required_notice:"Accedi prima di pagare e votare.",
+    select_side_pack:"Seleziona lato e pacchetto voto",
+    vote_success:"Voto registrato",
+    verify_failed:"Verifica pagamento fallita: ",
+    payment_failed:"Pagamento fallito",
+    order_failed:"Creazione ordine fallita: ",
+    order_retrying:"Controllo API contest e nuovo tentativo pagamento...",
+    no_contest:"Dati contest non disponibili",
+    open_from_list:"Apri dalla lista contest",
+    selection_prompt:"Seleziona lato e pacchetto per continuare il checkout.",
+    selection_need_both:"Scegli lato e pacchetto voto prima del pagamento.",
+    selection_need_side:"Scegli un lato prima del pagamento.",
+    selection_need_pack:"Scegli un pacchetto voto prima del pagamento.",
+    selection_ready:"Pronto al pagamento",
+    payment_cancelled:"Finestra pagamento chiusa.",
+    verify_retry_notice:"Pagamento ricevuto. Verifica voto in nuovo tentativo automatico.",
+    pending_verify_notice:"Verifica pagamento in sospeso in corso...",
+    live_connected:"Server contest live connesso",
+    api_pill_online:"API Online",
+    api_pill_offline:"API Offline",
+    gateway_pill_online:"Gateway Pronto",
+    gateway_pill_pending:"Gateway In attesa",
+    gateway_pill_offline:"Gateway Offline",
+    insight_title:"Insight Contest Live",
+    my_stats_title:"La mia partecipazione",
+    my_paid_votes:"Voti pagati",
+    my_weighted_entries:"Ingressi ponderati",
+    my_share_actions:"Azioni share",
+    leaderboard_title:"Top Supporter",
+    no_supporters:"Nessun supporter",
+    best_value:"Miglior valore",
+    most_popular:"Piu popolare"
+  }
+};
+function tr(key){
+  const dict = I18N[LANG_CODE] || I18N.en;
+  return dict[key] ?? I18N.en[key] ?? key;
+}
+
+function applyLanguage(){
+  LANG_CODE = getLangCode();
+  try{ document.documentElement.lang = LANG_CODE; }catch(_){ }
+  if(dom.backLink) dom.backLink.textContent = tr("back_to_contest");
+  if(dom.chipText) dom.chipText.textContent = tr("chip");
+  if(dom.battleSubtitle && !state.data) dom.battleSubtitle.textContent = tr("loading");
+  if(dom.metricDownloadLabel) dom.metricDownloadLabel.textContent = tr("metric_download");
+  if(dom.metricResultLabel) dom.metricResultLabel.textContent = tr("metric_result");
+  if(dom.metricGatewayLabel) dom.metricGatewayLabel.textContent = tr("metric_gateway");
+  if(dom.metricSupabaseLabel) dom.metricSupabaseLabel.textContent = tr("metric_supabase");
+  if(dom.battleSectionTitle) dom.battleSectionTitle.textContent = tr("battle_section_title");
+  if(dom.voteTitle) dom.voteTitle.textContent = tr("vote_title");
+  if(dom.priceInfo) dom.priceInfo.textContent = tr("pricing_line");
+  if(dom.selectionSummary) dom.selectionSummary.textContent = tr("selection_prompt");
+  if(dom.apiPill) dom.apiPill.textContent = tr("api_pill_offline");
+  if(dom.gatewayPill) dom.gatewayPill.textContent = tr("gateway_pill_pending");
+  if(dom.prizeTitle) dom.prizeTitle.textContent = tr("prizes_title");
+  if(dom.shareLinkBtn) dom.shareLinkBtn.textContent = tr("share_dashboard");
+  if(dom.insightTitle) dom.insightTitle.textContent = tr("insight_title");
+  if(dom.myStatsTitle) dom.myStatsTitle.textContent = tr("my_stats_title");
+  if(dom.myPaidVotesLabel) dom.myPaidVotesLabel.textContent = tr("my_paid_votes");
+  if(dom.myWeightedLabel) dom.myWeightedLabel.textContent = tr("my_weighted_entries");
+  if(dom.mySharesLabel) dom.mySharesLabel.textContent = tr("my_share_actions");
+  if(dom.leaderboardTitle) dom.leaderboardTitle.textContent = tr("leaderboard_title");
+
+  if(state.data) render();
+}
+
+function fmtInt(v){ return new Intl.NumberFormat("en-US").format(Math.max(0,Number(v)||0)); }
+function esc(v){ return String(v||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;").replace(/'/g,"&#39;"); }
+function safeNum(v){ const n=Number(v||0); return Number.isFinite(n)?n:0; }
+function readableApiError(err){
+  const raw = String(err?.message || err || "").trim();
+  const lower = raw.toLowerCase();
+  const looksOffline = !raw
+    || lower.includes("failed to fetch")
+    || lower.includes("network")
+    || lower.includes("econnrefused")
+    || lower.includes("enotfound")
+    || lower.includes("connection");
+  if(looksOffline){
+    const hintBase = state.apiBase || (canUseRelativeApiPath() ? location.origin : "api_base=<your-server-url>");
+    return tr("api_connect_hint") + " " + hintBase;
+  }
+  return raw;
+}
+function showToast(msg, isError){
+  if(!msg) return;
+  dom.toast.textContent = msg;
+  dom.toast.className = "toast show " + (isError ? "err" : "ok");
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(()=>dom.toast.className="toast",2200);
+}
+
+function pauseAutoRefresh(ms){
+  const duration = Math.max(0, Math.round(Number(ms) || 0));
+  if(!duration) return;
+  state.refreshPauseUntil = Math.max(state.refreshPauseUntil, Date.now() + duration);
+}
+
+function isAutoRefreshLocked(){
+  if(state.paymentBusy) return true;
+  if(state.checkoutActive) return true;
+  return Date.now() < Math.max(0, Number(state.refreshPauseUntil) || 0);
+}
+
+function readPendingVerifications(){
+  try{
+    const raw = JSON.parse(localStorage.getItem(PENDING_VERIFY_STORAGE_KEY) || "[]");
+    if(!Array.isArray(raw)) return [];
+    return raw
+      .filter(item => item && typeof item === "object")
+      .map(item => ({
+        user_id: String(item.user_id || "").trim(),
+        user_name: String(item.user_name || "").trim(),
+        razorpay_order_id: String(item.razorpay_order_id || "").trim(),
+        razorpay_payment_id: String(item.razorpay_payment_id || "").trim(),
+        razorpay_signature: String(item.razorpay_signature || "").trim()
+      }))
+      .filter(item => item.razorpay_order_id && item.razorpay_payment_id && item.razorpay_signature);
+  }catch(_){
+    return [];
+  }
+}
+
+function persistPendingVerifications(){
+  try{
+    localStorage.setItem(PENDING_VERIFY_STORAGE_KEY, JSON.stringify(state.pendingVerifications || []));
+  }catch(_){ }
+}
+
+function queuePendingVerification(payload){
+  if(!payload?.razorpay_order_id) return;
+  const next = {
+    user_id: String(payload.user_id || state.userId || "").trim(),
+    user_name: String(payload.user_name || state.userName || "").trim(),
+    razorpay_order_id: String(payload.razorpay_order_id || "").trim(),
+    razorpay_payment_id: String(payload.razorpay_payment_id || "").trim(),
+    razorpay_signature: String(payload.razorpay_signature || "").trim()
+  };
+  if(!next.razorpay_order_id || !next.razorpay_payment_id || !next.razorpay_signature) return;
+  const idx = state.pendingVerifications.findIndex(item => item.razorpay_order_id === next.razorpay_order_id);
+  if(idx >= 0){
+    state.pendingVerifications[idx] = next;
+  }else{
+    state.pendingVerifications.push(next);
+  }
+  persistPendingVerifications();
+}
+
+function removePendingVerification(orderId){
+  const oid = String(orderId || "").trim();
+  if(!oid) return;
+  const before = state.pendingVerifications.length;
+  state.pendingVerifications = state.pendingVerifications.filter(item => item.razorpay_order_id !== oid);
+  if(state.pendingVerifications.length !== before){
+    persistPendingVerifications();
+  }
+}
+
+function isRetryableNetworkError(err){
+  const raw = String(err?.message || "").toLowerCase();
+  return raw.includes("failed to fetch")
+    || raw.includes("network")
+    || raw.includes("connection")
+    || raw.includes("econnrefused")
+    || raw.includes("enotfound")
+    || raw.includes("timeout")
+    || raw.includes("503");
+}
+
+function isHardVerifyFailure(err){
+  const raw = String(err?.message || "").toLowerCase();
+  return raw.includes("invalid_payment_signature")
+    || raw.includes("payment_fields_required")
+    || raw.includes("order_not_found")
+    || raw.includes("order_user_mismatch")
+    || raw.includes("payment_amount_mismatch")
+    || raw.includes("payment_currency_mismatch")
+    || raw.includes("order_payment_mismatch")
+    || raw.includes("invalid_payment_amount");
+}
+
+function ensureRazorpayLoaded(){
+  if(window.Razorpay) return Promise.resolve(true);
+  if(ensureRazorpayLoaded._promise) return ensureRazorpayLoaded._promise;
+  ensureRazorpayLoaded._promise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-role="razorpay-sdk"],script[src*="checkout.razorpay.com/v1/checkout.js"]');
+    if(existing){
+      existing.setAttribute("data-role", "razorpay-sdk");
+      if(window.Razorpay){
+        resolve(true);
+        return;
+      }
+      existing.addEventListener("load", () => resolve(Boolean(window.Razorpay)), { once:true });
+      existing.addEventListener("error", () => reject(new Error(tr("razorpay_missing"))), { once:true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = RAZORPAY_SDK_URL;
+    script.async = true;
+    script.setAttribute("data-role", "razorpay-sdk");
+    script.onload = () => {
+      if(window.Razorpay){
+        resolve(true);
+      }else{
+        reject(new Error(tr("razorpay_missing")));
+      }
+    };
+    script.onerror = () => reject(new Error(tr("razorpay_missing")));
+    document.head.appendChild(script);
+  }).catch(err => {
+    ensureRazorpayLoaded._promise = null;
+    throw err;
+  });
+  return ensureRazorpayLoaded._promise;
+}
+
+function avatarData(name){
+  const initials = String(name||"NV").trim().split(/\s+/).map(x=>x[0]).join("").slice(0,2).toUpperCase() || "NV";
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#ff6a00"/><stop offset="100%" stop-color="#ff9345"/></linearGradient></defs><rect width="160" height="160" rx="80" fill="url(#g)"/><text x="80" y="94" text-anchor="middle" font-family="Arial" font-size="42" font-weight="700" fill="#fff">'+ initials +'</text></svg>';
+  return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+}
+
+function setPosterWithFallback(imgEl, src, fallbackLabel){
+  const fallback = avatarData(fallbackLabel);
+  const raw = String(src || "").trim();
+  const attempts = [];
+  const isClearlyInvalid = (value) => {
+    const v = String(value || "").trim();
+    if(!v) return true;
+    if(v === "data:;base64," || v === "data:,") return true;
+    return false;
+  };
+  if(!isClearlyInvalid(raw)) attempts.push(raw);
+  if(/^images\//i.test(raw)){
+    attempts.push(raw.replace(/^images\//i, "Images/"));
+  }
+  if(/^Images\//.test(raw)){
+    attempts.push(raw.replace(/^Images\//, "images/"));
+  }
+  attempts.push("Images/logo.png");
+  const uniqAttempts = attempts.filter((value, idx) => attempts.indexOf(value) === idx && !isClearlyInvalid(value));
+
+  let idx = 0;
+  const next = () => {
+    if(idx >= uniqAttempts.length){
+      imgEl.onerror = null;
+      imgEl.src = fallback;
+      return;
+    }
+    imgEl.src = uniqAttempts[idx];
+    idx += 1;
+  };
+
+  imgEl.onerror = next;
+  next();
+}
+
+function normalizeBase(base){
+  const next = String(base || "").trim().replace(/\/+$/g, "");
+  if(!next) return "";
+  if(/^data:/i.test(next)) return "";
+  try{
+    const url = new URL(next);
+    if(url.protocol !== "http:" && url.protocol !== "https:"){
+      return "";
+    }
+    if(!url.hostname) return "";
+    return next;
+  }catch(_){
+    return "";
+  }
+}
+
+function isLoopbackBase(base){
+  const normalized = normalizeBase(base);
+  if(!normalized) return false;
+  try{
+    const host = String(new URL(normalized).hostname || "").toLowerCase();
+    return host === "127.0.0.1" || host === "localhost";
+  }catch(_){
+    return false;
+  }
+}
+
+function clearStoredApiBase(){
+  try{
+    localStorage.removeItem("contest_api_base");
+    localStorage.removeItem("api_base");
+  }catch(_){ }
+}
+
+function persistApiBase(base){
+  const raw = String(base || "").trim();
+  const normalized = normalizeBase(base);
+  try{
+    if(!normalized){
+      if(raw){
+        localStorage.removeItem("contest_api_base");
+        localStorage.removeItem("api_base");
+      }
+      return;
+    }
+    if(isLoopbackBase(normalized) && !allowLoopbackApiBase()){
+      clearStoredApiBase();
+      return;
+    }
+    localStorage.setItem("contest_api_base", normalized);
+    localStorage.setItem("api_base", normalized);
+  }catch(_){ }
+}
+
+function canUseRelativeApiPath(){
+  return String(location.port || "") === "3000";
+}
+
+function allowLoopbackApiBase(){
+  if(canUseRelativeApiPath()) return true;
+  const host = String(location.hostname || "").toLowerCase();
+  if(location.protocol === "file:" || host === "localhost" || host === "127.0.0.1"){
+    return true;
+  }
+  const params = new URLSearchParams(location.search);
+  const raw = String(
+    params.get("allow_local_api") ||
+    params.get("force_local_api") ||
+    params.get("local_api") ||
+    ""
+  ).trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
+function isLocalRuntime(){
+  const host = String(location.hostname || "").toLowerCase();
+  return location.protocol === "file:"
+    || host === "localhost"
+    || host === "127.0.0.1";
+}
+
+function isLikelySupabaseUserId(value){
+  const raw = String(value || "").trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(raw);
+}
+
+function isLoggedInContestUser(){
+  return isLikelySupabaseUserId(state.userId);
+}
+
+function getPaymentGatewayMode(){
+  return String(state.data?.payment_gateway_mode || "").trim().toLowerCase();
+}
+
+function getPaymentGatewayIssue(){
+  return String(state.data?.payment_gateway_issue || "").trim().toLowerCase();
+}
+
+function isGatewayBlockedByMode(){
+  if(getPaymentGatewayIssue() === "live_key_required"){
+    return true;
+  }
+  const mode = getPaymentGatewayMode();
+  if(mode === "test" && !isLocalRuntime()){
+    return true;
+  }
+  return false;
+}
+
+function resolveInitialApiBase(){
+  const params = new URLSearchParams(location.search);
+  const queryRaw = String(params.get("api_base") || "").trim();
+  const allowLoopback = allowLoopbackApiBase();
+  const fromQuery = normalizeBase(queryRaw);
+  if(fromQuery){
+    if(!(isLoopbackBase(fromQuery) && !allowLoopback)){
+      persistApiBase(fromQuery);
+      return fromQuery;
+    }
+    clearStoredApiBase();
+  }
+  if(queryRaw && !fromQuery){
+    persistApiBase(queryRaw);
+  }
+
+  let fromStorage = "";
+  try{
+    const rawStorage = String(localStorage.getItem("contest_api_base") || localStorage.getItem("api_base") || "").trim();
+    fromStorage = normalizeBase(rawStorage);
+    if(rawStorage && !fromStorage){
+      persistApiBase(rawStorage);
+    }
+  }catch(_){ }
+  if(fromStorage){
+    const skipStoredLoopback = !allowLoopback && isLoopbackBase(fromStorage);
+    if(skipStoredLoopback){
+      clearStoredApiBase();
+    }else{
+      return fromStorage;
+    }
+  }
+
+  const fromGlobal = normalizeBase(window.CONTEST_API_BASE || window.API_BASE || "");
+  if(fromGlobal && !(isLoopbackBase(fromGlobal) && !allowLoopback)){
+    return fromGlobal;
+  }
+
+  if(canUseRelativeApiPath()) return "";
+  return "";
+}
+
+function buildApiBaseCandidates(){
+  const params = new URLSearchParams(location.search);
+  const allowLoopback = allowLoopbackApiBase();
+  const list = [];
+  const pushBase = (base) => {
+    const normalized = normalizeBase(base);
+    if(normalized === "" && !canUseRelativeApiPath()) return;
+    if(!allowLoopback && isLoopbackBase(normalized)) return;
+    if(list.includes(normalized)) return;
+    list.push(normalized);
+  };
+
+  pushBase(state.apiBase);
+  pushBase(params.get("api_base"));
+
+  try{
+    pushBase(localStorage.getItem("contest_api_base"));
+    pushBase(localStorage.getItem("api_base"));
+  }catch(_){ }
+  pushBase(window.CONTEST_API_BASE || window.API_BASE || "");
+
+  if(canUseRelativeApiPath()){
+    pushBase("");
+  }
+  return list;
+}
+
+async function probeApiBase(suffix){
+  const candidates = buildApiBaseCandidates();
+  if(!candidates.length){
+    throw new Error(tr("api_offline_notice"));
+  }
+  let lastError = null;
+
+  for(const base of candidates){
+    try{
+      const payload = await fetchJson((base ? (base + suffix) : suffix), { method:"GET" });
+      if(payload?.data){
+        state.apiBase = base;
+        persistApiBase(base);
+        return payload;
+      }
+    }catch(err){
+      lastError = err;
+    }
+  }
+
+  throw (lastError || new Error(tr("api_offline_notice")));
+}
+
+function apiUrl(path){ return state.apiBase ? state.apiBase + path : path; }
+
+async function fetchJson(url,opt){
+  const res = await fetch(url,opt);
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok || !data?.ok){
+    throw new Error(data?.message || data?.error || ("Request failed: " + res.status));
+  }
+  return data;
+}
+
+function postJson(path,payload){
+  return fetchJson(apiUrl(path), {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(payload||{})
+  });
+}
+
+function getStoredUser(){
+  try{
+    const raw = JSON.parse(localStorage.getItem("user") || "{}");
+    return raw && typeof raw === "object" ? raw : {};
+  }catch(_){
+    return {};
+  }
+}
+
+function getUserFromSupabaseStorage(){
+  try{
+    for(let i = 0; i < localStorage.length; i += 1){
+      const key = String(localStorage.key(i) || "");
+      if(!key.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
+      const value = localStorage.getItem(key);
+      if(!value) continue;
+      const parsed = JSON.parse(value);
+      const user = parsed?.user || parsed?.currentSession?.user || parsed?.session?.user || null;
+      if(user?.id) return user;
+    }
+  }catch(_){ }
+  return null;
+}
+
+async function initUser(){
+  state.supabaseSessionReady = Boolean(supa?.auth || window.supa?.auth);
+  const stored = getStoredUser();
+  if(stored?.uid){
+    state.userId = String(stored.uid || "");
+    state.userName = String(stored.name || "");
+    state.userEmail = String(stored.email || "");
+  }
+
+  const authClients = [];
+  if(window.supa?.auth) authClients.push(window.supa);
+  if(supa?.auth && supa !== window.supa) authClients.push(supa);
+
+  for(const client of authClients){
+    try{
+      const sessionRes = await client.auth.getSession();
+      if(!sessionRes?.error) state.supabaseSessionReady = true;
+      const sessionUser = sessionRes?.data?.session?.user || null;
+      if(sessionUser?.id){
+        state.userId = sessionUser.id || state.userId;
+        state.userEmail = sessionUser.email || state.userEmail;
+        state.userName = sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || state.userName || "";
+        break;
+      }
+    }catch(_){ }
+  }
+
+  if(!state.userId){
+    for(const client of authClients){
+      try{
+        const userRes = await client.auth.getUser();
+        if(!userRes?.error) state.supabaseSessionReady = true;
+        const user = userRes?.data?.user || null;
+        if(user?.id){
+          state.userId = user.id || state.userId;
+          state.userEmail = user.email || state.userEmail;
+          state.userName = user.user_metadata?.full_name || user.user_metadata?.name || state.userName || "";
+          break;
+        }
+      }catch(_){ }
+    }
+  }
+
+  if(!state.userId){
+    const storageUser = getUserFromSupabaseStorage();
+    if(storageUser?.id){
+      state.supabaseSessionReady = true;
+      state.userId = storageUser.id || state.userId;
+      state.userEmail = storageUser.email || state.userEmail;
+      state.userName = storageUser.user_metadata?.full_name || storageUser.user_metadata?.name || state.userName || "";
+    }
+  }
+
+  if(!state.userName && state.userEmail){
+    state.userName = String(state.userEmail.split("@")[0] || "").trim();
+  }
+
+  if(state.userId && !isLikelySupabaseUserId(state.userId)){
+    state.userId = "";
+  }
+
+  if(state.userId){
+    try{
+      localStorage.setItem("user", JSON.stringify({
+        uid: state.userId,
+        name: state.userName || "",
+        email: state.userEmail || ""
+      }));
+    }catch(_){ }
+  }else{
+    try{
+      localStorage.removeItem("contest_guest_user_id");
+    }catch(_){ }
+  }
+}
+
+async function registerContestAccount(){
+  if(!isLoggedInContestUser()) return false;
+  if(state.accountRegisterDone) return true;
+  try{
+    await postJson("/api/contest/account/register", {
+      user_id: state.userId,
+      user_name: state.userName || "",
+      email: state.userEmail || ""
+    });
+    state.accountRegisterDone = true;
+    return true;
+  }catch(_){
+    return false;
+  }
+}
+
+function parseContestId(){
+  const params = new URLSearchParams(location.search);
+  const raw = String(params.get("contest") || "contest_1").trim().toLowerCase();
+  const valid = /^contest_[1-6]$/.test(raw) ? raw : "contest_1";
+  state.contestId = valid;
+}
+
+async function loadData(){
+  const qp = new URLSearchParams();
+  if(state.userId){
+    qp.set("user_id", state.userId);
+    if(state.userName) qp.set("user_name", state.userName);
+  }
+  const suffix = "/api/contest/dashboard" + (qp.toString() ? ("?" + qp.toString()) : "");
+  const fetchDashboard = (base) => fetchJson((base ? (base + suffix) : suffix), { method:"GET" });
+  const canTryPrimary = Boolean(state.apiBase) || canUseRelativeApiPath();
+
+  let firstError = null;
+  if(canTryPrimary){
+    try{
+      const payload = await fetchDashboard(state.apiBase);
+      state.data = payload?.data || null;
+      if(!state.data){
+        throw new Error(tr("api_offline_notice"));
+      }
+      persistApiBase(state.apiBase);
+      state.apiError = "";
+      return;
+    }catch(err){
+      firstError = err;
+    }
+  }
+
+  try{
+    const payload = await probeApiBase(suffix);
+    state.data = payload?.data || null;
+    state.apiError = "";
+  }catch(probeErr){
+    const rawError = String(
+      probeErr?.message ||
+      firstError?.message ||
+      ""
+    ).trim();
+    state.apiError = readableApiError(rawError || tr("api_offline_notice"));
+    state.data = null;
+  }
+}
+
+async function verifyVotePayment(payload, opts){
+  const options = opts || {};
+  await postJson("/api/contest/order/verify", payload);
+  removePendingVerification(payload?.razorpay_order_id);
+  if(options.refresh !== false){
+    await loadData();
+    render();
+  }
+  if(!options.silentSuccess){
+    showToast(tr("vote_success"), false);
+  }
+}
+
+async function flushPendingVerifications(opts){
+  const options = opts || {};
+  const queue = [...state.pendingVerifications];
+  if(!queue.length) return;
+  let updated = false;
+  if(!options.silent){
+    showToast(tr("pending_verify_notice"), false);
+  }
+  for(const item of queue){
+    try{
+      await verifyVotePayment(item, { refresh:false, silentSuccess:true });
+      updated = true;
+    }catch(err){
+      if(isHardVerifyFailure(err)){
+        removePendingVerification(item.razorpay_order_id);
+      }
+    }
+  }
+  if(updated){
+    await loadData();
+    render();
+    if(!options.silent){
+      showToast(tr("vote_success"), false);
+    }
+  }
+}
+
+function clearRealtimeSubscription(){
+  if(state.realtimeRefreshTimer){
+    clearTimeout(state.realtimeRefreshTimer);
+    state.realtimeRefreshTimer = 0;
+  }
+  if(!state.realtimeChannel) return;
+
+  try{
+    if(typeof supa?.removeChannel === "function"){
+      supa.removeChannel(state.realtimeChannel);
+    }else if(typeof state.realtimeChannel.unsubscribe === "function"){
+      state.realtimeChannel.unsubscribe();
+    }
+  }catch(_){ }
+
+  state.realtimeChannel = null;
+  state.realtimeContestId = "";
+}
+
+function scheduleRealtimeRefresh(){
+  if(document.visibilityState === "hidden") return;
+  if(isAutoRefreshLocked()) return;
+  if(state.realtimeRefreshTimer){
+    clearTimeout(state.realtimeRefreshTimer);
+  }
+  state.realtimeRefreshTimer = setTimeout(async () => {
+    state.realtimeRefreshTimer = 0;
+    if(isAutoRefreshLocked() || document.visibilityState === "hidden") return;
+    try{
+      await loadData();
+      render();
+    }catch(_){ }
+  }, 700);
+}
+
+function bindApiAutoRetry(){
+  if(bindApiAutoRetry._bound) return;
+  bindApiAutoRetry._bound = true;
+
+  const retry = async () => {
+    if(state.apiRetryBusy) return;
+    if(isAutoRefreshLocked()) return;
+    if(document.visibilityState === "hidden") return;
+    if(!state.apiError) return;
+    state.apiRetryBusy = true;
+    try{
+      await loadData();
+      render();
+    }catch(_){ }
+    state.apiRetryBusy = false;
+  };
+
+  state.apiRetryTimer = setInterval(retry, 5000);
+  document.addEventListener("visibilitychange", () => {
+    if(document.visibilityState === "visible"){
+      retry();
+    }
+  });
+}
+
+function bindRealtimeSync(){
+  if(!supa?.channel || !state.data?.supabase_sync_ready || !state.contestId) return;
+  if(state.realtimeChannel && state.realtimeContestId === state.contestId) return;
+
+  clearRealtimeSubscription();
+  const channelName = "contest-live-" + state.contestId + "-" + Math.random().toString(36).slice(2, 8);
+  const channel = supa
+    .channel(channelName)
+    .on("postgres_changes", {
+      event: "*",
+      schema: "public",
+      table: "contest_votes",
+      filter: "contest_id=eq." + state.contestId
+    }, scheduleRealtimeRefresh)
+    .on("postgres_changes", {
+      event: "*",
+      schema: "public",
+      table: "contest_orders"
+    }, scheduleRealtimeRefresh);
+
+  if(state.userId){
+    channel.on("postgres_changes", {
+      event: "*",
+      schema: "public",
+      table: "contest_users",
+      filter: "user_id=eq." + state.userId
+    }, scheduleRealtimeRefresh);
+  }
+
+  try{
+    channel.subscribe(status => {
+      if(status === "SUBSCRIBED"){
+        state.supabaseSessionReady = true;
+        render();
+      }
+    });
+    state.realtimeChannel = channel;
+    state.realtimeContestId = state.contestId;
+  }catch(_){ }
+}
+
+function bindScrollMode(){
+  if(bindScrollMode._bound) return;
+  bindScrollMode._bound = true;
+
+  let rafId = 0;
+  const applyMode = () => {
+    rafId = 0;
+    const threshold = Math.max(140, Math.round(window.innerHeight * 0.18));
+    const compact = (window.scrollY || window.pageYOffset || 0) > threshold;
+    if(state.compactMode === compact) return;
+    state.compactMode = compact;
+    document.body.classList.toggle("compact-mode", compact);
+  };
+  const queueApply = () => {
+    if(rafId) return;
+    rafId = requestAnimationFrame(applyMode);
+  };
+
+  window.addEventListener("scroll", queueApply, { passive:true });
+  window.addEventListener("resize", queueApply, { passive:true });
+  window.addEventListener("pageshow", queueApply, { passive:true });
+  queueApply();
+}
+
+function getContest(){
+  return (state.data?.contests || []).find(c => c.id === state.contestId) || null;
+}
+
+function setPill(node, text, tone){
+  if(!node) return;
+  node.textContent = text;
+  const next = ["pill"];
+  if(tone === "good") next.push("good");
+  if(tone === "bad") next.push("bad");
+  node.className = next.join(" ");
+}
+
+function render(){
+  const supabaseSyncReady = Boolean(state.data?.supabase_sync_ready);
+  const supabaseLiveSynced = supabaseSyncReady && Boolean(state.realtimeChannel);
+  const supabaseStatusText = supabaseSyncReady
+    ? (supabaseLiveSynced ? tr("supabase_live") : tr("supabase_online"))
+    : (state.supabaseSessionReady ? tr("supabase_local") : tr("supabase_offline"));
+  const gatewayIssue = getPaymentGatewayIssue();
+  const gatewayBlockedByMode = isGatewayBlockedByMode();
+
+  if(state.data?.supabase_sync_ready){
+    bindRealtimeSync();
+  }
+
+  if(!state.data){
+    clearRealtimeSubscription();
+    dom.downloadsValue.textContent = "-- / --";
+    dom.resultStatus.textContent = "--";
+    dom.gatewayStatus.textContent = tr("gateway_offline");
+    dom.supabaseStatus.textContent = supabaseStatusText;
+    dom.battleTitle.textContent = tr("no_contest");
+    dom.battleSubtitle.textContent = state.apiError || tr("api_offline_notice");
+    dom.sideRow.innerHTML = "";
+    dom.bars.innerHTML = "";
+    dom.packRow.innerHTML = "";
+    dom.prizeList.innerHTML = "";
+    dom.leaderboardList.innerHTML = "<li><span class=\"leader-name\">"+esc(tr("no_supporters"))+"</span><span class=\"leader-score\">--</span></li>";
+    dom.myPaidVotesValue.textContent = "0";
+    dom.myWeightedValue.textContent = "0";
+    dom.mySharesValue.textContent = "0";
+    dom.ruleLine.textContent = "";
+    dom.payBtn.textContent = tr("pay_now");
+    dom.payBtn.disabled = true;
+    dom.selectionSummary.textContent = state.apiError || tr("selection_prompt");
+    setPill(dom.apiPill, tr("api_pill_offline"), "bad");
+    setPill(dom.gatewayPill, tr("gateway_pill_offline"), "bad");
+    dom.payNotice.textContent = state.apiError || tr("api_offline_notice");
+    return;
+  }
+
+  const contest = getContest();
+  const packs = state.data?.packs || [];
+  const userStats = state.data?.user_stats || {};
+  const leaderboard = Array.isArray(state.data?.leaderboard) ? state.data.leaderboard : [];
+
+  dom.downloadsValue.textContent = fmtInt(state.data?.current_downloads || 0) + " / " + fmtInt(state.data?.download_target || 5000000);
+  dom.resultStatus.textContent = state.data?.results_ready ? tr("result_open") : tr("result_locked");
+  dom.gatewayStatus.textContent = state.apiError
+    ? tr("gateway_offline")
+    : (state.data?.razorpay_ready ? tr("gateway_online") : tr("gateway_pending"));
+  dom.supabaseStatus.textContent = supabaseStatusText;
+
+  if(dom.priceInfo){
+    if(packs.length){
+      dom.priceInfo.textContent = packs
+        .map(pack => {
+          const votes = Math.max(0, Math.round(safeNum(pack.votes)));
+          const usd = Math.max(0, safeNum(pack.usd));
+          return votes + " " + tr("votes_label") + " = $" + usd;
+        })
+        .join(", ");
+    }else{
+      dom.priceInfo.textContent = tr("pricing_line");
+    }
+  }
+
+  if(!contest){
+    dom.battleTitle.textContent = tr("no_contest");
+    dom.battleSubtitle.textContent = tr("open_from_list");
+    dom.sideRow.innerHTML = "";
+    dom.bars.innerHTML = "";
+    dom.packRow.innerHTML = "";
+    dom.prizeList.innerHTML = "";
+    dom.ruleLine.textContent = "";
+    dom.payBtn.disabled = true;
+    dom.selectionSummary.textContent = tr("selection_prompt");
+    return;
+  }
+
+  dom.battleTitle.textContent = contest.title;
+  dom.battleSubtitle.textContent = contest.subtitle;
+
+  const leftLabel = contest?.sides?.[0]?.label || "Side 1";
+  const rightLabel = contest?.sides?.[1]?.label || "Side 2";
+  const sidePosters = CONTEST_SIDE_POSTERS[state.contestId] || {};
+  if(dom.heroAvatar){
+    const heroPoster = String(sidePosters.left || sidePosters.right || "").trim();
+    if(heroPoster){
+      dom.heroAvatar.style.backgroundImage = 'url("' + heroPoster.replace(/"/g, "") + '")';
+      dom.heroAvatar.style.backgroundSize = "cover";
+      dom.heroAvatar.style.backgroundPosition = "center";
+    }else{
+      dom.heroAvatar.style.backgroundImage = "";
+      dom.heroAvatar.style.backgroundSize = "";
+      dom.heroAvatar.style.backgroundPosition = "";
+    }
+  }
+  dom.leftName.textContent = leftLabel;
+  dom.rightName.textContent = rightLabel;
+  dom.leftImage.alt = leftLabel + " poster";
+  dom.rightImage.alt = rightLabel + " poster";
+  setPosterWithFallback(dom.leftImage, sidePosters.left, leftLabel);
+  setPosterWithFallback(dom.rightImage, sidePosters.right, rightLabel);
+
+  if(!(contest.sides || []).some(side => side.id === state.selectedSide)){
+    state.selectedSide = "";
+  }
+  if(!packs.some(pack => pack.id === state.selectedPack)){
+    state.selectedPack = "";
+  }
+  if(!state.selectedSide && (contest.sides || []).length){
+    state.selectedSide = String(contest.sides[0].id || "").trim();
+  }
+  if(!state.selectedPack && packs.length){
+    const preferredPack = packs.find(pack => String(pack?.id || "") === "vote_7") || packs[0];
+    state.selectedPack = String(preferredPack?.id || "").trim();
+  }
+
+  dom.sideRow.innerHTML = (contest.sides || []).map(side => {
+    const active = side.id === state.selectedSide ? " active" : "";
+    return '<button type="button" class="side-btn'+active+'" data-side="'+esc(side.id)+'">'+esc(side.label)+'</button>';
+  }).join("");
+
+  const totalVotes = safeNum(contest.total_votes);
+  dom.bars.innerHTML = (contest.sides || []).map(side => {
+    const votes = safeNum(side.votes);
+    const percent = totalVotes > 0 ? (votes * 100 / totalVotes) : 0;
+    return '<div class="bar"><small><span>'+esc(side.label)+'</span><span>'+fmtInt(votes)+' '+esc(tr("votes_label"))+'</span></small><div class="track"><span style="width:'+percent.toFixed(2)+'%"></span></div></div>';
+  }).join("");
+
+  const bestPackRatio = packs.reduce((best, row) => {
+    const rowVotes = Math.max(0, safeNum(row.votes));
+    const rowUsd = Math.max(0, safeNum(row.usd));
+    const ratio = rowUsd > 0 ? (rowVotes / rowUsd) : 0;
+    return Math.max(best, ratio);
+  }, 0);
+
+  dom.packRow.innerHTML = packs.map(pack => {
+    const active = pack.id === state.selectedPack ? " active" : "";
+    const votes = Math.max(0, Math.round(safeNum(pack.votes)));
+    const usd = Math.max(0, safeNum(pack.usd));
+    const votePerDollar = usd > 0 ? (votes / usd) : 0;
+    let tag = "";
+    if(votePerDollar > 0 && Math.abs(votePerDollar - bestPackRatio) < 0.001){
+      tag = tr("best_value");
+    }else if(pack.id === "vote_7"){
+      tag = tr("most_popular");
+    }
+    return [
+      '<button type="button" class="pack-btn'+active+'" data-pack="'+esc(pack.id)+'">',
+      (tag ? '<span class="pack-tag">'+esc(tag)+'</span>' : ""),
+      '<span class="pack-label">'+esc(votes + " " + tr("votes_label"))+'</span>',
+      '<span class="pack-price">$'+esc(usd)+'</span>',
+      '</button>'
+    ].join("");
+  }).join("");
+
+  dom.prizeList.innerHTML = (contest.prizes || []).map(row => "<li>"+esc(row)+"</li>").join("");
+  dom.ruleLine.textContent = state.data?.result_rule || tr("result_rule_line");
+
+  const selectedPack = packs.find(pack => pack.id === state.selectedPack) || null;
+  const selectedSide = (contest.sides || []).find(side => side.id === state.selectedSide) || null;
+  if(selectedPack && selectedSide){
+    const votes = Math.max(0, Math.round(safeNum(selectedPack.votes)));
+    const usd = Math.max(0, safeNum(selectedPack.usd));
+    dom.selectionSummary.textContent = tr("selection_ready") + ": " + selectedSide.label + " | " + votes + " " + tr("votes_label") + " | $" + usd;
+  }else if(!selectedSide && !selectedPack){
+    dom.selectionSummary.textContent = tr("selection_need_both");
+  }else if(!selectedSide){
+    dom.selectionSummary.textContent = tr("selection_need_side");
+  }else{
+    dom.selectionSummary.textContent = tr("selection_need_pack");
+  }
+
+  const apiOnline = !state.apiError;
+  const loginReady = isLoggedInContestUser();
+  const gatewayOnline = Boolean(state.data?.razorpay_ready) && !state.apiError && !gatewayBlockedByMode;
+  setPill(dom.apiPill, apiOnline ? tr("api_pill_online") : tr("api_pill_offline"), apiOnline ? "good" : "bad");
+  const gatewayPillText = gatewayOnline
+    ? tr("gateway_pill_online")
+    : (state.apiError || gatewayBlockedByMode ? tr("gateway_pill_offline") : tr("gateway_pill_pending"));
+  const gatewayPillTone = gatewayOnline ? "good" : (state.apiError || gatewayBlockedByMode ? "bad" : "");
+  setPill(
+    dom.gatewayPill,
+    gatewayPillText,
+    gatewayPillTone
+  );
+
+  dom.myPaidVotesValue.textContent = fmtInt(safeNum(userStats?.paid_votes));
+  dom.myWeightedValue.textContent = String(Math.round(safeNum(userStats?.weighted_entries) * 100) / 100);
+  dom.mySharesValue.textContent = fmtInt(safeNum(userStats?.share_actions));
+
+  const boardRows = leaderboard.slice(0, 5);
+  if(!boardRows.length){
+    dom.leaderboardList.innerHTML = "<li><span class=\"leader-name\">"+esc(tr("no_supporters"))+"</span><span class=\"leader-score\">--</span></li>";
+  }else{
+    dom.leaderboardList.innerHTML = boardRows.map(row => {
+      const name = row?.display_name || "User";
+      const score = safeNum(row?.weighted_entries);
+      return "<li><span class=\"leader-name\">#"+esc(row?.rank)+" "+esc(name)+"</span><span class=\"leader-score\">"+esc(score.toFixed(1))+"</span></li>";
+    }).join("");
+  }
+
+  dom.payBtn.textContent = state.paymentBusy ? tr("pay_processing") : tr("pay_now");
+  dom.payBtn.disabled = state.paymentBusy || !state.selectedSide || !state.selectedPack || !gatewayOnline || !loginReady;
+
+  dom.shareLinkBtn.href = "contest.html" + (state.apiBase ? ("?api_base=" + encodeURIComponent(state.apiBase)) : "");
+  if(state.paymentBusy){
+    dom.payNotice.textContent = tr("pay_processing");
+  }else if(!loginReady){
+    dom.payNotice.textContent = tr("login_required_notice");
+  }else if(state.apiError){
+    dom.payNotice.textContent = state.apiError;
+  }else if(gatewayBlockedByMode || gatewayIssue === "live_key_required"){
+    dom.payNotice.textContent = tr("gateway_live_required_notice");
+  }else if(!state.data?.razorpay_ready){
+    dom.payNotice.textContent = tr("gateway_not_ready_notice");
+  }else if(selectedPack){
+    const votes = Math.max(0, Math.round(safeNum(selectedPack.votes)));
+    const usd = Math.max(0, safeNum(selectedPack.usd));
+    dom.payNotice.textContent = tr("pay_ready_notice") + " " + votes + " " + tr("votes_label") + " | $" + usd;
+  }else{
+    dom.payNotice.textContent = tr("selection_need_pack");
+  }
+}
+
+async function startPayment(){
+  if(state.paymentBusy) return;
+  pauseAutoRefresh(90000);
+
+  if(isLoggedInContestUser()){
+    await registerContestAccount();
+  }
+  if(state.apiError || !state.data){
+    await loadData();
+    render();
+  }
+  if(state.pendingVerifications.length){
+    await flushPendingVerifications({ silent:true });
+    render();
+  }
+  if(!state.data){
+    showToast(tr("api_order_block"), true);
+    return;
+  }
+
+  const autoContest = getContest();
+  const autoPacks = Array.isArray(state.data?.packs) ? state.data.packs : [];
+  if(autoContest && !state.selectedSide){
+    const defaultSide = autoContest?.sides?.[0]?.id || "";
+    if(defaultSide) state.selectedSide = defaultSide;
+  }
+  if(autoPacks.length && !state.selectedPack){
+    const preferredPack = autoPacks.find(pack => String(pack?.id || "") === "vote_7") || autoPacks[0];
+    const defaultPack = String(preferredPack?.id || "").trim();
+    if(defaultPack) state.selectedPack = defaultPack;
+  }
+
+  if(state.apiError){
+    showToast(state.apiError, true);
+    return;
+  }
+  if(isGatewayBlockedByMode() || getPaymentGatewayIssue() === "live_key_required"){
+    showToast(tr("gateway_live_required_notice"), true);
+    return;
+  }
+  if(!state.data?.razorpay_ready){
+    showToast(tr("gateway_not_ready_notice"), true);
+    return;
+  }
+  if(!isLoggedInContestUser()){
+    showToast(tr("login_required_notice"), true);
+    return;
+  }
+
+  const contest = getContest();
+  if(!contest || !state.selectedSide || !state.selectedPack){
+    showToast(tr("select_side_pack"), true);
+    return;
+  }
+
+  state.paymentBusy = true;
+  state.checkoutActive = true;
+  pauseAutoRefresh(180000);
+  render();
+
+  try{
+    await ensureRazorpayLoaded();
+
+    const createOrder = () => postJson("/api/contest/order", {
+      user_id: state.userId,
+      user_name: state.userName || "",
+      contest_id: state.contestId,
+      side_id: state.selectedSide,
+      pack_id: state.selectedPack
+    });
+    let orderPayload;
+    try{
+      orderPayload = await createOrder();
+    }catch(firstErr){
+      if(!isRetryableNetworkError(firstErr)) throw firstErr;
+
+      showToast(tr("order_retrying"), true);
+      await loadData();
+      render();
+      orderPayload = await createOrder();
+    }
+
+    const order = orderPayload?.order || null;
+    if(!order?.razorpay_order_id || !order?.key_id){
+      throw new Error("invalid_order_payload");
+    }
+
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (err) => {
+        if(settled) return;
+        settled = true;
+        state.checkoutActive = false;
+        pauseAutoRefresh(15000);
+        if(err){
+          reject(err);
+          return;
+        }
+        resolve(true);
+      };
+
+      const rzp = new Razorpay({
+        key: order.key_id,
+        order_id: order.razorpay_order_id,
+        amount: order.amount_paise,
+        currency: order.currency,
+        name: "NOVAGAPP Contest Battle",
+        description: contest.title,
+        prefill:{ name:state.userName || "", email:state.userEmail || "" },
+        theme:{ color:"#ff6a00" },
+        retry:{ enabled:true, max_count:1 },
+        modal:{
+          confirm_close:true,
+          escape:false,
+          backdropclose:false,
+          ondismiss: () => {
+            const cancelled = new Error("payment_cancelled");
+            cancelled.handled = true;
+            showToast(tr("payment_cancelled"), true);
+            finish(cancelled);
+          }
+        },
+        handler: async (resp) => {
+          const verifyPayload = {
+            user_id: state.userId,
+            user_name: state.userName || "",
+            razorpay_order_id: String(resp?.razorpay_order_id || order.razorpay_order_id || "").trim(),
+            razorpay_payment_id: String(resp?.razorpay_payment_id || "").trim(),
+            razorpay_signature: String(resp?.razorpay_signature || "").trim()
+          };
+
+          if(!verifyPayload.razorpay_order_id || !verifyPayload.razorpay_payment_id || !verifyPayload.razorpay_signature){
+            const invalid = new Error(tr("verify_failed") + "missing_fields");
+            invalid.handled = true;
+            showToast(invalid.message, true);
+            finish(invalid);
+            return;
+          }
+
+          queuePendingVerification(verifyPayload);
+          try{
+            await verifyVotePayment(verifyPayload, { refresh:true, silentSuccess:false });
+            finish();
+          }catch(err){
+            if(isHardVerifyFailure(err)){
+              removePendingVerification(verifyPayload.razorpay_order_id);
+              showToast(tr("verify_failed") + (err?.message || ""), true);
+            }else{
+              showToast(tr("verify_retry_notice"), true);
+            }
+            const verifyErr = new Error("verify_pending");
+            verifyErr.handled = true;
+            finish(verifyErr);
+          }
+        }
+      });
+
+      rzp.on("payment.failed", (evt) => {
+        const msg = evt?.error?.description || tr("payment_failed");
+        const failed = new Error(msg);
+        failed.handled = true;
+        showToast(msg, true);
+        finish(failed);
+      });
+
+      try{
+        rzp.open();
+      }catch(err){
+        finish(err);
+      }
+    });
+  }catch(err){
+    if(!err?.handled){
+      showToast(tr("order_failed") + (err?.message || ""), true);
+    }
+  }finally{
+    state.paymentBusy = false;
+    state.checkoutActive = false;
+    pauseAutoRefresh(8000);
+    render();
+  }
+}
+
+function bindEvents(){
+  dom.sideRow.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-side]");
+    if(!btn) return;
+    state.selectedSide = String(btn.getAttribute("data-side") || "");
+    render();
+  });
+
+  dom.packRow.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-pack]");
+    if(!btn) return;
+    state.selectedPack = String(btn.getAttribute("data-pack") || "");
+    render();
+  });
+
+  dom.payBtn.addEventListener("click", startPayment);
+
+  document.addEventListener("visibilitychange", () => {
+    if(document.visibilityState === "visible" && state.data){
+      scheduleRealtimeRefresh();
+    }
+  });
+  window.addEventListener("beforeunload", () => {
+    clearRealtimeSubscription();
+    if(state.apiRetryTimer){
+      clearInterval(state.apiRetryTimer);
+      state.apiRetryTimer = 0;
+    }
+  }, { once:true });
+}
+
+async function init(){
+  if(window.__contestBattleInitDone) return;
+  window.__contestBattleInitDone = true;
+
+  state.pendingVerifications = readPendingVerifications();
+  parseContestId();
+  state.apiBase = resolveInitialApiBase();
+  bindScrollMode();
+  applyLanguage();
+  document.addEventListener("languageUpdated", applyLanguage);
+  await initUser();
+  await registerContestAccount();
+  await loadData();
+  await flushPendingVerifications({ silent:true });
+  bindApiAutoRetry();
+  bindEvents();
+  render();
+}
+
+if(!window.__contestBattleInitPromise){
+  window.__contestBattleInitPromise = init().catch(err => {
+    console.error("battle_init_error", err);
+    showToast("Page load failed", true);
+  });
+}
+</script>
+</body>
+</html>

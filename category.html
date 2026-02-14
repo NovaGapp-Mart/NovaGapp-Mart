@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Category - NOVAGAPP</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="stylesheet" href="style.css">
+
+  <!-- 🔥 SUPABASE SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+  <script>
+    window.supa = window.supa || supabase.createClient(
+      window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+      window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+    );
+  </script>
+
+  <!-- 🔥 GLOBAL -->
+  <script src="global.js"></script>
+
+  <style>
+    .seller-badge{
+      display:inline-block;
+      margin-top:6px;
+      background:linear-gradient(135deg,#f7d774,#d6a21f);
+      color:#4a3300;
+      font-size:11px;
+      font-weight:bold;
+      padding:3px 6px;
+      border-radius:6px;
+      box-shadow:0 2px 6px rgba(0,0,0,.18)
+    }
+    .seller-name{
+      font-size:12px;
+      color:#666;
+      margin:4px 0 6px;
+    }
+    .low-stock{
+      font-size:12px;color:#d14;font-weight:bold;margin:4px 0 6px
+    }
+  </style>
+</head>
+
+<body>
+
+<header class="top">
+  <span class="company-name" id="catTitle">Category</span>
+</header>
+
+<div class="product-grid" id="productBox"></div>
+
+<script>
+/* CATEGORY */
+const params = new URLSearchParams(location.search);
+const cat = params.get("cat") || localStorage.getItem("category");
+const box = document.getElementById("productBox");
+const title = document.getElementById("catTitle");
+
+const titles = {
+  our_products:"Our Products",
+  niv_ai:"NIV-AI",
+  fashion:"Fashion",
+  mobiles:"Mobiles",
+  furniture:"Furniture",
+  electronics:"Electronics",
+  grocery:"Grocery",
+  kids:"Kids",
+  flights:"Flights",
+  sports:"Sports",
+  beauty:"Beauty",
+  health:"Health",
+  books:"Books",
+  accessories:"Accessories",
+  gaming:"Gaming"
+};
+
+if(!cat){
+  title.innerText = "Category";
+  box.innerHTML = "<p style='padding:20px'>Category not found</p>";
+}else{
+  title.innerText = titles[cat] || "Category";
+}
+
+const supa = window.supa;
+
+/* 🔥 LOAD PRODUCTS FROM SUPABASE */
+(async function(){
+  if(!cat) return;
+  box.innerHTML = "Loading...";
+
+  const { data, error } = await supa
+    .from("products")
+    .select("*")
+    .eq("category", cat)
+    .order("created_at", { ascending: false });
+
+  if(error){
+    console.error(error);
+    box.innerHTML = "<p style='padding:20px'>Error loading products</p>";
+    return;
+  }
+
+  if(!data || data.length === 0){
+    box.innerHTML="<p style='padding:20px'>Products coming soon 🚀</p>";
+    return;
+  }
+
+  box.innerHTML = "";
+
+  const sellerMap = await getSellerBadgeMap(data);
+  const sellerNameMap = await getSellerNameMap(data);
+
+  data.forEach(p=>{
+    let discountPercent = "";
+    if(p.mrp && p.mrp > p.price){
+      discountPercent = Math.round(((p.mrp - p.price) / p.mrp) * 100);
+    }
+
+    const showSellerBadge = sellerMap[p.owner_id] === true;
+    const sellerName =
+      sellerNameMap[p.owner_id] ||
+      "Seller";
+    const remainingQty = Number(p.quantity) || 0;
+    const lowStockHtml = remainingQty < 1000
+      ? `<div class="low-stock">Only ${remainingQty} left</div>`
+      : "";
+
+    const card = document.createElement("div");
+    card.className = "product-card";
+    card.dataset.id = p.id || "";
+    card.dataset.name = p.name || "";
+    card.dataset.price = p.price || 0;
+    card.dataset.currency = p.currency || "USD";
+    card.dataset.image = (p.images?.[0] || "");
+    card.dataset.ownerId = p.owner_id || "";
+    card.dataset.ownerName = sellerName || "";
+
+    card.innerHTML = `
+      <img src="${p.images?.[0] || ''}">
+      <h4>${translateProductName(p.name)}</h4>
+      <div class="seller-name">by ${sellerName}</div>
+      ${lowStockHtml}
+      ${showSellerBadge ? `<div class="seller-badge">⭐ Seller</div>` : ""}
+
+      ${
+        p.mrp && p.mrp > p.price
+        ? `<p>
+            <span style="text-decoration:line-through;color:#999;">
+              ${formatPrice(p.mrp, p.currency)}
+            </span>
+            <span style="font-weight:bold;margin-left:6px;">
+              ${formatPrice(p.price, p.currency)}
+            </span>
+            <span style="color:green;font-size:13px;margin-left:6px;">
+              ${discountPercent}% OFF
+            </span>
+          </p>`
+        : `<p>${formatPrice(p.price, p.currency)}</p>`
+      }
+      <button class="add-btn">Add to cart</button>
+    `;
+    box.appendChild(card);
+  });
+})();
+
+function openProduct(id){
+  localStorage.setItem("selectedProductId", id);
+  location.href = "product-details.html?id=" + encodeURIComponent(id);
+}
+
+function addToCart(id,name,price,image,ownerId,currency){
+  let cart = JSON.parse(localStorage.getItem("cart")) || [];
+  let item = cart.find(i => i.id === id);
+
+  if(item) item.qty++;
+  else cart.push({
+    id,
+    name,
+    price,
+    currency: currency || "USD",
+    images:[image],
+    qty:1,
+    owner_id: ownerId || ""
+  });
+
+  localStorage.setItem("cart", JSON.stringify(cart));
+}
+
+function bindProductEvents(){
+  const box = document.getElementById("productBox");
+  if(!box || box.dataset.bound === "1") return;
+  box.dataset.bound = "1";
+
+  box.addEventListener("click", (e)=>{
+    const addBtn = e.target.closest(".add-btn");
+    if(addBtn){
+      e.preventDefault();
+      e.stopPropagation();
+      const card = addBtn.closest(".product-card");
+      if(!card) return;
+      addToCart(
+        card.dataset.id,
+        card.dataset.name,
+        Number(card.dataset.price || 0),
+        card.dataset.image,
+        card.dataset.ownerId,
+        card.dataset.currency
+      );
+      return;
+    }
+
+    const card = e.target.closest(".product-card");
+    if(card && card.dataset.id){
+      openProduct(card.dataset.id);
+    }
+  });
+}
+
+document.addEventListener("DOMContentLoaded", bindProductEvents);
+
+function formatPrice(amount, currency){
+  if(typeof window.moneyTag === "function"){
+    return moneyTag(amount, currency || "USD");
+  }
+  const val = Number(amount) || 0;
+  return "$" + val;
+}
+
+async function getSellerBadgeMap(products){
+  const ownerIds = [...new Set(products.map(p=>p.owner_id).filter(Boolean))];
+  if(ownerIds.length === 0) return {};
+
+  const { data, error } = await supa
+    .from("sellers")
+    .select("user_id,show_badge,is_paid")
+    .in("user_id", ownerIds);
+
+  if(error){
+    console.error(error);
+    return {};
+  }
+
+  const map = {};
+  (data || []).forEach(s=>{
+    if(s.is_paid && s.show_badge) map[s.user_id] = true;
+  });
+  return map;
+}
+
+async function getSellerNameMap(products){
+  const map = {};
+
+  const ownerIds = [...new Set(
+    (products || [])
+      .map(p=>p.owner_id)
+      .filter(Boolean)
+  )];
+
+  if(ownerIds.length === 0) return map;
+
+  const { data, error } = await supa
+    .from("users")
+    .select("user_id,username")
+    .in("user_id", ownerIds);
+
+  if(error){
+    console.error(error);
+    return map;
+  }
+
+  (data || []).forEach(u=>{
+    if(u.username) map[u.user_id] = u.username;
+  });
+
+  return map;
+}
+</script>
+
+<nav class="bottom-nav">
+  <div class="nav-item" onclick="go('index.html')">
+    <img src="https://img.icons8.com/ios-filled/50/ff6a00/home.png"/>
+    <span>Home</span>
+  </div>
+  <div class="nav-item active" onclick="go('categories.html')">
+    <img src="https://img.icons8.com/ios-filled/50/000000/grid.png"/>
+    <span>Categories</span>
+  </div>
+  <div class="nav-item" onclick="go('account.html')">
+    <img src="https://img.icons8.com/ios-filled/50/000000/user.png"/>
+    <span>Account</span>
+  </div>
+  <div class="nav-item" onclick="go('cart.html')">
+    <img src="https://img.icons8.com/ios-filled/50/000000/shopping-cart.png"/>
+    <span>Cart</span>
+  </div>
+</nav>
+
+<script>
+function go(page){ location.href = page; }
+</script>
+
+</body>
+</html>
+
+
+

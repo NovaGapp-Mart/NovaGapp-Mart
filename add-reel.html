@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Create – NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body{
+  margin:0;
+  background:#000;
+  color:#fff;
+  font-family:Arial;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  height:100vh;
+}
+.box{
+  width:90%;
+  max-width:380px;
+  background:#111;
+  border-radius:18px;
+  padding:20px;
+  text-align:center;
+}
+h2{margin-bottom:10px}
+.upload{
+  border:2px dashed #444;
+  border-radius:14px;
+  padding:30px;
+  cursor:pointer;
+}
+.upload:hover{border-color:#ff6a00}
+input{display:none}
+.preview img,.preview video{
+  width:100%;
+  border-radius:14px;
+  margin-top:15px;
+}
+button{
+  width:100%;
+  padding:14px;
+  margin-top:15px;
+  border:none;
+  border-radius:30px;
+  background:#ff6a00;
+  color:#fff;
+  font-size:16px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="box">
+  <h2>Create</h2>
+  <p>Select photo or video</p>
+
+  <label class="upload">
+    Tap to choose media
+    <input type="file" id="media" accept="image/*,video/*">
+  </label>
+
+  <div class="preview" id="preview"></div>
+
+  <button onclick="next()">Next</button>
+</div>
+
+<script>
+/* ======================
+   GLOBAL MEDIA HOLDER
+   (NO TEMP STORAGE)
+====================== */
+window.selectedMedia = null;
+window.selectedType  = null;
+
+media.onchange = e => {
+  const file = e.target.files[0];
+  if(!file) return;
+
+  const type = file.type.startsWith("video") ? "reel" : "post";
+
+  window.selectedMedia = file;
+  window.selectedType  = type;
+
+  const url = URL.createObjectURL(file);
+
+  preview.innerHTML = type === "reel"
+    ? `<video src="${url}" controls></video>`
+    : `<img src="${url}">`;
+};
+
+function next(){
+  if(!window.selectedMedia){
+    alert("Select media first");
+    return;
+  }
+
+  // 🚨 IMPORTANT:
+  // Do NOT reload between pages
+  location.href = "add-details.html";
+}
+</script>
+
+</body>
+</html>

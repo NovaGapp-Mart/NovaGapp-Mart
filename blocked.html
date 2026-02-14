@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Blocked</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- SUPABASE -->
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial}
+body{background:#fff;color:#000}
+
+/* HEADER */
+.header{
+  display:flex;
+  align-items:center;
+  padding:14px;
+  border-bottom:1px solid #eee;
+}
+.header svg{
+  width:22px;
+  height:22px;
+  margin-right:10px;
+  cursor:pointer;
+}
+.header h2{font-size:18px}
+
+/* LIST */
+.list{
+  padding:10px 14px;
+}
+.user{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:12px 0;
+  border-bottom:1px solid #eee;
+}
+.user span{
+  font-size:15px;
+}
+
+/* BUTTON */
+.btn{
+  padding:6px 12px;
+  font-size:13px;
+  border-radius:6px;
+  border:1px solid #000;
+  background:#fff;
+  cursor:pointer;
+}
+.btn.red{
+  background:#000;
+  color:#fff;
+}
+.empty{
+  height:70vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:#777;
+  font-size:14px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+  <svg onclick="history.back()" viewBox="0 0 24 24">
+    <path d="M15 18l-6-6 6-6"/>
+  </svg>
+  <h2>Blocked</h2>
+</div>
+
+<div class="list" id="list"></div>
+<div class="empty" id="empty">No blocked accounts</div>
+
+<script>
+/* 🔐 SUPABASE CONFIG */
+const supabase = supabase.createClient(
+  window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+  window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+);
+
+/* LOAD BLOCKED USERS */
+(async()=>{
+  const { data } = await supabase.auth.getUser();
+  if(!data.user){
+    location.href="login.html";
+    return;
+  }
+
+  const list = document.getElementById("list");
+  const empty = document.getElementById("empty");
+
+
+  function render(){
+    list.innerHTML="";
+    if(blocked.length === 0){
+      empty.style.display="flex";
+      return;
+    }
+    empty.style.display="none";
+
+    blocked.forEach(uid=>{
+      const div=document.createElement("div");
+      div.className="user";
+      div.innerHTML=`
+        <span>${uid}</span>
+        <button class="btn red">Unblock</button>
+      `;
+      div.querySelector("button").onclick=()=>{
+        blocked = blocked.filter(u=>u!==uid);
+        render();
+
+        // 🔮 FUTURE DB SYNC (NO UI CHANGE)
+      };
+      list.appendChild(div);
+    });
+  }
+
+  render();
+})();
+
+/* GLOBAL BLOCK FUNCTION (USE ANYWHERE) */
+function blockUser(targetUid){
+  if(blocked.includes(targetUid)) return;
+
+  blocked.push(targetUid);
+
+  // 🔮 FUTURE DB SYNC
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New Story</title>
+
+<style>
+body{
+  margin:0;
+  background:#000;
+  color:#fff;
+  font-family:Arial;
+}
+.top{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:12px;
+}
+.preview img,.preview video{
+  width:100%;
+  height:calc(100vh - 120px);
+  object-fit:cover;
+}
+button{
+  background:#0095f6;
+  border:none;
+  color:#fff;
+  padding:8px 16px;
+  border-radius:20px;
+  font-size:14px;
+  cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+
+<div class="top">
+  <span>New Story</span>
+  <button onclick="publishStory()">Share</button>
+</div>
+
+<div class="preview" id="preview"></div>
+
+<script>
+const type = sessionStorage.getItem("storyType");
+const url  = sessionStorage.getItem("storyPreview");
+
+/* PREVIEW */
+preview.innerHTML =
+  type === "video"
+    ? `<video src="${url}" autoplay loop muted></video>`
+    : `<img src="${url}">`;
+
+/* PUBLISH (FRONTEND FLOW ONLY) */
+function publishStory(){
+  // mark story as published (frontend state)
+  sessionStorage.setItem("storyPublished","yes");
+  sessionStorage.removeItem("storyPreview");
+  sessionStorage.removeItem("storyType");
+
+  // back to feed
+  location.href = "post.html";
+}
+</script>
+
+</body>
+</html>

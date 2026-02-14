@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Order Details - NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+:root{
+  --brand:#ff6a00;
+  --brand-soft:#fff1e8;
+  --ink:#1f1f1f;
+  --muted:#6b7280;
+  --line:#ececec;
+  --ok:#16a34a;
+  --danger:#ef4444;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#f4f6f8;color:var(--ink)}
+.header{
+  position:sticky;top:0;z-index:20;
+  background:linear-gradient(135deg,#ff7a00,#ff5a00);
+  color:#fff;padding:14px 14px 18px;
+  box-shadow:0 8px 20px rgba(0,0,0,.15)
+}
+.head-row{display:flex;align-items:center;gap:10px}
+.back-btn{
+  border:none;background:rgba(255,255,255,.2);color:#fff;
+  min-width:56px;height:34px;border-radius:10px;cursor:pointer;font-size:13px;padding:0 10px
+}
+.header .id{font-size:12px;opacity:.9;margin-top:4px;word-break:break-all}
+.wrap{padding:12px 12px 80px;max-width:820px;margin:0 auto}
+.card{
+  background:#fff;border-radius:14px;padding:14px;
+  box-shadow:0 4px 14px rgba(0,0,0,.06);
+  margin-bottom:12px
+}
+.section-title{font-size:15px;font-weight:700;margin-bottom:10px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pill{
+  background:#fff;border:1px solid var(--line);border-radius:10px;
+  padding:10px
+}
+.label{font-size:12px;color:var(--muted)}
+.value{font-size:14px;font-weight:600;margin-top:4px;word-break:break-word}
+.address{line-height:1.4}
+.timeline{position:relative;padding-left:26px;margin-top:6px}
+.timeline::before{
+  content:"";position:absolute;left:7px;top:6px;bottom:6px;width:4px;
+  background:#ffd8c2;border-radius:99px
+}
+.timeline.cancel-flow{padding-left:0}
+.timeline.cancel-flow::before{display:none}
+.cancel-flow-wrap{display:flex;flex-direction:column;align-items:flex-start}
+.cancel-node{
+  position:relative;padding-left:26px;min-height:28px
+}
+.cancel-node .dot{
+  position:absolute;left:0;top:2px;width:16px;height:16px;border-radius:50%;
+  border:3px solid #ffc49d;background:#fff
+}
+.cancel-node .title{font-size:14px;font-weight:700}
+.cancel-node .sub{font-size:12px;color:#6b7280;margin-top:2px}
+.cancel-node.orange .dot{background:#ff6a00;border-color:#ff6a00}
+.cancel-node.orange .title{color:#c2410c}
+.cancel-node.red .dot{background:#dc2626;border-color:#dc2626}
+.cancel-node.red .title{color:#991b1b}
+.cancel-node.red .sub{color:#b91c1c}
+.cancel-link{
+  width:4px;height:36px;background:#dc2626;border-radius:99px;margin-left:6px;margin-top:2px;margin-bottom:2px
+}
+.step{position:relative;padding:0 0 18px 6px}
+.step:last-child{padding-bottom:0}
+.step-dot{
+  position:absolute;left:-26px;top:0;width:18px;height:18px;border-radius:50%;
+  border:3px solid #ffc49d;background:#fff;z-index:1
+}
+.step-title{font-size:14px;font-weight:700}
+.step-sub{font-size:12px;color:var(--muted);margin-top:3px}
+.step.done .step-dot,
+.step.current .step-dot{background:var(--brand);border-color:var(--brand)}
+.step.done .step-title,
+.step.current .step-title{color:var(--brand)}
+.step.done .step-sub,
+.step.current .step-sub{color:#9a3412}
+.step.cancelled .step-dot{background:#dc2626;border-color:#dc2626}
+.step.cancelled .step-title{color:#991b1b}
+.step.cancelled .step-sub{color:#b91c1c}
+.declined-note{
+  margin-top:10px;font-size:12px;color:#b91c1c;
+  background:#fee2e2;border:1px solid #fecaca;border-radius:8px;padding:8px
+}
+.cancelled-note{
+  margin-top:10px;font-size:12px;color:#991b1b;
+  background:#fee2e2;border:1px solid #fecaca;border-radius:8px;padding:8px
+}
+.return-note{
+  margin-top:10px;font-size:12px;color:#92400e;
+  background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px
+}
+.pending-note{
+  margin-top:10px;font-size:12px;color:#9a3412;
+  background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px
+}
+.items{display:grid;gap:10px}
+.item{border:1px solid var(--line);border-radius:10px;padding:10px;display:flex;gap:10px}
+.thumb{width:62px;height:62px;border-radius:8px;object-fit:cover;background:#f0f0f0}
+.item-main{flex:1;min-width:0}
+.item-name{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row{display:flex;justify-content:space-between;gap:8px;margin-top:6px;font-size:13px;color:#374151}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.btn{border:none;border-radius:10px;padding:11px;font-weight:700;cursor:pointer}
+.btn-approve{background:var(--ok);color:#fff}
+.btn-decline{background:var(--danger);color:#fff}
+.btn-next{background:var(--brand);color:#fff;width:100%;margin-top:10px}
+.btn-cancel{background:#dc2626;color:#fff}
+.btn-return{background:#7c3aed;color:#fff}
+.btn-approve-return{background:#059669;color:#fff}
+.btn-reject-return{background:#b91c1c;color:#fff}
+.muted{font-size:12px;color:var(--muted)}
+.buyer-actions{margin-top:10px;display:grid;gap:8px}
+.return-box{border:1px solid #ececec;border-radius:10px;padding:10px;background:#fff}
+.return-box textarea,.return-box input{
+  width:100%;padding:9px;border:1px solid #d8d8d8;border-radius:8px;font-size:13px;margin-top:8px
+}
+.extra-steps{margin-top:10px;border-top:1px dashed #e7e7e7;padding-top:10px}
+.chip{display:inline-block;padding:5px 8px;border-radius:999px;font-size:11px;font-weight:700}
+.chip-orange{background:#fff1e8;color:#b45309}
+.chip-red{background:#fee2e2;color:#991b1b}
+.chip-purple{background:#f3e8ff;color:#6d28d9}
+.status-badge{
+  display:inline-block;
+  padding:5px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:700
+}
+.status-badge.approved{background:#fff1e8;color:#b45309;border:1px solid #fed7aa}
+.status-badge.pending{background:#f3f4f6;color:#4b5563;border:1px solid #e5e7eb}
+.status-badge.rejected{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
+@media (max-width:640px){
+  .grid{grid-template-columns:1fr}
+}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<script src="global.js"></script>
+</head>
+<body>
+
+<div class="header">
+  <div class="head-row">
+    <button class="back-btn" onclick="goBack()">Back</button>
+    <div style="font-size:18px;font-weight:700">Order Details</div>
+  </div>
+  <div class="id" id="orderIdText">Loading...</div>
+</div>
+
+<div class="wrap">
+  <div class="card" id="metaCard">Loading order...</div>
+
+  <div class="card">
+    <div class="section-title">Order Journey</div>
+    <div class="timeline" id="timelineBox"></div>
+    <div id="timelineNote"></div>
+    <div id="buyerActions"></div>
+    <div id="sellerActions"></div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Ordered Items</div>
+    <div class="items" id="itemsBox"></div>
+  </div>
+</div>
+
+<script>
+const supa =
+  window.supa ||
+  window.supabase?.createClient(
+    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+  );
+
+const STAGES = [
+  { key: "approved", label: "Seller Approval", sub: "Seller confirms your order" },
+  { key: "shipped", label: "Shipped", sub: "Package left seller facility" },
+  { key: "hub_reached", label: "Package Reached Hub", sub: "Package reached nearest hub" },
+  { key: "out_for_delivery", label: "Out for Delivery", sub: "Rider is delivering your package" },
+  { key: "delivered", label: "Delivered", sub: "Order delivered successfully" }
+];
+
+const params = new URLSearchParams(location.search);
+const ORDER_ID =
+  params.get("order_id") ||
+  params.get("orderId") ||
+  params.get("Order_id") ||
+  params.get("OrderId") ||
+  "";
+const NOTIF_ID =
+  params.get("notif_id") ||
+  params.get("notifId") ||
+  params.get("Notif_id") ||
+  params.get("NotifId") ||
+  "";
+
+let CURRENT_USER = null;
+let ORDER = null;
+
+const metaCard = document.getElementById("metaCard");
+const timelineBox = document.getElementById("timelineBox");
+const timelineNote = document.getElementById("timelineNote");
+const buyerActions = document.getElementById("buyerActions");
+const sellerActions = document.getElementById("sellerActions");
+const itemsBox = document.getElementById("itemsBox");
+const orderIdText = document.getElementById("orderIdText");
+
+(async function init(){
+  const { data } = await supa.auth.getSession();
+  if(!data.session){
+    location.href = "login.html";
+    return;
+  }
+  CURRENT_USER = data.session.user;
+
+  if(!ORDER_ID){
+    metaCard.innerText = "Order not found";
+    return;
+  }
+
+  await markNotifRead();
+  await loadOrder();
+  renderPage();
+  subscribeOrderRealtime();
+})();
+
+async function markNotifRead(){
+  if(!NOTIF_ID) return;
+  await supa
+    .from("notifications")
+    .update({ is_read: true })
+    .eq("id", NOTIF_ID);
+}
+
+async function loadOrder(){
+  const { data, error } = await supa
+    .from("orders")
+    .select("*")
+    .eq("id", ORDER_ID)
+    .single();
+
+  if(error || !data){
+    metaCard.innerText = "Order not found";
+    return;
+  }
+
+  ORDER = data;
+}
+
+function isBuyer(){
+  return ORDER?.user_id === CURRENT_USER?.id;
+}
+
+function isSeller(){
+  return ORDER?.seller_id === CURRENT_USER?.id;
+}
+
+function renderPage(){
+  if(!ORDER) return;
+
+  orderIdText.innerText = `Order ID: ${ORDER.id}`;
+
+  const buyerAddr = ORDER.buyer_address || ORDER.address || {};
+  const buyerAddrText = typeof buyerAddr === "string"
+    ? buyerAddr
+    : [buyerAddr.address, buyerAddr.city, buyerAddr.pincode].filter(Boolean).join(", ");
+
+  metaCard.innerHTML = `
+    <div><b>Status:</b> ${ORDER.status || "placed"}</div>
+    <div><b>Total:</b> ${window.moneyTag ? moneyTag(ORDER.total || ORDER.amount || 0, ORDER.currency || "USD") : (ORDER.total || ORDER.amount || 0)}</div>
+    <div><b>Payment:</b> ${ORDER.payment_status || "pending"} (${ORDER.payment_method || "Pending Payment"})</div>
+    <div><b>Buyer:</b> ${ORDER.buyer_name || ORDER.email || ""}</div>
+    <div><b>Address:</b> ${buyerAddrText || ""}</div>
+    <div><b>Created:</b> ${ORDER.created_at ? new Date(ORDER.created_at).toLocaleString() : ""}</div>
+  `;
+
+  renderTimeline();
+  renderItems();
+  renderActions();
+}
+
+function renderTimeline(){
+  timelineBox.innerHTML = "";
+  const status = String(ORDER.status || "placed").toLowerCase();
+  const stageKeys = STAGES.map(s=>s.key);
+  const currentIndex = stageKeys.indexOf(status);
+
+  STAGES.forEach((s, idx)=>{
+    const item = document.createElement("div");
+    item.className = "step" + (currentIndex >= 0 && idx <= currentIndex ? " done" : "");
+    item.innerHTML = `<span>${idx + 1}</span><div><b>${s.label}</b><div>${s.sub}</div></div>`;
+    timelineBox.appendChild(item);
+  });
+
+  timelineNote.innerText = status === "cancelled" ? "Order cancelled" : "";
+}
+
+function renderItems(){
+  itemsBox.innerHTML = "";
+  const items = Array.isArray(ORDER.items) ? ORDER.items : [];
+  if(items.length === 0){
+    itemsBox.innerHTML = "<div class='item'>No items</div>";
+    return;
+  }
+
+  items.forEach(i=>{
+    const row = document.createElement("div");
+    row.className = "item";
+    const img = Array.isArray(i.images) ? i.images[0] : i.image;
+    row.innerHTML = `
+      <img src="${img || 'images/no-image.png'}" />
+      <div class="item-info">
+        <div class="item-name">${translateProductName(i.name || "Item")}</div>
+        <div class="item-meta">Qty: ${Number(i.qty || 0)}</div>
+        <div class="item-meta">Price: ${window.moneyTag ? moneyTag(i.price || 0, i.currency || ORDER.currency || "USD") : (i.price || 0)}</div>
+      </div>
+    `;
+    itemsBox.appendChild(row);
+  });
+}
+
+function renderActions(){
+  buyerActions.innerHTML = "";
+  sellerActions.innerHTML = "";
+  const status = String(ORDER.status || "placed").toLowerCase();
+
+  if(isBuyer() && !["cancelled", "delivered"].includes(status)){
+    const btn = document.createElement("button");
+    btn.className = "action-btn danger";
+    btn.innerText = "Cancel Order";
+    btn.onclick = ()=>updateStatus("cancelled");
+    buyerActions.appendChild(btn);
+  }
+
+  if(isSeller() && status !== "cancelled"){
+    const next = getNextStatus(status);
+    if(next){
+      const btn = document.createElement("button");
+      btn.className = "action-btn";
+      btn.innerText = `Mark as ${labelForStatus(next)}`;
+      btn.onclick = ()=>updateStatus(next);
+      sellerActions.appendChild(btn);
+    }
+  }
+}
+
+function labelForStatus(key){
+  const found = STAGES.find(s=>s.key === key);
+  return found ? found.label : key;
+}
+
+function getNextStatus(status){
+  if(status === "placed") return "approved";
+  const keys = STAGES.map(s=>s.key);
+  const idx = keys.indexOf(status);
+  if(idx === -1) return null;
+  return keys[idx + 1] || null;
+}
+
+async function updateStatus(nextStatus){
+  if(!ORDER?.id) return;
+  const { error, data } = await supa
+    .from("orders")
+    .update({ status: nextStatus })
+    .eq("id", ORDER.id)
+    .select("*")
+    .single();
+
+  if(error){
+    alert("Failed to update order");
+    console.error(error);
+    return;
+  }
+
+  ORDER = data;
+  renderPage();
+}
+
+function subscribeOrderRealtime(){
+  if(!ORDER_ID) return;
+  supa
+    .channel("order-" + ORDER_ID)
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "orders", filter: `id=eq.${ORDER_ID}` },
+      payload => {
+        ORDER = payload.new;
+        renderPage();
+      }
+    )
+    .subscribe();
+}
+
+function goBack(){
+  history.back();
+}
+</script>
+
+</body>
+</html>
+
+

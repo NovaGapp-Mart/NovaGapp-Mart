@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Publish Product - NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body{margin:0;font-family:Arial;background:#f5f5f5}
+.header{background:#ff7a00;color:#fff;padding:15px;font-size:20px;font-weight:bold}
+.box{background:#fff;margin:15px;padding:15px;border-radius:12px}
+input,textarea,select{width:100%;padding:12px;margin-bottom:12px;border-radius:8px;border:1px solid #ccc;font-size:16px;box-sizing:border-box}
+textarea{height:90px;resize:none}
+.price-row{display:flex;gap:10px}
+.preview{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.preview img,.preview video{width:70px;height:70px;object-fit:cover;border-radius:8px;border:1px solid #ddd}
+button{width:100%;background:#ff7a00;color:#fff;border:none;padding:15px;font-size:18px;border-radius:10px;cursor:pointer;font-weight:bold}
+.note{font-size:13px;color:#666}
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<script>
+  window.supa = window.supa || supabase.createClient(
+    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+  );
+</script>
+<script src="global.js"></script>
+</head>
+
+<body>
+
+<div class="header">Publish Product</div>
+
+<div class="box">
+  <input type="text" id="p_name" placeholder="Product Name">
+  <textarea id="p_desc" placeholder="Product Description"></textarea>
+
+  <select id="p_category">
+    <option value="">Select Category</option>
+    <option value="our_products">Our Products</option>
+    <option value="niv_ai">NIV-AI</option>
+    <option value="fashion">Fashion</option>
+    <option value="furniture">Furniture</option>
+    <option value="mobiles">Mobiles</option>
+    <option value="electronics">Electronics</option>
+    <option value="grocery">Grocery</option>
+    <option value="kids">Kids</option>
+    <option value="flights">Flights</option>
+    <option value="sports">Sports</option>
+    <option value="beauty">Beauty</option>
+    <option value="health">Health</option>
+    <option value="books">Books</option>
+    <option value="accessories">Accessories</option>
+    <option value="gaming">Gaming</option>
+  </select>
+
+  <select id="p_currency">
+    <option value="">Select Currency</option>
+    <option value="INR">INR (₹)</option>
+    <option value="USD">USD ($)</option>
+    <option value="EUR">EUR (€)</option>
+    <option value="GBP">GBP (£)</option>
+    <option value="JPY">JPY (¥)</option>
+  </select>
+
+  <div class="price-row">
+    <input id="p_mrp" type="number" placeholder="MRP Price">
+    <input id="p_price" type="number" placeholder="Our Price">
+  </div>
+
+  <input id="p_quantity" type="number" placeholder="Total Quantity">
+  <b id="p_discount" style="color:green">0% OFF</b>
+
+  <hr>
+
+  <input type="text" id="p_keywords" placeholder="Keywords (comma separated, unlimited)">
+  <div class="note">You can add unlimited keywords separated by commas.</div>
+
+  <input type="file" id="p_images" accept="image/*" multiple>
+  <div class="preview" id="imgPreview"></div>
+  <div class="note">You can upload unlimited product photos.</div>
+
+  <button id="publishBtn">PUBLISH PRODUCT</button>
+</div>
+
+<script>
+const supa = window.supa;
+let currentUser = null;
+let SELLER_PROFILE = null;
+let SELECTED_IMAGES = [];
+const FILE_KEYS = new Set();
+const API_BASE = localStorage.getItem("tryonApiBase") || "http://localhost:3000";
+
+async function cacheProductImage(productId, productUrl){
+  if(!productId || !productUrl) return;
+  try{
+    const res = await fetch(`${API_BASE}/products/cache`, {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({
+        product_id: productId,
+        product_url: productUrl
+      })
+    });
+    const data = await res.json().catch(()=>null);
+    if(!res.ok){
+      console.warn("Product cache failed", res.status, data);
+    }
+  }catch(err){
+    console.warn("Product cache error", err);
+  }
+}
+
+/* 🔐 AUTH + SELLER CHECK */
+(async function(){
+  const { data } = await supa.auth.getSession();
+  if(!data.session){
+    location.href="login.html";
+    return;
+  }
+
+  currentUser = data.session.user;
+
+  const { data: profile } = await supa
+    .from("users")
+    .select("username")
+    .eq("user_id", currentUser.id)
+    .maybeSingle();
+  SELLER_PROFILE = profile || null;
+
+  const { data: seller } = await supa
+    .from("sellers")
+    .select("is_paid")
+    .eq("user_id", currentUser.id)
+    .maybeSingle();
+
+  if(!seller || seller.is_paid !== true){
+    alert("Seller plan required");
+    location.href="seller.html";
+    return;
+  }
+})();
+
+/* IMAGE PREVIEW (APPEND ONLY) */
+p_images.onchange=e=>{
+  const newFiles = [...e.target.files];
+
+  newFiles.forEach(f=>{
+    const key = `${f.name}|${f.size}|${f.lastModified}`;
+    if(FILE_KEYS.has(key)) return;
+    FILE_KEYS.add(key);
+    SELECTED_IMAGES.push(f);
+
+    const img = document.createElement("img");
+    img.src = URL.createObjectURL(f);
+    img.onload = () => URL.revokeObjectURL(img.src);
+    imgPreview.appendChild(img);
+  });
+
+  // allow selecting the same file again later if needed
+  e.target.value = "";
+};
+
+/* DISCOUNT */
+p_mrp.oninput=p_price.oninput=()=>{
+  let m=+p_mrp.value,p=+p_price.value;
+  if(m>p && p>0) p_discount.innerText=Math.round(((m-p)/m)*100)+"% OFF";
+};
+
+/* PUBLISH */
+publishBtn.onclick=async()=>{
+  const files = SELECTED_IMAGES;
+  if(files.length === 0){
+    alert("Please upload at least one product image");
+    return;
+  }
+
+  publishBtn.disabled = true;
+  publishBtn.innerText = "PUBLISHING...";
+
+  const imageUrls = await Promise.all(files.map(f => new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Image read failed"));
+    reader.readAsDataURL(f);
+  })));
+
+  const mrpValue = Number(p_mrp.value || 0);
+  const priceValue = Number(p_price.value || 0);
+  const quantityValue = Number(p_quantity.value || 0);
+  const discountValue = mrpValue > 0
+    ? Math.round(((mrpValue - priceValue) / mrpValue) * 100)
+    : 0;
+
+  const product={
+    name:p_name.value,
+    desc:p_desc.value,
+    category:p_category.value,
+    currency:p_currency.value,
+    mrp:mrpValue,
+    price:priceValue,
+    quantity:quantityValue,
+    keywords:p_keywords.value.trim(),
+    discount:discountValue,
+    owner_id:currentUser.id,
+    images:imageUrls
+  };
+
+  const { data, error } = await supa
+    .from("products")
+    .insert(product)
+    .select()
+    .single();
+  if(error){
+    console.error(error);
+    alert("Publish failed");
+    publishBtn.disabled = false;
+    publishBtn.innerText = "PUBLISH PRODUCT";
+    return;
+  }
+
+  await cacheProductImage(
+    data?.id,
+    (data?.images && data.images[0]) || (product.images && product.images[0])
+  );
+
+  alert("Product published");
+  location.href="index.html";
+};
+</script>
+
+</body>
+</html>

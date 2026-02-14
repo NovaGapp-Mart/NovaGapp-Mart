@@ -1,0 +1,1343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>My Account - NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- SUPABASE -->
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="global.js"></script>
+<script src="public-config.js"></script>
+<script src="social.js"></script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial}
+body{background:#fff;color:#111;min-height:100vh}
+
+/* HEADER */
+.header{
+  padding:12px 14px;
+  border-bottom:1px solid #eee;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+}
+.header .left,
+.header .right{display:flex;align-items:center;gap:12px}
+.header .handle{
+  display:flex;align-items:center;gap:6px;font-weight:bold;font-size:16px;
+}
+.header .caret{font-size:12px;color:#777}
+.header .live-dot{
+  width:6px;height:6px;border-radius:50%;background:#ff2d55;display:inline-block
+}
+.icon-btn{
+  width:30px;height:30px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  border:1px solid #eee;background:#fff;cursor:pointer
+}
+.icon-btn svg{width:18px;height:18px;fill:#111}
+
+/* PROFILE */
+.profile{
+  padding:16px;
+  display:flex;
+  align-items:center;
+  gap:16px;
+}
+.avatar-wrap{position:relative}
+.avatar{
+  width:90px;height:90px;border-radius:50%;
+  background:linear-gradient(45deg,#ff6a00,#ff2d55);
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-size:34px;font-weight:bold;
+  background-size:cover;background-position:center;
+}
+.avatar-plus{
+  position:absolute;bottom:2px;right:2px;
+  width:24px;height:24px;border-radius:50%;
+  background:#0095f6;color:#fff;border:2px solid #fff;
+  font-size:16px;line-height:20px;cursor:pointer
+}
+.bubble{
+  position:absolute;left:90px;top:0;
+  background:#fff;border:1px solid #eee;border-radius:14px;
+  padding:6px 10px;font-size:11px;color:#666;box-shadow:0 4px 10px rgba(0,0,0,0.08)
+}
+.stats{
+  flex:1;display:flex;justify-content:space-around;gap:10px
+}
+.stat{text-align:center}
+.stat b{display:block;font-size:18px}
+.stat span{font-size:12px;color:#666}
+
+/* NAME + BIO */
+.profile-text{padding:0 16px 6px}
+.profile-text .name{font-weight:bold;font-size:16px;margin-bottom:3px}
+.profile-text .bio{font-size:13px;color:#555}
+
+/* DASHBOARD */
+.dashboard{
+  margin:10px 16px 8px;padding:12px;border-radius:10px;background:#f4f4f4;color:#333
+}
+.dashboard small{color:#777}
+
+/* ACTIONS */
+.actions-row{
+  display:flex;gap:10px;padding:0 16px 12px
+}
+.action-btn{
+  flex:1;border:1px solid #e5e5e5;background:#f6f6f6;border-radius:10px;
+  padding:8px 10px;font-weight:bold;cursor:pointer
+}
+.action-btn.follow{background:#ff6a00;color:#fff;border-color:#ff6a00}
+.action-btn.follow.following{background:#999;color:#fff;border-color:#999}
+
+/* TABS */
+.tabs{
+  display:flex;justify-content:space-around;align-items:center;
+  border-top:1px solid #eee;border-bottom:1px solid #eee;
+  padding:8px 0;margin:0 0 6px
+}
+.tab-btn{background:none;border:none;cursor:pointer;opacity:0.45}
+.tab-btn.active{opacity:1}
+.tab-btn svg{width:22px;height:22px;fill:#111}
+
+/* GRID */
+.grid{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  gap:2px;padding-bottom:70px
+}
+.media-item{position:relative;background:#000;display:flex;flex-direction:column}
+.media-item img,
+.media-item video{width:100%;height:120px;object-fit:cover;display:block}
+.media-item .badge{
+  position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.6);
+  color:#fff;font-size:10px;padding:2px 6px;border-radius:10px
+}
+.item-menu-btn{
+  position:absolute;
+  top:6px;
+  left:6px;
+  width:24px;
+  height:24px;
+  border-radius:50%;
+  border:none;
+  background:rgba(0,0,0,0.65);
+  color:#fff;
+  cursor:pointer;
+  font-size:15px;
+  line-height:24px;
+  z-index:4;
+}
+.item-menu{
+  position:absolute;
+  top:34px;
+  left:6px;
+  min-width:92px;
+  background:#fff;
+  border:1px solid #ddd;
+  border-radius:8px;
+  box-shadow:0 6px 16px rgba(0,0,0,0.18);
+  overflow:hidden;
+  z-index:5;
+  display:none;
+}
+.item-menu.show{display:block}
+.item-menu button{
+  width:100%;
+  border:none;
+  background:#fff;
+  text-align:left;
+  padding:8px 10px;
+  font-size:12px;
+  cursor:pointer;
+}
+.item-menu button:hover{background:#f5f5f5}
+.item-menu .danger{color:#d11}
+.media-title{
+  padding:6px 6px 8px;
+  font-size:11px;
+  color:#fff;
+  background:#111;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.empty{text-align:center;color:#777;padding:14px}
+
+/* NAV */
+.nav{position:fixed;bottom:0;left:0;width:100%;height:60px;background:#111;display:flex}
+.nav div{flex:1;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.nav svg{width:24px;height:24px;fill:#888}
+.nav .active svg{fill:#ff6a00}
+.sub-img{width:26px;height:26px}
+
+/* CREATE SHEET */
+.sheet-backdrop{
+  position:fixed;inset:0;background:rgba(0,0,0,0.45);
+  opacity:0;pointer-events:none;transition:0.2s;z-index:30;
+}
+.sheet{
+  position:fixed;left:0;right:0;bottom:-420px;
+  background:#fff;border-radius:18px 18px 0 0;
+  padding:12px 16px 20px;z-index:40;transition:0.25s;
+}
+.sheet.show{bottom:0}
+.sheet-backdrop.show{opacity:1;pointer-events:auto}
+.sheet-header{display:flex;flex-direction:column;align-items:center;gap:8px;padding-bottom:6px}
+.sheet-handle{width:44px;height:5px;border-radius:999px;background:#ddd}
+.sheet-title{font-weight:700;font-size:16px}
+.sheet-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.sheet-item{
+  display:flex;align-items:center;gap:12px;
+  padding:12px;border-radius:12px;
+  border:1px solid #eee;background:#fff;cursor:pointer;
+}
+.sheet-item svg{width:20px;height:20px;fill:#111}
+.sheet-item span{font-weight:600}
+.sheet-item small{color:#777}
+
+/* EDIT PROFILE MODAL */
+.modal-backdrop{
+  position:fixed;inset:0;background:rgba(0,0,0,0.45);
+  opacity:0;pointer-events:none;transition:0.2s;z-index:50;
+}
+.modal{
+  position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:88%;max-width:360px;background:#fff;border-radius:12px;
+  padding:16px;z-index:60;opacity:0;pointer-events:none;transition:0.2s;
+}
+.modal.show{opacity:1;pointer-events:auto}
+.modal-backdrop.show{opacity:1;pointer-events:auto}
+.modal h3{margin-bottom:10px}
+.modal label{font-size:12px;color:#555;display:block;margin-top:10px}
+.modal input,.modal textarea{
+  width:100%;margin-top:4px;padding:8px;border:1px solid #ddd;border-radius:8px;font-size:13px
+}
+.modal .row{display:flex;gap:8px;margin-top:12px}
+.modal .row button{flex:1;border:none;border-radius:8px;padding:8px;cursor:pointer;font-weight:bold}
+.modal .save{background:#111;color:#fff}
+.modal .cancel{background:#eee}
+
+.media-edit-modal{
+  left:0;
+  top:0;
+  transform:none;
+  width:100%;
+  max-width:none;
+  min-height:100vh;
+  height:100dvh;
+  border-radius:0;
+  padding:16px;
+  padding-bottom:calc(16px + env(safe-area-inset-bottom));
+  display:flex;
+  flex-direction:column;
+  overflow-y:auto;
+}
+.media-edit-modal h3{margin-bottom:6px}
+.media-edit-modal textarea{
+  min-height:140px;
+  resize:vertical;
+}
+.media-edit-modal .row{
+  margin-top:auto;
+  padding-top:14px;
+}
+
+.media-viewer-backdrop{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.75);
+  opacity:0;
+  pointer-events:none;
+  transition:0.2s;
+  z-index:70;
+}
+.media-viewer-modal{
+  position:fixed;
+  inset:0;
+  background:#000;
+  opacity:0;
+  pointer-events:none;
+  transition:0.2s;
+  z-index:80;
+  display:flex;
+  flex-direction:column;
+}
+.media-viewer-backdrop.show{opacity:1;pointer-events:auto}
+.media-viewer-modal.show{opacity:1;pointer-events:auto}
+.media-viewer-header{
+  display:flex;
+  justify-content:flex-end;
+  padding:10px 12px calc(10px + env(safe-area-inset-top));
+}
+.media-viewer-close{
+  border:1px solid #333;
+  background:#111;
+  color:#fff;
+  border-radius:999px;
+  padding:6px 14px;
+  font-size:13px;
+  cursor:pointer;
+}
+.media-viewer-body{
+  flex:1;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  padding:10px 14px calc(14px + env(safe-area-inset-bottom));
+}
+.media-viewer-body video,
+.media-viewer-body img{
+  width:auto;
+  max-width:100%;
+  max-height:78vh;
+  border-radius:12px;
+  background:#000;
+}
+.media-viewer-caption{
+  width:min(100%, 720px);
+  color:#fff;
+  font-size:13px;
+  line-height:1.35;
+}
+
+</style>
+</head>
+
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="left">
+    <button class="icon-btn" id="openCreate" title="Create">+</button>
+  </div>
+  <div class="handle">
+    <span id="username">user</span>
+    <span class="caret">v</span>
+    <span class="live-dot"></span>
+  </div>
+  <div class="right">
+    <button class="icon-btn" title="Threads">@</button>
+    <button class="icon-btn" title="Menu" onclick="location.href='m-setting.html'">
+      <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- PROFILE -->
+<div class="profile">
+  <div class="avatar-wrap">
+    <div class="avatar" id="avatar">U</div>
+    <button class="avatar-plus" onclick="openSheet()">+</button>
+    <div class="bubble">Your thoughts go here...</div>
+  </div>
+  <div class="stats">
+    <div class="stat"><b id="postsCount">0</b><span>posts</span></div>
+    <div class="stat"><b id="followersCount">0</b><span>followers</span></div>
+    <div class="stat"><b id="followingCount">0</b><span>following</span></div>
+  </div>
+</div>
+
+<div class="profile-text">
+  <div class="name" id="displayName">User</div>
+  <div class="bio" id="bioText">Welcome to NOVAGAPP</div>
+</div>
+
+<div class="dashboard">
+  <div><b>Professional dashboard</b></div>
+  <small>1 view in the last 30 days.</small>
+</div>
+
+<div class="actions-row">
+  <button class="action-btn" id="editProfileBtn">Edit profile</button>
+  <button class="action-btn" onclick="shareProfile()">Share profile</button>
+</div>
+
+<div class="tabs">
+  <button class="tab-btn active" data-filter="all" title="Posts">
+    <svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>
+  </button>
+  <button class="tab-btn" data-filter="reel" title="Reels">
+    <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM9 8l6 4-6 4z"/></svg>
+  </button>
+  <button class="tab-btn" data-filter="video" title="Videos">
+    <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+  </button>
+  <button class="tab-btn" data-filter="post" title="Tagged">
+    <svg viewBox="0 0 24 24"><path d="M12 3l7 4v10l-7 4-7-4V7l7-4z"/></svg>
+  </button>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<!-- NAV -->
+<div class="nav">
+  <div onclick="go('index.html')">
+    <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3l-10-9-10 9h3v8z"/></svg>
+  </div>
+  <div onclick="go('find.html')">
+    <svg viewBox="0 0 24 24"><path d="M21 21l-5.2-5.2a7 7 0 1 0-1.8 1.8L21 21z"/></svg>
+  </div>
+  <div onclick="go('reel.html')">
+    <svg viewBox="0 0 24 24"><path d="M17 10.5v-7l-12 9 12 9v-7l7 4v-12z"/></svg>
+  </div>
+  <div onclick="go('post.html')">
+    <svg viewBox="0 0 24 24"><path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14z"/></svg>
+  </div>
+  <div onclick="go('m-subcription.html')">
+    <img src="images/subscription.png" class="sub-img" alt="">
+  </div>
+  <div onclick="go('chat.html')">
+    <svg viewBox="0 0 24 24"><path d="M21 6h-18v12h4v4l4-4h10z"/></svg>
+  </div>
+  <div class="active">
+    <svg viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0-5-5m0 2c-3.3 0-10 1.7-10 5v3h20v-3"/></svg>
+  </div>
+</div>
+
+<!-- CREATE SHEET -->
+<div class="sheet-backdrop" id="sheetBackdrop"></div>
+<div class="sheet" id="createSheet">
+  <div class="sheet-header">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Create</div>
+  </div>
+  <div class="sheet-list">
+    <div class="sheet-item" data-type="reel">
+      <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM9 8l6 4-6 4z"/></svg>
+      <div>
+        <span>Reel</span><br>
+        <small>9:16 short video</small>
+      </div>
+    </div>
+    <div class="sheet-item" data-type="long">
+      <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      <div>
+        <span>Long Video</span><br>
+        <small>16:9 full video</small>
+      </div>
+    </div>
+    <div class="sheet-item" data-type="post">
+      <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM8 14l3-3 4 5"/></svg>
+      <div>
+        <span>Post</span><br>
+        <small>Photo post</small>
+      </div>
+    </div>
+    <div class="sheet-item" data-type="story">
+      <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 9 9 0 0 0-9-9zm0 4a5 5 0 1 1-5 5 5 5 0 0 1 5-5z"/></svg>
+      <div>
+        <span>Story</span><br>
+        <small>24h status</small>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- EDIT PROFILE MODAL -->
+<div class="modal-backdrop" id="modalBackdrop"></div>
+<div class="modal" id="profileModal">
+  <h3>Edit profile</h3>
+  <label>Display name</label>
+  <input type="text" id="editName">
+  <label>Username</label>
+  <input type="text" id="editUsername">
+  <label>Bio</label>
+  <textarea id="editBio" rows="3"></textarea>
+  <label>Avatar (optional)</label>
+  <input type="file" id="editAvatar" accept="image/*">
+  <div class="row">
+    <button class="cancel" onclick="closeEdit()">Cancel</button>
+    <button class="save" onclick="saveProfile()">Save</button>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="mediaModalBackdrop"></div>
+<div class="modal media-edit-modal" id="mediaEditModal">
+  <h3>Edit Upload</h3>
+  <label>Title</label>
+  <input type="text" id="mediaEditTitle" placeholder="Title">
+  <label>Description</label>
+  <textarea id="mediaEditDesc" rows="3" placeholder="Description"></textarea>
+  <label>Keywords (comma separated)</label>
+  <input type="text" id="mediaEditKeywords" placeholder="e.g. travel, vlog">
+  <div class="row">
+    <button class="cancel" id="mediaEditCancel">Cancel</button>
+    <button class="save" id="mediaEditSave">Save</button>
+  </div>
+</div>
+
+<div class="media-viewer-backdrop" id="mediaViewerBackdrop"></div>
+<div class="media-viewer-modal" id="mediaViewerModal">
+  <div class="media-viewer-header">
+    <button type="button" class="media-viewer-close" id="mediaViewerClose">Close</button>
+  </div>
+  <div class="media-viewer-body" id="mediaViewerBody"></div>
+</div>
+
+
+<script>
+let user = null;
+let profileUserId = null;
+let viewingOwnProfile = true;
+let followState = false;
+let profileOverride = null;
+let allItems = [];
+let activeFilter = "all";
+let activeItemMenu = null;
+let editingMediaItem = null;
+const MEDIA_META_KEY_PREFIX = "m_media_meta_";
+
+const sheet = document.getElementById("createSheet");
+const backdrop = document.getElementById("sheetBackdrop");
+const openCreate = document.getElementById("openCreate");
+
+function openSheet(){
+  sheet.classList.add("show");
+  backdrop.classList.add("show");
+}
+function closeSheet(){
+  sheet.classList.remove("show");
+  backdrop.classList.remove("show");
+}
+openCreate.addEventListener("click", openSheet);
+backdrop.addEventListener("click", closeSheet);
+
+Array.from(document.querySelectorAll(".sheet-item")).forEach(btn => {
+  btn.addEventListener("click", () => {
+    const type = btn.getAttribute("data-type");
+    closeSheet();
+    if(type === "reel") location.href = "gallery.html?type=reel";
+    if(type === "long") location.href = "gallery.html?type=long";
+    if(type === "post") location.href = "gallery.html?type=post";
+    if(type === "story") location.href = "gallery.html?type=story";
+  });
+});
+
+const modalBackdrop = document.getElementById("modalBackdrop");
+const profileModal = document.getElementById("profileModal");
+const editProfileBtn = document.getElementById("editProfileBtn");
+const shareProfileBtn = document.querySelector(".actions-row .action-btn:nth-child(2)");
+const menuBtn = document.querySelector(".right .icon-btn[title='Menu']");
+const avatarPlus = document.querySelector(".avatar-plus");
+const bubble = document.querySelector(".bubble");
+const dashboard = document.querySelector(".dashboard");
+const mediaModalBackdrop = document.getElementById("mediaModalBackdrop");
+const mediaEditModal = document.getElementById("mediaEditModal");
+const mediaEditTitle = document.getElementById("mediaEditTitle");
+const mediaEditDesc = document.getElementById("mediaEditDesc");
+const mediaEditKeywords = document.getElementById("mediaEditKeywords");
+const mediaEditCancel = document.getElementById("mediaEditCancel");
+const mediaEditSave = document.getElementById("mediaEditSave");
+const mediaViewerBackdrop = document.getElementById("mediaViewerBackdrop");
+const mediaViewerModal = document.getElementById("mediaViewerModal");
+const mediaViewerBody = document.getElementById("mediaViewerBody");
+const mediaViewerClose = document.getElementById("mediaViewerClose");
+let mediaViewerVideo = null;
+
+editProfileBtn.onclick = openEdit;
+modalBackdrop.addEventListener("click", closeEdit);
+mediaModalBackdrop.addEventListener("click", closeMediaEdit);
+mediaEditCancel.addEventListener("click", closeMediaEdit);
+mediaEditSave.addEventListener("click", saveMediaEdit);
+mediaViewerBackdrop.addEventListener("click", closeMediaViewer);
+mediaViewerClose.addEventListener("click", closeMediaViewer);
+document.addEventListener("keydown", (e) => {
+  if(e.key === "Escape"){
+    closeMediaViewer();
+  }
+});
+
+function syncBodyScrollLock(){
+  const editOpen = mediaEditModal.classList.contains("show");
+  const viewerOpen = mediaViewerModal.classList.contains("show");
+  document.body.style.overflow = (editOpen || viewerOpen) ? "hidden" : "";
+}
+
+function openEdit(){
+  if(!viewingOwnProfile) return;
+  document.getElementById("editName").value = profileOverride?.displayName || displayName.textContent;
+  document.getElementById("editUsername").value = profileOverride?.username || username.textContent;
+  document.getElementById("editBio").value = profileOverride?.bio || bioText.textContent;
+  profileModal.classList.add("show");
+  modalBackdrop.classList.add("show");
+}
+function closeEdit(){
+  profileModal.classList.remove("show");
+  modalBackdrop.classList.remove("show");
+}
+
+async function saveProfile(){
+  const name = document.getElementById("editName").value.trim();
+  const uname = document.getElementById("editUsername").value.trim();
+  const bio = document.getElementById("editBio").value.trim();
+  const avatarFile = document.getElementById("editAvatar").files[0];
+
+  const data = {
+    displayName: name || displayName.textContent,
+    username: uname || username.textContent,
+    bio: bio || "",
+    avatarData: profileOverride?.avatarData || ""
+  };
+
+  if(avatarFile){
+    const reader = new FileReader();
+    reader.onload = () => {
+      data.avatarData = reader.result;
+      persistProfile(data);
+    };
+    reader.readAsDataURL(avatarFile);
+  }else{
+    persistProfile(data);
+  }
+}
+
+function persistProfile(data){
+  const key = "m_profile_" + user.id;
+  localStorage.setItem(key, JSON.stringify(data));
+  profileOverride = data;
+  applyProfile(data);
+  try{
+    window.NOVA.supa.from("users")
+      .update({
+        username: data.username,
+        full_name: data.displayName,
+        bio: data.bio || "",
+        photo: data.avatarData || null
+      })
+      .eq("user_id", user.id);
+  }catch(_){}
+  closeEdit();
+}
+
+function applyProfile(data){
+  username.textContent = data.username;
+  displayName.textContent = data.displayName;
+  bioText.textContent = data.bio || "";
+  if(data.avatarData){
+    avatar.style.backgroundImage = `url('${data.avatarData}')`;
+    avatar.textContent = "";
+  }else{
+    avatar.style.backgroundImage = "";
+    avatar.textContent = (data.username || "U")[0].toUpperCase();
+  }
+}
+
+(async()=>{
+  user = await window.NOVA.requireUser();
+
+  const params = new URLSearchParams(location.search);
+  const requestedId = params.get("uid");
+  profileUserId = requestedId || user.id;
+  viewingOwnProfile = profileUserId === user.id;
+
+  let handle = "user";
+  let name = "User";
+  let bio = "Welcome to NOVAGAPP";
+  let avatarData = "";
+  if(viewingOwnProfile){
+    const email = user.email || "User";
+    handle = email.split("@")[0];
+    name = user.user_metadata?.full_name || handle;
+  }
+
+  const { data: profile } = await window.NOVA.supa
+    .from("users")
+    .select("username,full_name,bio,photo")
+    .eq("user_id", profileUserId)
+    .maybeSingle();
+
+  if(profile?.username) handle = profile.username;
+  if(profile?.full_name) name = profile.full_name;
+  if(profile?.bio) bio = profile.bio;
+  if(profile?.photo) avatarData = profile.photo;
+
+  const localOther = getLocalProfileOverride(profileUserId);
+  if(localOther){
+    handle = localOther.username || handle;
+    name = localOther.displayName || name;
+    bio = localOther.bio || bio;
+    avatarData = localOther.avatarData || avatarData;
+  }
+
+  username.textContent = handle;
+  displayName.textContent = name;
+  bioText.textContent = bio || "Welcome to NOVAGAPP";
+  if(avatarData){
+    avatar.style.backgroundImage = `url('${avatarData}')`;
+    avatar.textContent = "";
+  }else{
+    avatar.style.backgroundImage = "";
+    avatar.textContent = (handle || "U")[0].toUpperCase();
+  }
+
+  if(viewingOwnProfile){
+    const key = "m_profile_" + user.id;
+    const local = localStorage.getItem(key);
+    if(local){
+      profileOverride = JSON.parse(local);
+      applyProfile(profileOverride);
+    }
+  }
+
+  loadStats();
+  loadUploads();
+  configureProfileView();
+})();
+
+async function loadStats(){
+  const supa = window.NOVA.supa;
+  const targetId = profileUserId || user.id;
+
+  const [postsRes, reelsRes, videosRes, followersRes, followingRes] = await Promise.all([
+    supa.from("posts").select("id", { count:"exact", head:true }).eq("user_id", targetId),
+    supa.from("reels").select("id", { count:"exact", head:true }).eq("user_id", targetId),
+    supa.from("long_videos").select("id", { count:"exact", head:true }).eq("user_id", targetId),
+    supa.from("follows").select("follower_id", { count:"exact", head:true }).eq("following_id", targetId),
+    supa.from("follows").select("following_id", { count:"exact", head:true }).eq("follower_id", targetId)
+  ]);
+
+  const totalPosts = (postsRes.count || 0) + (reelsRes.count || 0) + (videosRes.count || 0);
+  postsCount.innerText = totalPosts;
+  followersCount.innerText = followersRes.count || 0;
+  followingCount.innerText = followingRes.count || 0;
+}
+
+function getSupabaseErrorText(error){
+  return [error?.message, error?.details, error?.hint]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function getMissingColumnName(error){
+  const text = getSupabaseErrorText(error);
+  if(!text) return "";
+
+  const pgrstMatch = text.match(/'([a-zA-Z0-9_]+)' column/i);
+  if(pgrstMatch && pgrstMatch[1]) return pgrstMatch[1].toLowerCase();
+
+  const pgMatch = text.match(/column\s+\"?([a-zA-Z0-9_.]+)\"?\s+does not exist/i);
+  if(pgMatch && pgMatch[1]){
+    const normalized = pgMatch[1].replace(/\"/g, "").toLowerCase();
+    return normalized.split(".").pop() || "";
+  }
+
+  return "";
+}
+
+async function fetchMediaRows(table, fields, targetId){
+  const selectFields = [...fields];
+  let useOrder = selectFields.includes("created_at");
+  let attempts = 0;
+
+  const optionalColumns = [
+    "keywords",
+    "description",
+    "title",
+    "media_type",
+    "thumb_url",
+    "created_at"
+  ];
+
+  while(selectFields.length && attempts < 20){
+    attempts += 1;
+    let query = window.NOVA.supa
+      .from(table)
+      .select(selectFields.join(","))
+      .eq("user_id", targetId)
+      .limit(30);
+
+    if(useOrder && selectFields.includes("created_at")){
+      query = query.order("created_at", { ascending:false });
+    }
+
+    const { data, error } = await query;
+    if(!error){
+      return (data || []).map(row => ({
+        ...row,
+        title: row.title ?? null,
+        description: row.description ?? null,
+        keywords: row.keywords ?? null
+      }));
+    }
+
+    const missingColumn = getMissingColumnName(error);
+    if(missingColumn){
+      if(selectFields.includes(missingColumn)){
+        selectFields.splice(selectFields.indexOf(missingColumn), 1);
+        if(missingColumn === "created_at") useOrder = false;
+        continue;
+      }
+      if(missingColumn === "created_at"){
+        useOrder = false;
+        continue;
+      }
+    }
+
+    const errText = getSupabaseErrorText(error).toLowerCase();
+    if(useOrder && (errText.includes("order") || errText.includes("sort"))){
+      useOrder = false;
+      continue;
+    }
+
+    const removable = optionalColumns.find(col => selectFields.includes(col));
+    if(removable){
+      selectFields.splice(selectFields.indexOf(removable), 1);
+      if(removable === "created_at") useOrder = false;
+      continue;
+    }
+
+    console.error(`Failed to load ${table}`, error);
+    return [];
+  }
+
+  return [];
+}
+
+async function updateMediaPayloadWithFallback(targetItem, payload){
+  const editable = { ...payload };
+
+  while(true){
+    const keys = Object.keys(editable);
+    if(!keys.length){
+      return { error:null, appliedPayload:{} };
+    }
+
+    const { error } = await window.NOVA.supa
+      .from(targetItem.table)
+      .update(editable)
+      .eq("id", targetItem.id)
+      .eq("user_id", user.id);
+
+    if(!error){
+      return { error:null, appliedPayload:editable };
+    }
+
+    const missingColumn = getMissingColumnName(error);
+    if(!missingColumn || !Object.prototype.hasOwnProperty.call(editable, missingColumn)){
+      return { error, appliedPayload:editable };
+    }
+    delete editable[missingColumn];
+  }
+}
+
+async function loadUploads(){
+  const targetId = profileUserId || user.id;
+  const [reelsRows, longRows, postsRows] = await Promise.all([
+    fetchMediaRows("reels", ["id","video_url","created_at","title","description","keywords"], targetId),
+    fetchMediaRows("long_videos", ["id","video_url","created_at","title","description"], targetId),
+    fetchMediaRows("posts", ["id","media_url"], targetId)
+  ]);
+
+  allItems = [];
+  (reelsRows || []).forEach(r => {
+    const item = {
+      id:r.id,
+      table:"reels",
+      type:"reel",
+      url:r.video_url,
+      created_at:r.created_at,
+      isVideo:true,
+      title:r.title,
+      description:r.description,
+      keywords:r.keywords
+    };
+    applyLocalMediaMeta(item);
+    allItems.push(item);
+  });
+  (longRows || []).forEach(v => {
+    const item = {
+      id:v.id,
+      table:"long_videos",
+      type:"video",
+      url:v.video_url,
+      created_at:v.created_at,
+      isVideo:true,
+      title:v.title,
+      description:v.description,
+      keywords:v.keywords
+    };
+    applyLocalMediaMeta(item);
+    allItems.push(item);
+  });
+  (postsRows || []).forEach(p => {
+    const item = {
+      id:p.id,
+      table:"posts",
+      type:"post",
+      url:p.media_url,
+      created_at:p.created_at,
+      isVideo:isPostVideo(p),
+      title:p.title,
+      description:p.description,
+      keywords:p.keywords
+    };
+    applyLocalMediaMeta(item);
+    allItems.push(item);
+  });
+
+  allItems.sort((a,b)=>{
+    const aTs = Date.parse(a.created_at || "") || 0;
+    const bTs = Date.parse(b.created_at || "") || 0;
+    return bTs - aTs;
+  });
+  renderGrid();
+}
+
+function renderGrid(){
+  closeActiveItemMenu();
+  grid.innerHTML = "";
+  let list = allItems;
+  if(activeFilter !== "all"){
+    list = allItems.filter(i => i.type === activeFilter);
+  }
+  if(!list.length){
+    grid.innerHTML = "<div class='empty'>No posts yet</div>";
+    return;
+  }
+  list.forEach(item => {
+    const cell = document.createElement("div");
+    cell.className = "media-item";
+    if(item.isVideo){
+      cell.innerHTML = `<video src="${item.url}" muted></video>`;
+    }else{
+      cell.innerHTML = `<img src="${item.url}" alt="">`;
+    }
+    const badge = document.createElement("div");
+    badge.className = "badge";
+    badge.textContent = item.type;
+    cell.appendChild(badge);
+    cell.addEventListener("click", () => {
+      openMediaViewer(item);
+    });
+
+    if(viewingOwnProfile){
+      const menuBtn = document.createElement("button");
+      menuBtn.className = "item-menu-btn";
+      menuBtn.innerHTML = "&#8942;";
+      menuBtn.type = "button";
+
+      const menu = document.createElement("div");
+      menu.className = "item-menu";
+      menu.innerHTML = `
+        <button type="button" data-action="edit">Edit</button>
+        <button type="button" data-action="delete" class="danger">Delete</button>
+      `;
+
+      menuBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if(activeItemMenu && activeItemMenu !== menu){
+          activeItemMenu.classList.remove("show");
+        }
+        const willShow = !menu.classList.contains("show");
+        menu.classList.toggle("show", willShow);
+        activeItemMenu = willShow ? menu : null;
+      });
+
+      menu.querySelector('[data-action="edit"]').addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeActiveItemMenu();
+        openMediaEdit(item);
+      });
+
+      menu.querySelector('[data-action="delete"]').addEventListener("click", async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeActiveItemMenu();
+        await deleteMediaItem(item);
+      });
+
+      cell.appendChild(menuBtn);
+      cell.appendChild(menu);
+    }
+
+    const title = document.createElement("div");
+    title.className = "media-title";
+    const fallbackTitle = item.type === "reel" ? "Reel" : item.type === "video" ? "Video" : "Post";
+    title.textContent = item.title || item.name || item.caption || fallbackTitle;
+    cell.appendChild(title);
+    grid.appendChild(cell);
+  });
+}
+
+function closeActiveItemMenu(){
+  if(activeItemMenu){
+    activeItemMenu.classList.remove("show");
+    activeItemMenu = null;
+  }
+}
+
+function isSameMediaItem(left, right){
+  return String(left?.id ?? "") === String(right?.id ?? "")
+    && String(left?.table ?? "") === String(right?.table ?? "");
+}
+
+function mediaMetaItemKey(item){
+  return `${String(item?.table || "")}:${String(item?.id || "")}`;
+}
+
+function getMediaMetaStoreKey(){
+  const ownerId = profileUserId || user?.id || "guest";
+  return MEDIA_META_KEY_PREFIX + ownerId;
+}
+
+function readMediaMetaStore(){
+  try{
+    const raw = localStorage.getItem(getMediaMetaStoreKey());
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  }catch(_){
+    return {};
+  }
+}
+
+function writeMediaMetaStore(store){
+  try{
+    localStorage.setItem(getMediaMetaStoreKey(), JSON.stringify(store || {}));
+  }catch(_){}
+}
+
+function setLocalMediaMeta(item, meta){
+  const key = mediaMetaItemKey(item);
+  if(!key || key === ":") return;
+  const store = readMediaMetaStore();
+  store[key] = {
+    title: meta?.title ?? null,
+    description: meta?.description ?? null,
+    keywords: meta?.keywords ?? null,
+    ts: Date.now()
+  };
+  writeMediaMetaStore(store);
+}
+
+function removeLocalMediaMeta(item){
+  const key = mediaMetaItemKey(item);
+  if(!key || key === ":") return;
+  const store = readMediaMetaStore();
+  if(Object.prototype.hasOwnProperty.call(store, key)){
+    delete store[key];
+    writeMediaMetaStore(store);
+  }
+}
+
+function applyLocalMediaMeta(item){
+  const key = mediaMetaItemKey(item);
+  if(!key || key === ":") return item;
+  const store = readMediaMetaStore();
+  const localMeta = store[key];
+  if(!localMeta || typeof localMeta !== "object") return item;
+
+  if(Object.prototype.hasOwnProperty.call(localMeta, "title")){
+    item.title = localMeta.title;
+  }
+  if(Object.prototype.hasOwnProperty.call(localMeta, "description")){
+    item.description = localMeta.description;
+  }
+  if(Object.prototype.hasOwnProperty.call(localMeta, "keywords")){
+    item.keywords = localMeta.keywords;
+  }
+  return item;
+}
+
+function getKeywordsText(value){
+  if(Array.isArray(value)) return value.join(", ");
+  return value || "";
+}
+
+function isPostVideo(post){
+  const mediaType = String(post?.media_type || "").toLowerCase();
+  if(mediaType === "video") return true;
+  const url = String(post?.media_url || "").toLowerCase();
+  return /\.(mp4|webm|ogg|mov|m4v|avi)(\?|#|$)/.test(url);
+}
+
+function openMediaViewer(item){
+  if(!item?.id) return;
+  const qs = new URLSearchParams();
+  if(profileUserId) qs.set("uid", profileUserId);
+  qs.set("focus", String(item.id));
+
+  let targetPage = "post.html";
+  if(item.type === "reel"){
+    targetPage = "reel.html";
+  }else if(item.type === "video"){
+    targetPage = "m-video.html";
+  }
+  location.href = `${targetPage}?${qs.toString()}`;
+}
+
+function closeMediaViewer(){
+  if(mediaViewerVideo){
+    try{
+      mediaViewerVideo.pause();
+    }catch(_){}
+    mediaViewerVideo = null;
+  }
+  mediaViewerBody.innerHTML = "";
+  mediaViewerModal.classList.remove("show");
+  mediaViewerBackdrop.classList.remove("show");
+  syncBodyScrollLock();
+}
+
+function openMediaEdit(item){
+  editingMediaItem = item;
+  mediaEditTitle.value = item.title || "";
+  mediaEditDesc.value = item.description || "";
+  mediaEditKeywords.value = getKeywordsText(item.keywords);
+  mediaEditModal.classList.add("show");
+  mediaModalBackdrop.classList.add("show");
+  syncBodyScrollLock();
+}
+
+function closeMediaEdit(){
+  editingMediaItem = null;
+  mediaEditModal.classList.remove("show");
+  mediaModalBackdrop.classList.remove("show");
+  syncBodyScrollLock();
+}
+
+async function saveMediaEdit(){
+  if(!editingMediaItem || !user) return;
+
+  const targetItem = {
+    id: editingMediaItem.id,
+    table: editingMediaItem.table,
+    type: editingMediaItem.type
+  };
+  const titleVal = mediaEditTitle.value.trim();
+  const descVal = mediaEditDesc.value.trim();
+  const keyVal = mediaEditKeywords.value.trim();
+
+  const payload = {
+    title: titleVal || null,
+    description: descVal || null
+  };
+
+  if(targetItem.type === "reel"){
+    payload.keywords = keyVal
+      ? keyVal.split(",").map(k=>k.trim()).filter(Boolean)
+      : [];
+  }else{
+    payload.keywords = keyVal || null;
+  }
+
+  mediaEditSave.disabled = true;
+  try{
+    const { error, appliedPayload } = await updateMediaPayloadWithFallback(targetItem, payload);
+    const idx = allItems.findIndex(i => isSameMediaItem(i, targetItem));
+
+    if(error){
+      console.error(error);
+      setLocalMediaMeta(targetItem, payload);
+      if(idx >= 0){
+        allItems[idx].title = payload.title;
+        allItems[idx].description = payload.description;
+        allItems[idx].keywords = payload.keywords;
+      }
+      renderGrid();
+      closeMediaEdit();
+      alert("Server save failed. Changes saved locally on this device.");
+      return;
+    }
+
+    setLocalMediaMeta(targetItem, payload);
+    if(idx >= 0){
+      allItems[idx].title = payload.title;
+      allItems[idx].description = payload.description;
+      allItems[idx].keywords = payload.keywords;
+    }
+    if(!Object.keys(appliedPayload || {}).length){
+      console.warn("Saved locally because editable DB columns are unavailable for", targetItem.table);
+    }
+    renderGrid();
+    closeMediaEdit();
+    try{
+      await Promise.all([loadUploads(), loadStats()]);
+    }catch(refreshErr){
+      console.error("Refresh failed after save", refreshErr);
+    }
+  }catch(err){
+    console.error(err);
+    alert("Update failed");
+  }finally{
+    mediaEditSave.disabled = false;
+  }
+}
+
+async function deleteMediaItem(item){
+  if(!item?.id || !item?.table || !user) return;
+  const ok = confirm("Delete this item?");
+  if(!ok) return;
+
+  const targetItem = { id:item.id, table:item.table };
+  try{
+    const { error } = await window.NOVA.supa
+      .from(item.table)
+      .delete()
+      .eq("id", item.id)
+      .eq("user_id", user.id);
+
+    if(error){
+      console.error(error);
+      alert("Delete failed");
+      return;
+    }
+
+    removeLocalMediaMeta(targetItem);
+    allItems = allItems.filter(i => !isSameMediaItem(i, targetItem));
+    renderGrid();
+    try{
+      await Promise.all([loadUploads(), loadStats()]);
+    }catch(refreshErr){
+      console.error("Refresh failed after delete", refreshErr);
+    }
+  }catch(err){
+    console.error(err);
+    alert("Delete failed");
+  }
+}
+
+Array.from(document.querySelectorAll(".tab-btn")).forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    activeFilter = btn.getAttribute("data-filter");
+    renderGrid();
+  });
+});
+
+function shareProfile(){
+  const text = "Check my NOVAGAPP profile";
+  if(navigator.share){
+    navigator.share({ title:"NOVAGAPP", text, url:location.href }).catch(()=>{});
+  }else{
+    alert(text + "\n" + location.href);
+  }
+}
+
+function go(p){location.href=p;}
+
+async function configureProfileView(){
+  if(viewingOwnProfile){
+    editProfileBtn.textContent = "Edit profile";
+    editProfileBtn.classList.remove("follow","following");
+    editProfileBtn.onclick = openEdit;
+    if(shareProfileBtn){
+      shareProfileBtn.textContent = "Share profile";
+      shareProfileBtn.onclick = shareProfile;
+    }
+    if(menuBtn) menuBtn.style.display = "";
+    if(openCreate) openCreate.style.display = "";
+    if(avatarPlus) avatarPlus.style.display = "";
+    if(bubble) bubble.style.display = "";
+    if(dashboard) dashboard.style.display = "";
+    return;
+  }
+
+  if(menuBtn) menuBtn.style.display = "none";
+  if(openCreate) openCreate.style.display = "none";
+  if(avatarPlus) avatarPlus.style.display = "none";
+  if(bubble) bubble.style.display = "none";
+  if(dashboard) dashboard.style.display = "none";
+
+  if(shareProfileBtn){
+    shareProfileBtn.textContent = "Message";
+    shareProfileBtn.onclick = () => {
+      location.href = `chat.html?uid=${profileUserId}`;
+    };
+  }
+
+  let isFollowing = false;
+  try{
+    const { data: followRow } = await window.NOVA.supa
+      .from("follows")
+      .select("following_id")
+      .eq("follower_id", user.id)
+      .eq("following_id", profileUserId)
+      .maybeSingle();
+    isFollowing = !!followRow;
+  }catch(_){}
+  followState = isFollowing;
+
+  setFollowButton(isFollowing);
+
+  editProfileBtn.onclick = async () => {
+    if(editProfileBtn.disabled) return;
+    editProfileBtn.disabled = true;
+    let nowFollowing = null;
+    try{
+      const res = await window.NOVA.toggleFollow(profileUserId);
+      if(typeof res?.following === "boolean"){
+        nowFollowing = res.following;
+      }
+    }catch(_){}
+    if(nowFollowing === null){
+      try{
+        const { data: followRow } = await window.NOVA.supa
+          .from("follows")
+          .select("following_id")
+          .eq("follower_id", user.id)
+          .eq("following_id", profileUserId)
+          .maybeSingle();
+        nowFollowing = !!followRow;
+      }catch(_){
+        nowFollowing = followState;
+      }
+    }
+
+    const currentCount = Number(followersCount.innerText || 0);
+    if(nowFollowing !== followState){
+      followersCount.innerText = nowFollowing
+        ? currentCount + 1
+        : Math.max(0, currentCount - 1);
+    }
+    followState = nowFollowing;
+
+    setFollowButton(nowFollowing);
+    editProfileBtn.disabled = false;
+  };
+}
+
+function setFollowButton(isFollowing){
+  if(isFollowing){
+    editProfileBtn.textContent = "Followed";
+    editProfileBtn.classList.add("follow","following");
+  }else{
+    editProfileBtn.textContent = "Follow";
+    editProfileBtn.classList.add("follow");
+    editProfileBtn.classList.remove("following");
+  }
+}
+
+document.getElementById("followersCount").parentElement.addEventListener("click", () => {
+  const id = profileUserId || user.id;
+  location.href = `followers.html?uid=${id}`;
+});
+document.getElementById("followingCount").parentElement.addEventListener("click", () => {
+  const id = profileUserId || user.id;
+  location.href = `following.html?uid=${id}`;
+});
+
+function getLocalProfileOverride(id){
+  try{
+    const raw = localStorage.getItem("m_profile_" + id);
+    return raw ? JSON.parse(raw) : null;
+  }catch(_){
+    return null;
+  }
+}
+
+document.addEventListener("click", () => {
+  closeActiveItemMenu();
+});
+</script>
+
+</body>
+</html>

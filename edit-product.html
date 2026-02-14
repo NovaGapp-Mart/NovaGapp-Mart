@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Edit Product - NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body{
+  margin:0;
+  font-family:Arial, sans-serif;
+  background:#f5f5f5;
+}
+header{
+  background:#ff6a00;
+  color:#fff;
+  padding:15px;
+  text-align:center;
+  font-size:18px;
+  font-weight:bold;
+}
+.form{
+  padding:15px;
+}
+.form input, .form textarea, .form select{
+  width:100%;
+  padding:12px;
+  margin-bottom:12px;
+  border-radius:8px;
+  border:1px solid #ccc;
+  font-size:14px;
+}
+.form textarea{
+  resize:none;
+  height:80px;
+}
+.save-btn{
+  background:#ff6a00;
+  color:#fff;
+  border:none;
+  width:100%;
+  padding:14px;
+  font-size:16px;
+  border-radius:10px;
+  font-weight:bold;
+  cursor:pointer;
+}
+.preview-list{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-bottom:10px;
+}
+.preview-list img{
+  width:70px;
+  height:70px;
+  object-fit:cover;
+  border-radius:8px;
+  border:1px solid #ddd;
+}
+</style>
+
+<!-- 🔥 SUPABASE -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<script>
+  window.supa = window.supa || supabase.createClient(
+    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+  );
+</script>
+<script src="global.js"></script>
+</head>
+
+<body>
+
+<header>Edit Product</header>
+
+<div class="form">
+  <div id="imgPreview" class="preview-list"></div>
+  <input type="file" id="new_images" accept="image/*" multiple>
+
+  <input type="text" id="name" placeholder="Product name">
+  <textarea id="desc" placeholder="Product description"></textarea>
+
+  <input type="number" id="price" placeholder="Price">
+  <input type="number" id="mrp" placeholder="MRP">
+  <select id="currency">
+    <option value="INR">INR (₹)</option>
+    <option value="USD">USD ($)</option>
+  </select>
+
+  <button class="save-btn" onclick="saveProduct()">Save Changes</button>
+</div>
+
+<script>
+/* ===============================
+   SUPABASE EDIT PRODUCT LOGIC
+================================ */
+
+const editId = localStorage.getItem("editProductId");
+
+const supa = window.supa;
+let currentUser = null;
+let productData = null;
+let NEW_IMAGES = [];
+const API_BASE = localStorage.getItem("tryonApiBase") || "http://localhost:3000";
+
+async function cacheProductImage(productId, productUrl){
+  if(!productId || !productUrl) return;
+  try{
+    const res = await fetch(`${API_BASE}/products/cache`, {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({
+        product_id: productId,
+        product_url: productUrl
+      })
+    });
+    const data = await res.json().catch(()=>null);
+    if(!res.ok){
+      console.warn("Product cache failed", res.status, data);
+    }
+  }catch(err){
+    console.warn("Product cache error", err);
+  }
+}
+
+function renderPreview(urls){
+  imgPreview.innerHTML = "";
+  (urls || []).forEach(u=>{
+    const img = document.createElement("img");
+    img.src = u;
+    imgPreview.appendChild(img);
+  });
+}
+
+new_images.onchange = e=>{
+  NEW_IMAGES = [...e.target.files];
+  renderPreview(NEW_IMAGES.map(f=>URL.createObjectURL(f)));
+};
+
+/* 🔐 AUTH CHECK + LOAD PRODUCT */
+(async ()=>{
+  const { data: authData } = await supa.auth.getUser();
+
+  if(!authData?.user){
+    location.href = "login.html";
+    return;
+  }
+
+  currentUser = authData.user;
+
+  if(!editId){
+  await cacheProductImage(
+    editId,
+    (updated.images && updated.images[0]) || (productData?.images && productData.images[0])
+  );
+    alert("Product not found");
+    location.href = "my-products.html";
+    return;
+  }
+
+  const { data, error } = await supa
+    .from("products")
+    .select("*")
+    .eq("id", editId)
+    .single();
+
+  if(error || !data){
+  await cacheProductImage(
+    editId,
+    (updated.images && updated.images[0]) || (productData?.images && productData.images[0])
+  );
+    alert("Product not found");
+    location.href = "my-products.html";
+    return;
+  }
+
+  /* 🔐 ONLY OWNER CAN EDIT */
+  if(data.owner_id !== currentUser.id){
+  await cacheProductImage(
+    editId,
+    (updated.images && updated.images[0]) || (productData?.images && productData.images[0])
+  );
+    alert("Unauthorized access");
+    location.href = "my-products.html";
+    return;
+  }
+
+  productData = data;
+
+  /* FILL FORM */
+  renderPreview(data.images || []);
+  name.value = data.name || "";
+  desc.value = data.desc || "";
+  price.value = data.price || "";
+  mrp.value = data.mrp || "";
+  currency.value = data.currency || "INR";
+})();
+
+/* 💾 SAVE PRODUCT */
+async function saveProduct(){
+  if(!productData) return;
+
+  const updated = {
+    name: name.value.trim(),
+    desc: desc.value.trim(),
+    price: Number(price.value),
+    mrp: Number(mrp.value),
+    currency: currency.value
+  };
+
+  if(NEW_IMAGES.length > 0){
+    try{
+      const urls = await Promise.all(NEW_IMAGES.map(f => new Promise((resolve, reject)=>{
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error("Image read failed"));
+        reader.readAsDataURL(f);
+      })));
+      updated.images = urls;
+    }catch(err){
+      console.error(err);
+      alert("Image processing failed");
+      return;
+    }
+  }
+
+  const { error } = await supa
+    .from("products")
+    .update(updated)
+    .eq("id", editId)
+    .eq("owner_id", currentUser.id);
+
+  if(error){
+    alert("❌ Error updating product");
+    console.error(error);
+    return;
+  }
+  await cacheProductImage(
+    editId,
+    (updated.images && updated.images[0]) || (productData?.images && productData.images[0])
+  );
+
+  alert("✅ Product updated successfully");
+  location.href = "my-products.html";
+}
+</script>
+
+</body>
+</html>
+

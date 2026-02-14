@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Settings & Activity</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- SUPABASE -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="global.js"></script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial}
+body{background:#fff;color:#000}
+
+/* HEADER */
+.header{
+  display:flex;
+  align-items:center;
+  padding:14px;
+  border-bottom:1px solid #eee;
+}
+.header svg{width:22px;height:22px;margin-right:10px;cursor:pointer}
+.header h2{font-size:18px}
+
+/* SEARCH */
+.search{padding:10px}
+.search input{
+  width:100%;
+  padding:10px 14px;
+  border-radius:8px;
+  border:1px solid #ddd;
+  background:#f5f5f5;
+}
+
+/* SECTION */
+.section{padding:12px 0}
+.section h4{
+  padding:8px 14px;
+  font-size:13px;
+  color:#666;
+}
+
+/* ITEM */
+.item{
+  display:flex;
+  align-items:center;
+  padding:12px 14px;
+  cursor:pointer;
+}
+.item svg{
+  width:22px;
+  height:22px;
+  margin-right:14px;
+  fill:#000;
+}
+.item span{flex:1;font-size:15px}
+.item small{color:#888}
+
+/* DIVIDER */
+hr{border:none;border-top:1px solid #eee}
+
+/* LOGOUT */
+.logout{color:#d00}
+</style>
+</head>
+
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <svg onclick="goBack()" viewBox="0 0 24 24">
+    <path d="M15 18l-6-6 6-6"/>
+  </svg>
+  <h2>Settings and activity</h2>
+</div>
+
+<!-- SEARCH -->
+<div class="search">
+  <input placeholder="Search">
+</div>
+
+<!-- YOUR ACCOUNT -->
+<div class="section">
+  <h4>Your account</h4>
+  <div class="item" data-link="account-center.html">
+    <svg viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0-5-5m0 2c-4 0-8 2-8 4v2h16v-2"/></svg>
+    <span>Account Center</span>
+    <small>›</small>
+  </div>
+</div>
+
+<hr>
+
+<!-- HOW YOU USE -->
+<div class="section">
+  <h4>How you use NOVAGAPP</h4>
+  <div class="item" data-link="saved.html"><svg viewBox="0 0 24 24"><path d="M6 4h12v16H6z"/></svg><span>Saved</span><small>›</small></div>
+  <div class="item" data-link="activity.html"><svg viewBox="0 0 24 24"><path d="M12 8v4l3 3"/></svg><span>Your activity</span><small>›</small></div>
+  <div class="item" data-link="time-management.html"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10"/></svg><span>Time management</span><small>›</small></div>
+</div>
+
+<hr>
+
+<!-- PRIVACY -->
+<div class="section">
+  <h4>Who can see your content</h4>
+  <div class="item" data-link="privacy.html"><svg viewBox="0 0 24 24"><path d="M12 1l8 4v6c0 5-3.5 9.7-8 11-4.5-1.3-8-6-8-11V5z"/></svg><span>Account privacy</span><small>Public ›</small></div>
+  <div class="item" data-link="blocked.html"><svg viewBox="0 0 24 24"><path d="M3 3l18 18"/></svg><span>Blocked</span><small>›</small></div>
+</div>
+
+<hr>
+
+<!-- INTERACTIONS -->
+<div class="section">
+  <h4>How others can interact with you</h4>
+  <div class="item" data-link="messages-settings.html"><svg viewBox="0 0 24 24"><path d="M21 6h-18v12h4v4l4-4h10z"/></svg><span>Messages & replies</span><small>›</small></div>
+  <div class="item" data-link="comments-settings.html"><svg viewBox="0 0 24 24"><path d="M12 2l10 5-10 5-10-5z"/></svg><span>Comments</span><small>›</small></div>
+</div>
+
+<hr>
+
+<!-- SUPPORT -->
+<div class="section">
+  <h4>More info and support</h4>
+  <div class="item" data-link="help.html"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10"/></svg><span>Help</span><small>›</small></div>
+  <div class="item" data-link="privacy-center.html"><svg viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.5 9.7-8 11"/></svg><span>Privacy Center</span><small>›</small></div>
+</div>
+
+<hr>
+
+<!-- LOGOUT -->
+<div class="section">
+  <div class="item logout" onclick="logout()">
+    <svg viewBox="0 0 24 24"><path d="M16 17l5-5-5-5M21 12H9"/></svg>
+    <span>Log out</span>
+  </div>
+</div>
+
+<script>
+/* 🔐 AUTH CHECK */
+(async()=>{
+  const {data}=await supabase.auth.getUser();
+  if(!data?.user){
+    location.href="login.html";
+  }
+})();
+
+/* 🚪 LOGOUT */
+async function logout(){
+  await supabase.auth.signOut();
+  location.href="login.html";
+}
+
+function goBack(){ history.back(); }
+
+/* NAVIGATION */
+document.querySelectorAll(".item[data-link]").forEach(i=>{
+  i.onclick=()=>location.href=i.dataset.link;
+});
+</script>
+
+</body>
+</html>

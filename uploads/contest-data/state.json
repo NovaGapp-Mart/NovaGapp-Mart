@@ -1,0 +1,215 @@
+{
+  "version": 1,
+  "downloads": 0,
+  "users": {
+    "2584ad3f-b637-4cc2-a93c-1568105c91df": {
+      "user_id": "2584ad3f-b637-4cc2-a93c-1568105c91df",
+      "display_name": "Prashik Bhalerao",
+      "referral_code": "NVG-prashikbhalera@2026",
+      "share_actions": 0,
+      "share_actions_by_type": {},
+      "unique_share_visits": 0,
+      "verified_installs": 0,
+      "paid_votes": 0,
+      "contest_votes": {
+        "contest_1": 0,
+        "contest_2": 0,
+        "contest_3": 0,
+        "contest_4": 0,
+        "contest_5": 0,
+        "contest_6": 0
+      },
+      "created_at": "2026-02-13T02:48:37.041Z",
+      "updated_at": "2026-02-14T05:45:32.892Z"
+    },
+    "3ece4d57-cad4-45a3-a380-6da2b4df21b9": {
+      "user_id": "3ece4d57-cad4-45a3-a380-6da2b4df21b9",
+      "display_name": "Fire Style Gaming",
+      "referral_code": "NVG-firestylegamin@2026",
+      "share_actions": 0,
+      "share_actions_by_type": {},
+      "unique_share_visits": 0,
+      "verified_installs": 0,
+      "paid_votes": 0,
+      "contest_votes": {
+        "contest_1": 0,
+        "contest_2": 0,
+        "contest_3": 0,
+        "contest_4": 0,
+        "contest_5": 0,
+        "contest_6": 0
+      },
+      "created_at": "2026-02-14T03:00:24.957Z",
+      "updated_at": "2026-02-14T03:27:32.384Z"
+    }
+  },
+  "orders": {
+    "order_SFsRFCghOwyBhP": {
+      "razorpay_order_id": "order_SFsRFCghOwyBhP",
+      "receipt": "contest_1771039638781_b93fa9",
+      "status": "created",
+      "user_id": "3ece4d57-cad4-45a3-a380-6da2b4df21b9",
+      "contest_id": "contest_1",
+      "side_id": "ronaldo",
+      "pack_id": "vote_20",
+      "votes": 20,
+      "amount_usd": 50,
+      "amount_inr_paise": 453145,
+      "usd_inr_rate": 90.629061,
+      "currency": "INR",
+      "created_at": "2026-02-14T03:27:19.188Z",
+      "updated_at": "2026-02-14T03:27:19.188Z"
+    },
+    "order_SFsRL1wsF4JQnH": {
+      "razorpay_order_id": "order_SFsRL1wsF4JQnH",
+      "receipt": "contest_1771039643904_e0c29e",
+      "status": "created",
+      "user_id": "3ece4d57-cad4-45a3-a380-6da2b4df21b9",
+      "contest_id": "contest_1",
+      "side_id": "ronaldo",
+      "pack_id": "vote_7",
+      "votes": 7,
+      "amount_usd": 25,
+      "amount_inr_paise": 226573,
+      "usd_inr_rate": 90.629061,
+      "currency": "INR",
+      "created_at": "2026-02-14T03:27:24.523Z",
+      "updated_at": "2026-02-14T03:27:24.523Z"
+    },
+    "order_SFsRTSGhzkY176": {
+      "razorpay_order_id": "order_SFsRTSGhzkY176",
+      "receipt": "contest_1771039651257_ba2eb3",
+      "status": "created",
+      "user_id": "3ece4d57-cad4-45a3-a380-6da2b4df21b9",
+      "contest_id": "contest_1",
+      "side_id": "ronaldo",
+      "pack_id": "vote_7",
+      "votes": 7,
+      "amount_usd": 25,
+      "amount_inr_paise": 226573,
+      "usd_inr_rate": 90.629061,
+      "currency": "INR",
+      "created_at": "2026-02-14T03:27:32.384Z",
+      "updated_at": "2026-02-14T03:27:32.384Z"
+    },
+    "order_SFu6cmvakPlWSw": {
+      "razorpay_order_id": "order_SFu6cmvakPlWSw",
+      "receipt": "contest_1771045510399_61ab67",
+      "status": "created",
+      "user_id": "2584ad3f-b637-4cc2-a93c-1568105c91df",
+      "contest_id": "contest_1",
+      "side_id": "ronaldo",
+      "pack_id": "vote_7",
+      "votes": 7,
+      "amount_usd": 25,
+      "amount_inr_paise": 226573,
+      "usd_inr_rate": 90.629061,
+      "currency": "INR",
+      "created_at": "2026-02-14T05:05:11.036Z",
+      "updated_at": "2026-02-14T05:05:11.036Z"
+    },
+    "order_SFuHrywn81tFhU": {
+      "razorpay_order_id": "order_SFuHrywn81tFhU",
+      "receipt": "contest_1771046149289_c05c97",
+      "status": "created",
+      "user_id": "2584ad3f-b637-4cc2-a93c-1568105c91df",
+      "contest_id": "contest_5",
+      "side_id": "marvel",
+      "pack_id": "vote_7",
+      "votes": 7,
+      "amount_usd": 25,
+      "amount_inr_paise": 226573,
+      "usd_inr_rate": 90.629061,
+      "currency": "INR",
+      "created_at": "2026-02-14T05:15:49.728Z",
+      "updated_at": "2026-02-14T05:15:49.728Z"
+    },
+    "order_SFuJtPn9G544dQ": {
+      "razorpay_order_id": "order_SFuJtPn9G544dQ",
+      "receipt": "contest_1771046264094_fc521c",
+      "status": "created",
+      "user_id": "2584ad3f-b637-4cc2-a93c-1568105c91df",
+      "contest_id": "contest_6",
+      "side_id": "madrid",
+      "pack_id": "vote_7",
+      "votes": 7,
+      "amount_usd": 25,
+      "amount_inr_paise": 226573,
+      "usd_inr_rate": 90.629061,
+      "currency": "INR",
+      "created_at": "2026-02-14T05:17:44.651Z",
+      "updated_at": "2026-02-14T05:17:44.651Z"
+    },
+    "order_SFuJyLFBXsYkhM": {
+      "razorpay_order_id": "order_SFuJyLFBXsYkhM",
+      "receipt": "contest_1771046268816_ce8a96",
+      "status": "created",
+      "user_id": "2584ad3f-b637-4cc2-a93c-1568105c91df",
+      "contest_id": "contest_6",
+      "side_id": "madrid",
+      "pack_id": "vote_7",
+      "votes": 7,
+      "amount_usd": 25,
+      "amount_inr_paise": 226573,
+      "usd_inr_rate": 90.629061,
+      "currency": "INR",
+      "created_at": "2026-02-14T05:17:49.138Z",
+      "updated_at": "2026-02-14T05:17:49.138Z"
+    },
+    "order_SFunG0QXojWYDg": {
+      "razorpay_order_id": "order_SFunG0QXojWYDg",
+      "receipt": "contest_1771047932140_5ddca3",
+      "status": "created",
+      "user_id": "2584ad3f-b637-4cc2-a93c-1568105c91df",
+      "contest_id": "contest_6",
+      "side_id": "madrid",
+      "pack_id": "vote_7",
+      "votes": 7,
+      "amount_usd": 25,
+      "amount_inr_paise": 226573,
+      "usd_inr_rate": 90.629061,
+      "currency": "INR",
+      "created_at": "2026-02-14T05:45:32.892Z",
+      "updated_at": "2026-02-14T05:45:32.892Z"
+    }
+  },
+  "votes": {
+    "contest_1": {
+      "ronaldo": 0,
+      "messi": 0
+    },
+    "contest_2": {
+      "kohli": 0,
+      "babar": 0
+    },
+    "contest_3": {
+      "swift": 0,
+      "bts": 0
+    },
+    "contest_4": {
+      "apple": 0,
+      "samsung": 0
+    },
+    "contest_5": {
+      "marvel": 0,
+      "dc": 0
+    },
+    "contest_6": {
+      "madrid": 0,
+      "barca": 0
+    }
+  },
+  "installs": {},
+  "share_visit_log": {},
+  "created_at": "2026-02-13T02:48:37.037Z",
+  "updated_at": "2026-02-14T05:45:32.892Z",
+  "registered_accounts": {
+    "2584ad3f-b637-4cc2-a93c-1568105c91df": {
+      "user_id": "2584ad3f-b637-4cc2-a93c-1568105c91df",
+      "user_name": "Prashik Bhalerao",
+      "email": "prashikbhalerao0208@gmail.com",
+      "registered_at": "2026-02-14T05:25:06.004Z",
+      "last_seen_at": "2026-02-14T05:45:32.120Z"
+    }
+  }
+}

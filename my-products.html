@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>My Products - NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body{margin:0;font-family:Arial,sans-serif;background:#f5f5f5}
+header{
+  background:#ff6a00;color:#fff;padding:12px 15px;
+  display:flex;align-items:center;justify-content:space-between;
+  font-size:18px;font-weight:bold
+}
+.header-title{display:flex;align-items:center;gap:8px}
+.notif-bell{position:relative;cursor:pointer;font-size:20px}
+.notif-badge{
+  position:absolute;top:-6px;right:-6px;
+  background:#ff3b3b;color:#fff;border-radius:12px;
+  font-size:11px;padding:2px 6px;min-width:18px;text-align:center
+}
+.notif-panel{
+  position:fixed;top:56px;right:12px;width:340px;max-width:90vw;
+  background:#fff;border:1px solid #eee;border-radius:12px;
+  box-shadow:0 10px 30px rgba(0,0,0,.15);
+  display:none;z-index:500
+}
+.notif-tabs{display:flex;border-bottom:1px solid #eee}
+.notif-tab{flex:1;padding:10px;text-align:center;font-size:13px;cursor:pointer}
+.notif-tab.active{font-weight:bold;background:#fff7f0}
+.notif-list{max-height:360px;overflow:auto}
+.notif-item{padding:10px;border-bottom:1px solid #f1f1f1;font-size:13px}
+.notif-item b{color:#222}
+.notif-item{cursor:pointer}
+.notif-actions{display:flex;gap:8px;margin-top:8px}
+.notif-actions button{
+  flex:1;border:none;padding:6px;border-radius:6px;font-size:12px;cursor:pointer
+}
+.mark-read{background:#2d8cff;color:#fff}
+.delete-notif{background:#ff3b3b;color:#fff}
+.empty-notif{padding:15px;text-align:center;color:#777}
+.top-actions{padding:10px}
+.top-actions button{
+  width:100%;border:none;background:#fff;border-radius:10px;padding:10px;
+  font-weight:bold;cursor:pointer
+}
+.summary-grid{
+  padding:0 10px 10px;
+  display:grid;
+  grid-template-columns:repeat(4,minmax(120px,1fr));
+  gap:8px;
+}
+.summary-card{
+  background:#fff;
+  border-radius:10px;
+  box-shadow:0 1px 4px rgba(0,0,0,.08);
+  padding:10px;
+}
+.summary-card .k{font-size:11px;color:#666}
+.summary-card .v{font-size:18px;font-weight:700;color:#222;margin-top:3px}
+.products{padding:10px;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.product{background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,.1)}
+.product img{width:100%;height:160px;object-fit:cover}
+.info{padding:10px}
+.name{font-size:14px;font-weight:bold;height:34px;overflow:hidden}
+.meta{font-size:12px;color:#666;margin-top:4px}
+.meta b{color:#222}
+.stock-badge{
+  margin-top:6px;
+  display:inline-block;
+  font-size:11px;
+  font-weight:700;
+  background:#eef9f0;
+  color:#177536;
+  border-radius:999px;
+  padding:4px 8px;
+}
+.price{margin-top:5px}
+.price del{color:#888;font-size:12px}
+.price b{color:#ff6a00;font-size:16px;margin-left:5px}
+.actions{display:flex;gap:5px;padding:10px}
+.actions button{flex:1;border:none;padding:8px;border-radius:6px;cursor:pointer;font-weight:bold}
+.edit{background:#2d8cff;color:#fff}
+.delete{background:#ff3b3b;color:#fff}
+.empty{padding:30px;text-align:center;color:#666}
+.qty-row{display:flex;gap:6px;margin-top:8px}
+.qty-row input{flex:1;padding:6px;border:1px solid #ddd;border-radius:6px;font-size:12px}
+.qty-row button{padding:6px 8px;border:none;background:#1aa34a;color:#fff;border-radius:6px;font-size:12px;cursor:pointer}
+.qty-row.secondary button{background:#2d8cff}
+.toast{
+  position:fixed;
+  left:50%;
+  bottom:14px;
+  transform:translateX(-50%);
+  background:#222;
+  color:#fff;
+  padding:8px 10px;
+  border-radius:8px;
+  font-size:12px;
+  display:none;
+  z-index:600;
+}
+@media (max-width:900px){
+  .summary-grid{grid-template-columns:repeat(2,minmax(120px,1fr))}
+}
+@media (max-width:640px){
+  .products{grid-template-columns:1fr}
+  .summary-grid{grid-template-columns:1fr 1fr}
+}
+</style>
+
+<!-- 🔥 SUPABASE -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<script src="global.js"></script>
+</head>
+
+<body>
+
+<header>
+  <div class="header-title">My Products</div>
+  <div class="notif-bell" id="notifBell">🔔
+    <span class="notif-badge" id="notifCount" style="display:none">0</span>
+  </div>
+</header>
+
+<div id="notifPanel" class="notif-panel">
+  <div class="notif-tabs">
+    <div class="notif-tab active" data-tab="new">New</div>
+    <div class="notif-tab" data-tab="history">History</div>
+  </div>
+  <div id="notifNew" class="notif-list"></div>
+  <div id="notifHistory" class="notif-list" style="display:none"></div>
+</div>
+
+<div class="top-actions">
+  <button onclick="location.href='seller-history.html'">Seller History</button>
+</div>
+<div class="summary-grid" id="summaryGrid"></div>
+<div class="products" id="productsBox"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+let currentUser = null;
+const box = document.getElementById("productsBox");
+const summaryGrid = document.getElementById("summaryGrid");
+const toast = document.getElementById("toast");
+let notifChannel = null;
+const supa =
+  window.supa ||
+  window.supabase?.createClient(
+    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+  );
+
+/* 🔐 AUTH CHECK */
+(async function(){
+  if(!supa || !supa.auth){
+    console.error("Supabase client not initialized. Check script load order.");
+    return;
+  }
+
+  const { data } = await supa.auth.getSession();
+  if(!data.session){
+    location.href = "login.html";
+    return;
+  }
+  currentUser = data.session.user;
+  loadMyProducts();
+  initNotifications();
+})();
+
+function showToast(msg){
+  if(!msg || !toast) return;
+  toast.textContent = msg;
+  toast.style.display = "block";
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => {
+    toast.style.display = "none";
+  }, 2200);
+}
+
+function renderSummary(products, soldMap){
+  const rows = Array.isArray(products) ? products : [];
+  const totals = rows.reduce((acc, p) => {
+    const sold = Number(soldMap?.[p.id] || 0);
+    const left = Math.max(0, Number(p.quantity) || 0);
+    acc.productCount += 1;
+    acc.sold += sold;
+    acc.left += left;
+    acc.listed += (sold + left);
+    return acc;
+  }, { productCount:0, listed:0, sold:0, left:0 });
+
+  summaryGrid.innerHTML = `
+    <div class="summary-card"><div class="k">Products Listed</div><div class="v">${totals.productCount}</div></div>
+    <div class="summary-card"><div class="k">Total Units Listed</div><div class="v">${totals.listed}</div></div>
+    <div class="summary-card"><div class="k">Units Sold</div><div class="v">${totals.sold}</div></div>
+    <div class="summary-card"><div class="k">Units Left</div><div class="v">${totals.left}</div></div>
+  `;
+}
+
+/* 🔥 LOAD PRODUCTS FROM SUPABASE */
+async function loadMyProducts(){
+  box.innerHTML = "";
+
+  const products = await fetchOwnedProducts();
+
+  if(!products || products.length === 0){
+    summaryGrid.innerHTML = "";
+    box.innerHTML = `<div class="empty">No products found</div>`;
+    return;
+  }
+
+  const soldMap = await getSoldMap(products);
+  renderSummary(products, soldMap);
+
+  products.forEach(p=>{
+    const priceText = window.money ? money(p.price, p.currency || "USD") : (p.price || 0);
+    const mrpText = p.mrp ? (window.money ? money(p.mrp, p.currency || "USD") : p.mrp) : "";
+    const soldQty = soldMap[p.id] || 0;
+    const remaining = Math.max(0, Number(p.quantity) || 0);
+
+    let div = document.createElement("div");
+    div.className = "product";
+
+    div.innerHTML = `
+      <img src="${p.images?.[0] || ''}">
+      <div class="info">
+        <div class="name">${translateProductName(p.name)}</div>
+        <div class="price">
+          ${p.mrp ? `<del>${mrpText}</del>` : ""}
+          <b>${priceText}</b>
+        </div>
+        <div class="stock-badge">Live Stock: ${remaining}</div>
+        <div class="meta">Total Listed: <b>${remaining + soldQty}</b></div>
+        <div class="meta">Sold Orders: <b>${soldQty}</b></div>
+        <div class="meta">Public Remaining: <b>${remaining}</b></div>
+        <div class="qty-row">
+          <input type="number" min="1" placeholder="Add units" id="qty_${p.id}">
+          <button onclick="increaseQty('${p.id}')">Increase</button>
+        </div>
+        <div class="qty-row secondary">
+          <input type="number" min="0" placeholder="Set exact stock" id="setqty_${p.id}">
+          <button onclick="setQty('${p.id}')">Set Qty</button>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="edit" onclick="editProduct('${p.id}')">Edit Info</button>
+        <button class="delete" onclick="deleteProduct('${p.id}')">Delete</button>
+      </div>
+    `;
+    box.appendChild(div);
+  });
+}
+
+async function fetchOwnedProducts(){
+  const { data, error } = await supa
+    .from("products")
+    .select("*")
+    .eq("owner_id", currentUser.id)
+    .order("created_at", { ascending:false });
+
+  if(error){
+    console.error(error);
+    return [];
+  }
+
+  return data || [];
+}
+
+async function getSoldMap(products){
+  const map = {};
+  const { data: orders, error } = await supa
+    .from("orders")
+    .select("items")
+    .eq("seller_id", currentUser.id);
+
+  if(error){
+    console.error(error);
+    return map;
+  }
+
+  (orders || []).forEach(o=>{
+    (o.items || []).forEach(i=>{
+      if(i.owner_id !== currentUser.id) return;
+      if(!i.id) return;
+      map[i.id] = (map[i.id] || 0) + Number(i.qty || 0);
+    });
+  });
+
+  return map;
+}
+
+async function increaseQty(id){
+  const input = document.getElementById(`qty_${id}`);
+  const add = Number(input?.value || 0);
+  if(add <= 0){
+    showToast("Enter valid quantity");
+    return;
+  }
+
+  const { data, error } = await supa
+    .from("products")
+    .select("quantity")
+    .eq("id", id)
+    .single();
+
+  if(error){
+    showToast("Failed to update stock");
+    console.error(error);
+    return;
+  }
+
+  const nextQty = (Number(data.quantity) || 0) + add;
+  const { error: upErr } = await supa
+    .from("products")
+    .update({ quantity: nextQty })
+    .eq("id", id);
+
+  if(upErr){
+    showToast("Failed to update stock");
+    console.error(upErr);
+    return;
+  }
+
+  showToast("Stock updated");
+  if(input) input.value = "";
+  loadMyProducts();
+}
+
+async function setQty(id){
+  const input = document.getElementById(`setqty_${id}`);
+  const qty = Number(input?.value);
+  if(!Number.isFinite(qty) || qty < 0){
+    showToast("Enter valid stock number");
+    return;
+  }
+
+  const { error } = await supa
+    .from("products")
+    .update({ quantity: Math.floor(qty) })
+    .eq("id", id);
+
+  if(error){
+    showToast("Failed to set stock");
+    console.error(error);
+    return;
+  }
+
+  showToast("Stock set successfully");
+  if(input) input.value = "";
+  loadMyProducts();
+}
+
+/* 🗑 DELETE PRODUCT */
+async function deleteProduct(id){
+  const ok = window.confirm("Delete this product?");
+  if(!ok) return;
+
+  const { error } = await supa
+    .from("products")
+    .delete()
+    .eq("id", id);
+
+  if(error){
+    showToast("Failed to delete");
+    console.error(error);
+    return;
+  }
+
+  showToast("Product deleted");
+  loadMyProducts();
+}
+
+/* ✏️ EDIT PRODUCT */
+function editProduct(id){
+  localStorage.setItem("editProductId", id);
+  location.href = "edit-product.html";
+}
+
+/* 🔔 NOTIFICATIONS */
+function initNotifications(){
+  const bell = document.getElementById("notifBell");
+  const panel = document.getElementById("notifPanel");
+  const tabs = [...document.querySelectorAll(".notif-tab")];
+  const listNew = document.getElementById("notifNew");
+  const listHistory = document.getElementById("notifHistory");
+
+  bell.addEventListener("click", ()=>{
+    panel.style.display = panel.style.display === "block" ? "none" : "block";
+  });
+
+  tabs.forEach(t=>{
+    t.addEventListener("click", ()=>{
+      tabs.forEach(x=>x.classList.remove("active"));
+      t.classList.add("active");
+      if(t.dataset.tab === "new"){
+        listNew.style.display = "block";
+        listHistory.style.display = "none";
+      }else{
+        listNew.style.display = "none";
+        listHistory.style.display = "block";
+      }
+    });
+  });
+
+  loadNotifications();
+  subscribeNotifications();
+}
+
+async function loadNotifications(){
+  const first = await fetchSellerNotifications();
+  const data = first.data;
+  const error = first.error;
+
+  if(error){
+    console.error(error);
+    return;
+  }
+
+  const listNew = document.getElementById("notifNew");
+  const listHistory = document.getElementById("notifHistory");
+  listNew.innerHTML = "";
+  listHistory.innerHTML = "";
+
+  const rows = data || [];
+  const orderStatusMap = await fetchOrderStatusMap(rows);
+  rows.forEach(r=>{
+    const orderMeta = orderStatusMap[r.order_id] || {};
+    r._payment_method = orderMeta.payment_method || r.payment_method || "Cash on Delivery";
+    r._payment_state = paymentStateFromOrder(orderMeta, r.payment_method);
+  });
+  const unread = rows.filter(r=>!r.is_read && !r.is_deleted).length;
+  updateBadge(unread);
+
+  const active = rows.filter(r=>!r.is_deleted);
+  const deleted = rows.filter(r=>r.is_deleted);
+
+  if(active.length === 0) listNew.innerHTML = `<div class="empty-notif">No notifications</div>`;
+  if(deleted.length === 0) listHistory.innerHTML = `<div class="empty-notif">No history</div>`;
+
+  active.forEach(r=>listNew.appendChild(renderNotif(r, false)));
+  deleted.forEach(r=>listHistory.appendChild(renderNotif(r, true)));
+}
+
+async function fetchSellerNotifications(){
+  const bySellerId = await supa
+    .from("notifications")
+    .select("*")
+    .eq("seller_id", currentUser.id)
+    .order("created_at", { ascending:false });
+
+  if(!bySellerId.error && (bySellerId.data || []).length > 0) return bySellerId;
+
+  const byReceiver = await supa
+    .from("notifications")
+    .select("*")
+    .eq("receiver_user_id", currentUser.id)
+    .order("created_at", { ascending:false });
+
+  if(byReceiver.error) return bySellerId;
+  const seen = new Set();
+  const merged = [...(bySellerId.data || []), ...(byReceiver.data || [])].filter(r=>{
+    const key = r.id || `${r.order_id || ""}_${r.product_id || ""}_${r.created_at || ""}`;
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return {
+    data: merged,
+    error: null
+  };
+}
+
+function renderNotif(r, isHistory){
+  const div = document.createElement("div");
+  div.className = "notif-item";
+  div.onclick = ()=>openOrderFromNotif(r.id, r.order_id);
+  const date = r.created_at ? new Date(r.created_at).toLocaleString() : "";
+  div.innerHTML = `
+    <div><b>Order</b> ${r.order_id || ""}</div>
+    <div>Buyer: ${r.buyer_name || ""}</div>
+    <div>Address: ${r.buyer_address || ""}</div>
+    <div>Product: ${translateProductName(r.product_name || "")}</div>
+    <div>Qty: ${r.qty || 0}</div>
+    <div>Payment: ${r._payment_method || "Cash on Delivery"}</div>
+    <div>Payment Status: ${r._payment_state || "Unpaid"}</div>
+    <div style="color:#777;margin-top:4px">${date}</div>
+    ${isHistory ? "" : `
+      <div class="notif-actions">
+        <button class="mark-read" onclick="event.stopPropagation();markRead('${r.id}')">Mark Read</button>
+        <button class="delete-notif" onclick="event.stopPropagation();deleteNotif('${r.id}')">Delete</button>
+      </div>
+    `}
+  `;
+  return div;
+}
+
+function paymentStateFromOrder(orderMeta, fallbackMethod){
+  if(orderMeta?.payment_id) return "Paid";
+  const method = (orderMeta?.payment_method || fallbackMethod || "").toLowerCase();
+  return method.includes("razorpay") || method.includes("online") ? "Paid" : "Unpaid";
+}
+
+async function fetchOrderStatusMap(rows){
+  const ids = [...new Set((rows || []).map(r=>r.order_id).filter(Boolean))];
+  if(ids.length === 0) return {};
+
+  const { data, error } = await supa
+    .from("orders")
+    .select("id,status,payment_method,payment_id")
+    .in("id", ids);
+
+  if(error){
+    console.error(error);
+    return {};
+  }
+
+  const map = {};
+  (data || []).forEach(o=>{ map[o.id] = o; });
+  return map;
+}
+
+function openOrderFromNotif(notifId, orderId){
+  if(!orderId) return;
+  location.href =
+    "order-details.html?order_id=" +
+    encodeURIComponent(orderId) +
+    "&notif_id=" +
+    encodeURIComponent(notifId || "");
+}
+
+function updateBadge(count){
+  const badge = document.getElementById("notifCount");
+  if(count > 0){
+    badge.style.display = "inline-block";
+    badge.textContent = count;
+  }else{
+    badge.style.display = "none";
+  }
+}
+
+async function markRead(id){
+  await supa
+    .from("notifications")
+    .update({ is_read: true })
+    .eq("id", id);
+}
+
+async function deleteNotif(id){
+  await supa
+    .from("notifications")
+    .update({ is_deleted: true })
+    .eq("id", id);
+}
+
+function subscribeNotifications(){
+  if(notifChannel) supa.removeChannel(notifChannel);
+
+  notifChannel = supa
+    .channel("notif-" + currentUser.id)
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "notifications" },
+      () => loadNotifications()
+    )
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "notifications" },
+      () => loadNotifications()
+    )
+    .subscribe();
+}
+</script>
+
+</body>
+</html>

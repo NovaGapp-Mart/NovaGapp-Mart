@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Your Activity</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- SUPABASE -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="global.js"></script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial}
+body{background:#fff;color:#000}
+
+/* HEADER */
+.header{
+  display:flex;
+  align-items:center;
+  padding:14px;
+  border-bottom:1px solid #eee;
+}
+.header svg{
+  width:22px;
+  height:22px;
+  margin-right:10px;
+  cursor:pointer;
+}
+.header h2{font-size:18px}
+
+/* EMPTY STATE */
+.empty{
+  height:80vh;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  color:#666;
+}
+.empty svg{
+  width:80px;
+  height:80px;
+  fill:#bbb;
+  margin-bottom:12px;
+}
+.empty h3{
+  font-size:18px;
+  margin-bottom:6px;
+  color:#000;
+}
+.empty p{font-size:14px}
+
+/* ACTIVITY LIST */
+.list{
+  padding:10px;
+}
+.item{
+  padding:12px;
+  border-bottom:1px solid #eee;
+  font-size:14px;
+}
+.item small{
+  display:block;
+  color:#888;
+  margin-top:4px;
+}
+</style>
+</head>
+
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <svg onclick="history.back()" viewBox="0 0 24 24">
+    <path d="M15 18l-6-6 6-6"/>
+  </svg>
+  <h2>Your activity</h2>
+</div>
+
+<!-- EMPTY -->
+<div class="empty" id="empty">
+  <svg viewBox="0 0 24 24">
+    <path d="M12 8v4l3 3"/>
+  </svg>
+  <h3>No activity yet</h3>
+  <p>Your likes, comments and other actions will appear here.</p>
+</div>
+
+<!-- LIST -->
+<div class="list" id="list" style="display:none"></div>
+
+<script>
+/* 🔐 AUTH CHECK (SUPABASE ONLY) */
+(async ()=>{
+  const { data, error } = await supabase.auth.getUser();
+
+  if(error || !data?.user){
+    location.href = "login.html";
+    return;
+  }
+
+  // User authenticated
+  // Activity will auto-render once table exists
+  // No temporary or demo logic kept
+})();
+</script>
+
+</body>
+</html>

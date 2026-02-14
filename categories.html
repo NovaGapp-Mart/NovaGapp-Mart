@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Categories - NOVAGAPP</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="stylesheet" href="style.css">
+  <script src="global.js"></script>
+</head>
+
+<body>
+
+<header class="top">
+  <span class="company-name">All Categories</span>
+</header>
+
+<div class="category-grid">
+
+  <div class="cat-item" onclick="openCat('our_products')">
+    <img src="images/prashik-cat.jpg">
+    <span>Our Products</span>
+  </div>
+
+  <div class="cat-item" onclick="openCat('niv_ai')">
+    <img src="images/niv-cat.jpg">
+    <span>NIV-AI</span>
+  </div>
+
+  <div class="cat-item" onclick="openCat('fashion')">
+    <img src="https://img.icons8.com/color/96/t-shirt.png">
+    <span>Fashion</span>
+  </div>
+
+  <div class="cat-item" onclick="openCat('furniture')">
+    <img src="https://img.icons8.com/color/96/sofa.png">
+    <span>Furniture</span>
+  </div>
+
+  <div class="cat-item" onclick="openCat('mobiles')">
+    <img src="https://img.icons8.com/color/96/smartphone.png">
+    <span>Mobiles</span>
+  </div>
+
+  <div class="cat-item" onclick="openCat('electronics')">
+    <img src="https://img.icons8.com/color/96/laptop.png">
+    <span>Electronics</span>
+  </div>
+
+  <div class="cat-item" onclick="openCat('grocery')">
+    <img src="https://img.icons8.com/color/96/grocery-bag.png">
+    <span>Grocery</span>
+  </div>
+
+  <div class="cat-item" onclick="openCat('kids')">
+    <img src="https://img.icons8.com/color/96/teddy-bear.png">
+    <span>Kids</span>
+  </div>
+
+  <div class="cat-item" onclick="openCat('flights')">
+    <img src="https://img.icons8.com/color/96/airplane-take-off.png">
+    <span>Flights</span>
+  </div>
+
+  <div class="cat-item" onclick="openCat('sports')">
+    <img src="https://img.icons8.com/color/96/badminton.png">
+    <span>Sports</span>
+  </div>
+
+  <div class="cat-item" onclick="openCat('beauty')">
+    <img src="https://img.icons8.com/color/96/lipstick.png">
+    <span>Beauty</span>
+  </div>
+
+  <div class="cat-item" onclick="openCat('health')">
+    <img src="https://img.icons8.com/color/96/heart-with-pulse.png">
+    <span>Health</span>
+  </div>
+
+  <div class="cat-item" onclick="openCat('books')">
+    <img src="https://img.icons8.com/color/96/books.png">
+    <span>Books</span>
+  </div>
+
+  <div class="cat-item" onclick="openCat('accessories')">
+    <img src="https://img.icons8.com/color/96/watch.png">
+    <span>Accessories</span>
+  </div>
+
+  <div class="cat-item" onclick="openCat('gaming')">
+    <img src="https://img.icons8.com/color/96/controller.png">
+    <span>Gaming</span>
+  </div>
+
+</div>
+
+<script>
+/* CATEGORY OPEN */
+function openCat(cat){
+  location.href = "category.html?cat=" + encodeURIComponent(cat);
+}
+</script>
+
+<!-- 🔻 BOTTOM NAV -->
+<nav class="bottom-nav">
+
+  <div class="nav-item" onclick="go('index.html')">
+    <img src="https://img.icons8.com/ios-filled/50/ff6a00/home.png"/>
+    <span>Home</span>
+  </div>
+
+  <div class="nav-item active" onclick="go('categories.html')">
+    <img src="https://img.icons8.com/ios-filled/50/000000/grid.png"/>
+    <span>Categories</span>
+  </div>
+
+  <div class="nav-item" onclick="go('reel.html')">
+    <img src="https://img.icons8.com/ios-filled/50/000000/circled-play.png"/>
+    <span>Reels</span>
+  </div>
+
+  <div class="nav-item" onclick="go('account.html')">
+    <img src="https://img.icons8.com/ios-filled/50/000000/user.png"/>
+    <span>Account</span>
+  </div>
+
+  <div class="nav-item" onclick="go('cart.html')">
+    <img src="https://img.icons8.com/ios-filled/50/000000/shopping-cart.png"/>
+    <span>Cart</span>
+  </div>
+
+</nav>
+
+<script>
+function go(page){
+  location.href = page;
+}
+</script>
+
+</body>
+</html>

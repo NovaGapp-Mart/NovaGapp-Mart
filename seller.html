@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Seller Dashboard - NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body{margin:0;font-family:Arial,sans-serif;background:#f5f5f5}
+.header{
+  background:#ff7a00;color:#fff;padding:12px 15px;
+  font-size:20px;font-weight:bold;
+  display:flex;align-items:center;justify-content:space-between
+}
+.notif-bell{position:relative;cursor:pointer;font-size:20px}
+.notif-badge{
+  position:absolute;top:-6px;right:-6px;
+  background:#ff3b3b;color:#fff;border-radius:12px;
+  font-size:11px;padding:2px 6px;min-width:18px;text-align:center
+}
+.notif-panel{
+  position:fixed;top:56px;right:12px;width:340px;max-width:90vw;
+  background:#fff;border:1px solid #eee;border-radius:12px;
+  box-shadow:0 10px 30px rgba(0,0,0,.15);
+  display:none;z-index:500
+}
+.notif-tabs{display:flex;border-bottom:1px solid #eee}
+.notif-tab{flex:1;padding:10px;text-align:center;font-size:13px;cursor:pointer}
+.notif-tab.active{font-weight:bold;background:#fff7f0}
+.notif-list{max-height:360px;overflow:auto}
+.notif-item{padding:10px;border-bottom:1px solid #f1f1f1;font-size:13px}
+.notif-item b{color:#222}
+.notif-item{cursor:pointer}
+.notif-actions{display:flex;gap:8px;margin-top:8px}
+.notif-actions button{
+  flex:1;border:none;padding:6px;border-radius:6px;font-size:12px;cursor:pointer
+}
+.mark-read{background:#2d8cff;color:#fff}
+.delete-notif{background:#ff3b3b;color:#fff}
+.empty-notif{padding:15px;text-align:center;color:#777}
+.card{background:#fff;margin:15px;padding:15px;border-radius:12px}
+.seller-name{font-size:18px;font-weight:bold}
+.seller-note{color:#555;font-size:14px;margin-top:5px}
+.stats{display:flex;gap:10px;margin:15px}
+.stat-box{flex:1;background:#fff;padding:15px;border-radius:12px;text-align:center}
+.stat-box h3{margin:0;color:#ff7a00}
+.actions{margin:15px}
+
+.action-btn{
+  background:#fff;
+  padding:15px;
+  border-radius:12px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:12px;
+  cursor:pointer;
+}
+
+/* MAIN WITHDRAW CTA */
+.withdraw-btn{
+  background:linear-gradient(135deg,#ffbc02,#ff9d0a);
+  color:#fff;
+  box-shadow:0 6px 18px rgba(0,0,0,.18);
+}
+.withdraw-title{font-size:16px;font-weight:bold}
+.withdraw-sub{font-size:12px;color:#e6f4ea}
+.withdraw-amount{font-size:18px;font-weight:bold}
+
+/* REAL PAYOUT PANEL */
+.withdraw-card{
+  display:none;
+  border:1px solid #eee;
+}
+.withdraw-card input{
+  width:100%;
+  padding:12px;
+  margin-top:10px;
+  border-radius:8px;
+  border:1px solid #ddd;
+  font-size:14px;
+}
+.withdraw-card button{
+  margin-top:12px;
+  width:100%;
+  padding:12px;
+  background:#f78a0e;
+  color:#fff;
+  border:none;
+  border-radius:10px;
+  font-size:15px;
+  font-weight:bold;
+  cursor:pointer;
+}
+
+.history-item{border-bottom:1px solid #eee;padding:8px 0;font-size:14px}
+.history-item{cursor:pointer}
+
+.bottom-nav{
+  position:fixed;bottom:0;left:0;right:0;
+  background:#fff;display:flex;border-top:1px solid #ddd
+}
+.nav-item{flex:1;text-align:center;padding:8px 0;font-size:12px;color:#555}
+.active{color:#ff7a00}
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<script>
+  window.supabase = supabase.createClient(
+    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+  );
+</script>
+<script src="global.js"></script>
+</head>
+
+<body>
+
+<div class="header">
+  <span>Seller Dashboard</span>
+  <div class="notif-bell" id="notifBell">&#128276;
+    <span class="notif-badge" id="notifCount" style="display:none">0</span>
+  </div>
+</div>
+
+<div id="notifPanel" class="notif-panel">
+  <div class="notif-tabs">
+    <div class="notif-tab active" data-tab="new">New</div>
+    <div class="notif-tab" data-tab="history">History</div>
+  </div>
+  <div style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right">
+    <button class="delete-notif" onclick="clearNotificationHistory()">Clear notification history</button>
+  </div>
+  <div id="notifNew" class="notif-list"></div>
+  <div id="notifHistory" class="notif-list" style="display:none"></div>
+</div>
+
+<div class="card">
+  <div class="seller-name" id="sellerName">Seller</div>
+  <div class="seller-note" id="sellerNote">Checking seller status...</div>
+</div>
+
+<div class="stats">
+  <div class="stat-box"><h3 id="totalProducts">0</h3><p>Products</p></div>
+  <div class="stat-box"><h3 id="totalSales">0</h3><p>Total Sales</p></div>
+  <div class="stat-box"><h3 id="wallet">0</h3><p>Wallet</p></div>
+</div>
+
+<div class="actions">
+
+  <div class="action-btn" onclick="addProduct()">
+    <div><b>Add Product</b><br><small id="sellHint">Seller plan required</small></div>
+    <span id="lockIcon">LOCKED</span>
+  </div>
+
+  <div class="action-btn" onclick="toggleBadge()">
+    <div><b>Seller Badge (Optional)</b><br><small id="badgeHint">Seller plan required</small></div>
+    <span id="badgeState">LOCKED</span>
+  </div>
+
+  <div class="action-btn" onclick="go('my-products.html')">
+    <div><b>My Products</b><br><small>View listings</small></div>&rsaquo;
+  </div>
+
+  <!-- PRIMARY WITHDRAW CTA -->
+  <div class="action-btn withdraw-btn" onclick="toggleWithdraw()">
+    <div>
+      <div class="withdraw-title">Withdraw Wallet Balance</div>
+      <div class="withdraw-sub">Bank / UPI • Secure</div>
+    </div>
+    <div class="withdraw-amount" id="withdrawCTA">0</div>
+  </div>
+
+  <div class="action-btn" onclick="go('seller-pay.html')">
+    <div><b>Seller Plan</b><br><small>Pay once</small></div>&rsaquo;
+  </div>
+
+</div>
+
+<!-- REAL WITHDRAW PANEL -->
+<div class="card withdraw-card" id="withdrawBox">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <div>
+      <div style="font-size:16px;font-weight:bold">Request Withdrawal</div>
+      <div style="font-size:12px;color:#777">Processed in 24–72 hours</div>
+    </div>
+    <div style="font-size:18px;font-weight:bold;color:#ec8a1a">
+      <span id="availableBalance">0</span>
+    </div>
+  </div>
+
+  <input id="withdrawAmount" type="number" placeholder="Enter amount (min 500)">
+  <button onclick="submitWithdraw()">Request Withdrawal</button>
+
+  <div style="font-size:11px;color:#888;margin-top:8px;text-align:center">
+    Subject to verification • No instant payout
+  </div>
+</div>
+
+<!-- WALLET HISTORY -->
+<div class="card">
+  <b>Wallet History</b>
+  <div id="walletHistory">Loading...</div>
+</div>
+
+<!-- ORDERS -->
+<div class="card">
+  <b>Orders</b>
+  <div id="orderHistory">Loading...</div>
+</div>
+
+<nav class="bottom-nav">
+  <div class="nav-item" onclick="go('index.html')">Home</div>
+  <div class="nav-item active">Seller</div>
+  <div class="nav-item" onclick="go('account.html')">Account</div>
+</nav>
+
+<script>
+const supa = window.supabase;
+let CURRENT_USER=null, CURRENT_SELLER=null, isSellerPaid=false, showBadge=false;
+
+(async function init(){
+  const { data } = await supa.auth.getSession();
+  if(!data.session){ location.href="login.html"; return; }
+
+  CURRENT_USER=data.session.user;
+  sellerName.innerText=CURRENT_USER.email.split("@")[0];
+
+  let { data:seller } = await supa
+    .from("sellers")
+    .select("*")
+    .eq("user_id",CURRENT_USER.id)
+    .maybeSingle();
+
+  if(!seller){
+    seller=(await supa.from("sellers")
+      .insert({user_id:CURRENT_USER.id})
+      .select().single()).data;
+  }
+
+  if(seller.is_paid===true &&
+     (seller.show_badge===null || typeof seller.show_badge==="undefined")){
+    const { data: updated } = await supa
+      .from("sellers")
+      .update({ show_badge: true })
+      .eq("user_id", CURRENT_USER.id)
+      .select()
+      .single();
+    if(updated) seller = updated;
+  }
+
+  CURRENT_SELLER=seller;
+  isSellerPaid=seller.is_paid===true;
+  showBadge=seller.show_badge===true;
+
+  const walletAmount = Math.max(0, Number(seller.wallet ?? 0));
+  const totalProductsCount = await fetchSellerProductCount();
+  const totalSalesAmount = Number(seller.total_sales ?? 0);
+  totalProducts.innerText = totalProductsCount;
+  totalSales.innerHTML = moneyTag(totalSalesAmount, "INR");
+  wallet.innerHTML = moneyTag(walletAmount, "INR");
+  withdrawCTA.innerHTML = moneyTag(walletAmount, "INR");
+  availableBalance.innerHTML = moneyTag(walletAmount, "INR");
+  withdrawAmount.placeholder = "Enter amount (min " + money(500, "INR") + ")";
+
+  sellerNote.innerText=isSellerPaid?"Seller status: ACTIVE":"Seller status: INACTIVE";
+  sellHint.innerText=isSellerPaid?"You can add products":"Seller plan required";
+  lockIcon.innerText = isSellerPaid ? "UNLOCKED" : "LOCKED";
+  lockIcon.style.display = isSellerPaid ? "none" : "inline";
+  renderBadgeUI();
+
+  walletHistory.innerText = "Wallet history is unavailable.";
+  loadOrders();
+  initNotifications();
+})();
+
+async function fetchSellerProductCount(){
+  if(!CURRENT_USER?.id) return 0;
+  const { data, error } = await supa
+    .from("products")
+    .select("id")
+    .eq("owner_id", CURRENT_USER.id);
+
+  if(error){
+    console.error(error);
+    return Number(CURRENT_SELLER?.total_products ?? 0);
+  }
+
+  return (data || []).length;
+}
+
+/* SAFE LOADERS */
+async function loadOrders(){
+  if(!CURRENT_USER) return;
+
+  const { data, error } = await supa
+    .from("orders")
+    .select("*")
+    .eq("seller_id", CURRENT_USER.id)
+    .order("created_at", { ascending: false });
+
+  if(error){
+    console.error(error);
+    orderHistory.innerText = "No orders yet";
+    return;
+  }
+
+  const sellerRows = [];
+  (data || []).forEach(o=>{
+    (o.items || []).forEach(i=>{
+      if(i.owner_id !== CURRENT_USER.id) return;
+      sellerRows.push({
+        id: o.id,
+        product: i.name || "Product",
+        qty: Number(i.qty || 0),
+        buyer: o.address?.name || "",
+        status: o.status || "pending"
+      });
+    });
+  });
+
+  if(sellerRows.length === 0){
+    orderHistory.innerText = "No orders yet";
+    return;
+  }
+
+  orderHistory.innerHTML = "";
+  sellerRows.forEach(o=>{
+    orderHistory.innerHTML += `
+      <div class="history-item" onclick="openOrderDetails('${o.id}')">
+        Order ${o.id}<br>
+        <small>${translateProductName(o.product)} • Qty ${o.qty} • ${o.buyer || "Buyer"}</small><br>
+        <small>Status: ${o.status}</small>
+      </div>
+    `;
+  });
+}
+
+/* ACTIONS */
+function addProduct(){
+  if(!isSellerPaid){ alert("Seller plan required"); return; }
+  location.href="add-product.html";
+}
+
+function renderBadgeUI(){
+  if(!isSellerPaid){
+    badgeHint.innerText="Seller plan required";
+    badgeState.innerText="LOCKED";
+    return;
+  }
+  badgeHint.innerText=showBadge?"Badge is ON":"Badge is OFF";
+  badgeState.innerText=showBadge?"ON":"OFF";
+}
+
+async function toggleBadge(){
+  if(!isSellerPaid){ alert("Please activate seller plan"); return; }
+  const next = !showBadge;
+  const { error } = await supa
+    .from("sellers")
+    .update({ show_badge: next })
+    .eq("user_id", CURRENT_USER.id);
+
+  if(error){
+    alert("Failed to update badge");
+    console.error(error);
+    return;
+  }
+
+  showBadge = next;
+  renderBadgeUI();
+}
+
+function toggleWithdraw(){
+  withdrawBox.style.display =
+    withdrawBox.style.display==="block"?"none":"block";
+  availableBalance.innerHTML = moneyTag(Math.max(0, Number(CURRENT_SELLER?.wallet ?? 0)), "INR");
+}
+
+async function submitWithdraw(){
+  const amt=Number(withdrawAmount.value);
+  if(amt<500 || amt>(CURRENT_SELLER.wallet ?? 0)){
+    alert("Invalid amount"); return;
+  }
+  const { data, error } = await supa.rpc("request_withdraw", {
+    p_user_id: CURRENT_USER.id,
+    p_amount: amt
+  });
+  if(error){
+    alert(error.message || "Withdraw request failed");
+    console.error(error);
+    return;
+  }
+  alert("Withdraw request submitted");
+  location.reload();
+}
+
+function go(p){location.href=p;}
+function openOrderDetails(orderId){
+  if(!orderId) return;
+  location.href = "order-details.html?order_id=" + encodeURIComponent(orderId);
+}
+
+/* NOTIFICATIONS */
+let notifChannel = null;
+let orderChannel = null;
+let pushSeenMap = {};
+let notifLoadInProgress = false;
+let notifReloadQueued = false;
+
+function initNotifications(){
+  const bell = document.getElementById("notifBell");
+  const panel = document.getElementById("notifPanel");
+  const tabs = [...document.querySelectorAll(".notif-tab")];
+  const listNew = document.getElementById("notifNew");
+  const listHistory = document.getElementById("notifHistory");
+
+  bell.addEventListener("click", ()=>{
+    panel.style.display = panel.style.display === "block" ? "none" : "block";
+  });
+
+  tabs.forEach(t=>{
+    t.addEventListener("click", ()=>{
+      tabs.forEach(x=>x.classList.remove("active"));
+      t.classList.add("active");
+      if(t.dataset.tab === "new"){
+        listNew.style.display = "block";
+        listHistory.style.display = "none";
+      }else{
+        listNew.style.display = "none";
+        listHistory.style.display = "block";
+      }
+    });
+  });
+
+  if("Notification" in window && Notification.permission === "default"){
+    Notification.requestPermission().catch(()=>{});
+  }
+
+  pushSeenMap = loadPushSeenMap();
+  loadNotifications();
+  subscribeNotifications();
+}
+
+async function loadNotifications(){
+  if(notifLoadInProgress){
+    notifReloadQueued = true;
+    return;
+  }
+  notifLoadInProgress = true;
+  try{
+  const firstFetch = await fetchSellerNotifications();
+
+  if(firstFetch.error){
+    console.error(firstFetch.error);
+    return;
+  }
+
+  const rows = firstFetch.data || [];
+
+  const listNew = document.getElementById("notifNew");
+  const listHistory = document.getElementById("notifHistory");
+  listNew.innerHTML = "";
+  listHistory.innerHTML = "";
+  const unread = rows.filter(r=>!r.is_read && !r.is_deleted).length;
+  updateBadge(unread);
+  pushSellerNotifications(rows);
+
+  const active = rows.filter(r=>!r.is_deleted);
+  const deleted = rows.filter(r=>r.is_deleted);
+
+  if(active.length === 0) listNew.innerHTML = `<div class="empty-notif">No notifications</div>`;
+  if(deleted.length === 0) listHistory.innerHTML = `<div class="empty-notif">No history</div>`;
+
+  active.forEach(r=>listNew.appendChild(renderNotif(r, false)));
+  deleted.forEach(r=>listHistory.appendChild(renderNotif(r, true)));
+  }finally{
+    notifLoadInProgress = false;
+    if(notifReloadQueued){
+      notifReloadQueued = false;
+      loadNotifications();
+    }
+  }
+}
+
+function renderNotif(r, isHistory){
+  const div = document.createElement("div");
+  div.className = "notif-item";
+  if(r.type === "new_order"){
+    div.onclick = ()=>openOrderFromNotif(r.id, r.order_id);
+  }
+  const date = r.created_at ? new Date(r.created_at).toLocaleString() : "";
+  const html = r.type === "new_order"
+    ? `
+      <div><b>Order</b> ${r.order_id || ""}</div>
+      <div>Buyer: ${r.buyer_name || "-"}</div>
+      <div>Phone: ${r.buyer_phone || "-"}</div>
+      <div>Address: ${r.buyer_address || "-"}</div>
+      <div>Product: ${translateProductName(r.product_name || "-")}</div>
+      <div>Qty: ${Number(r.qty || 0)}</div>
+      <div>Payment: ${r.payment_method || "Pending Payment"}</div>
+      <div style="color:#777;margin-top:4px">${date}</div>
+    `
+    : (r.type === "wallet_credit" || r.type === "wallet_debit" || r.type === "cod_pending")
+    ? `
+      <div><b>${r.title || "Wallet Update"}</b></div>
+      <div>${r.message || "-"}</div>
+      <div style="color:#777;margin-top:4px">${date}</div>
+    `
+    : `
+      <div><b>${r.title || "Notification"}</b></div>
+      <div>Product: ${translateProductName(r.product_name || "-")}</div>
+      <div>Buyer: ${r.buyer_name || "-"}</div>
+      <div>${r.message || "-"}</div>
+      <div style="color:#777;margin-top:4px">${date}</div>
+    `;
+
+  div.innerHTML = `
+    ${html}
+    ${isHistory ? "" : `
+      <div class="notif-actions">
+        <button class="mark-read">Mark Read</button>
+        <button class="delete-notif">Delete</button>
+      </div>
+    `}
+  `;
+  if(!isHistory){
+    const markBtn = div.querySelector(".mark-read");
+    const deleteBtn = div.querySelector(".delete-notif");
+    if(markBtn){
+      markBtn.addEventListener("click", (e)=>{
+        e.stopPropagation();
+        markRead(r);
+      });
+    }
+    if(deleteBtn){
+      deleteBtn.addEventListener("click", (e)=>{
+        e.stopPropagation();
+        deleteNotif(r, div);
+      });
+    }
+  }
+  return div;
+}
+function openOrderFromNotif(notifId, orderId){
+  if(!orderId) return;
+  const q = new URLSearchParams();
+  q.set("order_id", String(orderId || ""));
+  q.set("notif_id", String(notifId || ""));
+  location.href =
+    "seller-notif-details.html?" + q.toString();
+}
+
+
+function updateBadge(count){
+  const badge = document.getElementById("notifCount");
+  if(count > 0){
+    badge.style.display = "inline-block";
+    badge.textContent = count;
+  }else{
+    badge.style.display = "none";
+  }
+}
+
+function matchNotificationRows(updateQuery, rowOrId){
+  if(!rowOrId || typeof rowOrId === "string"){
+    return updateQuery.eq("id", String(rowOrId || ""));
+  }
+
+  const row = rowOrId;
+  return updateQuery.eq("id", String(row.id || ""));
+}
+
+async function markRead(rowOrId){
+  const query = matchNotificationRows(
+    supa.from("notifications").update({ is_read: true }),
+    rowOrId
+  );
+  await query;
+  await loadNotifications();
+}
+
+async function deleteNotif(row, el){
+  if(el && el.nodeType === 1){
+    el.remove();
+    const listNew = document.getElementById("notifNew");
+    if(listNew && listNew.querySelectorAll(".notif-item").length === 0){
+      listNew.innerHTML = `<div class="empty-notif">No notifications</div>`;
+    }
+  }
+  await supa
+    .from("notifications")
+    .update({ is_deleted: true })
+    .eq("id", row?.id);
+}
+
+async function clearNotificationHistory(){
+  await supa
+    .from("notifications")
+    .update({ is_deleted: true })
+    .eq("receiver_user_id", CURRENT_USER.id);
+  const listNew = document.getElementById("notifNew");
+  const listHistory = document.getElementById("notifHistory");
+  if(listNew) listNew.innerHTML = `<div class="empty-notif">No notifications</div>`;
+  if(listHistory) listHistory.innerHTML = `<div class="empty-notif">No history</div>`;
+  updateBadge(0);
+}
+
+
+function loadPushSeenMap(){
+  try{
+    return JSON.parse(localStorage.getItem(`sellerPushSeen_${CURRENT_USER?.id || "guest"}`) || "{}");
+  }catch(_){
+    return {};
+  }
+}
+
+function savePushSeenMap(map){
+  const entries = Object.entries(map || {})
+    .sort((a,b)=>Number(b[1] || 0) - Number(a[1] || 0))
+    .slice(0, 300);
+  localStorage.setItem(
+    `sellerPushSeen_${CURRENT_USER?.id || "guest"}`,
+    JSON.stringify(Object.fromEntries(entries))
+  );
+}
+
+function showSellerPush(r){
+  if(!r?.id || !("Notification" in window) || Notification.permission !== "granted") return;
+  if(pushSeenMap[r.id]) return;
+
+  const title = r.title || (r.type === "review_comment" ? "New Review Received" : "New Order Received");
+  const body = (r.type === "wallet_credit" || r.type === "wallet_debit" || r.type === "cod_pending")
+    ? (r.message || "Wallet update")
+    : (r.type === "review_comment"
+      ? `Product: ${translateProductName(r.product_name || "-")} | Buyer: ${r.buyer_name || "-"} | Review: ${r.message || "-"}`
+      : `Buyer: ${r.buyer_name || "Customer"} | Address: ${r.buyer_address || "-"} | Product: ${translateProductName(r.product_name || "Product")} | Qty: ${Number(r.qty || 0)} | Payment: ${r.payment_method || "Pending Payment"}`);
+  const notif = new Notification(title, { body });
+  notif.onclick = ()=>{
+    window.focus();
+    if(r.type === "new_order") openOrderFromNotif(r.id, r.order_id);
+  };
+
+  pushSeenMap[r.id] = Date.now();
+  savePushSeenMap(pushSeenMap);
+}
+
+function pushSellerNotifications(rows){
+  const unread = (rows || [])
+    .filter(r=>!r.is_deleted && !r.is_read)
+    .sort((a,b)=>new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+  unread.slice(0, 2).forEach(showSellerPush);
+}
+
+async function fetchSellerNotifications(){
+  return supa
+    .from("notifications")
+    .select("*")
+    .eq("receiver_user_id", CURRENT_USER.id)
+    .in("type", ["new_order", "review_comment", "wallet_credit", "wallet_debit", "cod_pending"])
+    .order("created_at", { ascending:false });
+}
+
+async function fetchSellerProductIds(){
+  const { data, error } = await supa
+    .from("products")
+    .select("id")
+    .eq("owner_id", CURRENT_USER.id)
+    .limit(500);
+  if(error) return [];
+  return [...new Set((data || []).map(p=>p.id).filter(Boolean))];
+}
+
+function subscribeNotifications(){
+  if(notifChannel) supa.removeChannel(notifChannel);
+  if(orderChannel) supa.removeChannel(orderChannel);
+
+  notifChannel = supa
+    .channel("notif-" + CURRENT_USER.id)
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "notifications", filter: `receiver_user_id=eq.${CURRENT_USER.id}` },
+      () => loadNotifications()
+    )
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "notifications", filter: `receiver_user_id=eq.${CURRENT_USER.id}` },
+      () => loadNotifications()
+    )
+    .subscribe();
+
+  orderChannel = supa
+    .channel("orders-watch-" + CURRENT_USER.id)
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "orders" },
+      () => loadNotifications()
+    )
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "orders" },
+      () => loadNotifications()
+    )
+    .subscribe();
+
+  supa
+    .channel("seller-wallet-" + CURRENT_USER.id)
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "sellers", filter: `user_id=eq.${CURRENT_USER.id}` },
+      async () => {
+        const { data: seller } = await supa
+          .from("sellers")
+          .select("wallet,total_sales")
+          .eq("user_id", CURRENT_USER.id)
+          .maybeSingle();
+        if(!seller) return;
+        const walletAmount = Math.max(0, Number(seller.wallet ?? 0));
+        const totalSalesAmount = Number(seller.total_sales ?? 0);
+        wallet.innerHTML = moneyTag(walletAmount, "INR");
+        withdrawCTA.innerHTML = moneyTag(walletAmount, "INR");
+        totalSales.innerHTML = moneyTag(totalSalesAmount, "INR");
+        availableBalance.innerHTML = moneyTag(walletAmount, "INR");
+      }
+    )
+    .subscribe();
+}
+</script>
+
+</body>
+</html>
+

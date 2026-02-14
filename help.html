@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Help & Support</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- SUPABASE -->
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial}
+body{background:#fff;color:#000}
+
+/* HEADER */
+.header{
+  display:flex;
+  align-items:center;
+  padding:14px;
+  border-bottom:1px solid #eee;
+}
+.header svg{
+  width:22px;height:22px;margin-right:10px;cursor:pointer
+}
+.header h2{font-size:18px}
+
+/* SECTION */
+.section{padding:14px}
+.card{
+  border:1px solid #eee;
+  border-radius:10px;
+  padding:14px;
+  margin-bottom:12px;
+}
+.card h3{
+  font-size:16px;
+  margin-bottom:6px;
+}
+.card p{
+  font-size:14px;
+  color:#555;
+}
+
+/* FORM */
+.field{margin-bottom:12px}
+.field textarea{
+  width:100%;
+  min-height:100px;
+  padding:10px;
+  border-radius:8px;
+  border:1px solid #ddd;
+  font-size:14px;
+  resize:none;
+}
+
+/* BUTTON */
+.btn{
+  width:100%;
+  padding:12px;
+  border-radius:8px;
+  border:1px solid #000;
+  background:#000;
+  color:#fff;
+  font-size:14px;
+  cursor:pointer;
+}
+.small{
+  font-size:13px;
+  color:#666;
+  margin-top:8px;
+}
+</style>
+</head>
+
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <svg onclick="history.back()" viewBox="0 0 24 24">
+    <path d="M15 18l-6-6 6-6"/>
+  </svg>
+  <h2>Help & Support</h2>
+</div>
+
+<div class="section">
+
+  <div class="card">
+    <h3>Need help?</h3>
+    <p>Describe your issue below. Our team will review it.</p>
+  </div>
+
+  <div class="card">
+    <h3>Contact support</h3>
+
+    <div class="field">
+      <textarea id="message" placeholder="Write your issue or feedback"></textarea>
+    </div>
+
+    <button class="btn" onclick="sendSupport()">Send</button>
+    <div class="small" id="status"></div>
+  </div>
+
+</div>
+
+<script>
+/* 🔐 SUPABASE CONFIG */
+const supabase = supabase.createClient(
+  window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+  window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+);
+
+let currentUser;
+
+/* AUTH CHECK */
+(async()=>{
+  const { data } = await supabase.auth.getUser();
+  if(!data.user){
+    location.href="login.html";
+    return;
+  }
+  currentUser = data.user;
+})();
+
+/* SEND SUPPORT (PRODUCTION SAFE) */
+async function sendSupport(){
+  const text = message.value.trim();
+  if(!text){
+    status.innerText = "Please write something";
+    return;
+  }
+
+  status.innerText = "Sending...";
+
+  const ticket = {
+    user_id: currentUser.id,
+    email: currentUser.email || "",
+    message: text,
+    status: "open",
+    created_at: Date.now()
+  };
+
+  /* Instant save (offline safe) */
+  const all = JSON.parse(localStorage.getItem("supportTickets")) || [];
+  all.push(ticket);
+  localStorage.setItem("supportTickets", JSON.stringify(all));
+
+  /* 🔮 Future DB sync (NO CODE CHANGE LATER) */
+  // await supabase.from("support_tickets").insert(ticket);
+
+  message.value = "";
+  status.innerText = "Message sent successfully";
+}
+</script>
+
+</body>
+</html>

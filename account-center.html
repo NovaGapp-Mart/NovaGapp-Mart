@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Account Center</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- SUPABASE -->
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial}
+body{background:#f6f6f6;color:#000}
+
+/* HEADER */
+.header{
+  display:flex;
+  align-items:center;
+  padding:14px;
+  background:#fff;
+  border-bottom:1px solid #eee;
+}
+.header svg{width:22px;height:22px;margin-right:10px;cursor:pointer}
+.header h2{font-size:18px}
+
+/* SECTION */
+.section{padding:14px}
+
+/* PROFILE CARD */
+.profile-card{
+  background:#fff;
+  border-radius:14px;
+  padding:18px;
+  margin-bottom:16px;
+  text-align:center;
+}
+.avatar{
+  width:90px;
+  height:90px;
+  margin:0 auto 10px;
+}
+.avatar img{
+  width:90px;
+  height:90px;
+  border-radius:50%;
+  object-fit:cover;
+  border:2px solid #ddd;
+}
+.change{
+  font-size:13px;
+  color:#0095f6;
+  cursor:pointer;
+}
+
+/* FORM CARD */
+.card{
+  background:#fff;
+  border-radius:14px;
+  padding:16px;
+  margin-bottom:16px;
+}
+.card h3{font-size:16px;margin-bottom:12px}
+
+/* FORM */
+.field{margin-bottom:14px}
+.field label{
+  display:block;
+  font-size:13px;
+  color:#666;
+  margin-bottom:5px;
+}
+.field input, .field textarea{
+  width:100%;
+  padding:10px;
+  border-radius:10px;
+  border:1px solid #ddd;
+  font-size:14px;
+}
+textarea{resize:none;height:70px}
+
+/* BUTTON */
+.btn{
+  width:100%;
+  padding:12px;
+  border-radius:10px;
+  border:none;
+  background:#000;
+  color:#fff;
+  font-size:14px;
+  cursor:pointer;
+}
+.btn.outline{
+  background:#fff;
+  border:1px solid #000;
+  color:#000;
+}
+.small{
+  font-size:13px;
+  color:#009900;
+  margin-top:8px;
+  text-align:center;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+  <svg onclick="history.back()" viewBox="0 0 24 24">
+    <path d="M15 18l-6-6 6-6"/>
+  </svg>
+  <h2>Account Center</h2>
+</div>
+
+<div class="section">
+
+  <!-- PROFILE PHOTO -->
+  <div class="profile-card">
+    <div class="avatar">
+      <img id="profilePic" src="images/user.png">
+    </div>
+    <div class="change" onclick="pickPhoto()">Change profile photo</div>
+    <input type="file" id="photoInput" accept="image/*" hidden>
+  </div>
+
+  <!-- PROFILE INFO -->
+  <div class="card">
+    <h3>Profile information</h3>
+
+    <div class="field">
+      <label>Username</label>
+      <input id="username">
+    </div>
+
+    <button class="btn" onclick="saveProfile()">Save changes</button>
+    <div class="small" id="status"></div>
+  </div>
+
+  <!-- ACCOUNT -->
+  <div class="card">
+    <h3>Account</h3>
+
+    <div class="field">
+      <label>Email</label>
+      <input id="email" disabled>
+    </div>
+
+    <button class="btn outline" onclick="logout()">Log out</button>
+  </div>
+
+</div>
+
+<script>
+/* 🔐 SUPABASE CONFIG */
+const supabase = supabase.createClient(
+  window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+  window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+);
+
+let currentUser;
+
+/* AUTH + LOAD */
+(async()=>{
+  const { data } = await supabase.auth.getUser();
+  if(!data.user){
+    location.href="login.html";
+    return;
+  }
+
+  currentUser = data.user;
+  email.value = currentUser.email || "";
+
+  const { data: row } = await supabase
+    .from("users")
+    .select("user_id,username,email,photo")
+    .eq("user_id", currentUser.id)
+    .maybeSingle();
+
+  const fallbackName =
+    currentUser.user_metadata?.full_name ||
+    currentUser.user_metadata?.name ||
+    (currentUser.email ? currentUser.email.split("@")[0] : "user");
+
+  let userRow = row;
+  if(!userRow){
+    const { data: inserted } = await supabase
+      .from("users")
+      .insert({
+        user_id: currentUser.id,
+        email: currentUser.email,
+        username: fallbackName,
+        photo: currentUser.user_metadata?.avatar_url || currentUser.user_metadata?.picture || null
+      })
+      .select("user_id,username,email,photo")
+      .single();
+
+    userRow = inserted;
+  }
+
+  username.value = userRow?.username || fallbackName;
+  if(userRow?.photo) profilePic.src = userRow.photo;
+})();
+
+/* PROFILE PHOTO */
+function pickPhoto(){ photoInput.click(); }
+
+photoInput.onchange=e=>{
+  const file=e.target.files[0];
+  if(!file) return;
+
+  const reader=new FileReader();
+  reader.onload=()=>{
+    profilePic.src=reader.result;
+
+    // Photo stored directly in users.photo (text)
+  };
+  reader.readAsDataURL(file);
+};
+
+/* SAVE PROFILE */
+async function saveProfile(){
+  const payload={
+    username: username.value.trim().toLowerCase(),
+    photo: profilePic.src
+  };
+
+  const { error } = await supabase
+    .from("users")
+    .update(payload)
+    .eq("user_id", currentUser.id);
+
+  status.innerText = error ? "Update failed" : "Profile updated successfully";
+}
+
+/* LOGOUT */
+async function logout(){
+  await supabase.auth.signOut();
+  location.href="login.html";
+}
+</script>
+
+</body>
+</html>

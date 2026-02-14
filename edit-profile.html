@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Edit Profile</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+
+  <script>
+    window.supabase = supabase.createClient(
+      window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+      window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+    );
+  </script>
+
+  <script src="global.js"></script>
+
+  <style>
+    .edit-wrap{ padding:20px }
+    .avatar-big{
+      width:120px;
+      height:120px;
+      border-radius:50%;
+      object-fit:cover;
+      display:block;
+      margin:10px auto;
+      background:#f2f2f2;
+    }
+    .edit-wrap input{
+      width:100%;
+      padding:12px;
+      margin-top:12px;
+      border-radius:8px;
+      border:1px solid #ddd;
+    }
+    .edit-wrap textarea{
+      width:100%;
+      padding:12px;
+      margin-top:12px;
+      border-radius:8px;
+      border:1px solid #ddd;
+      resize:vertical;
+      min-height:90px;
+    }
+  </style>
+</head>
+
+<body>
+
+<header class="top">
+  <span class="company-name">Edit Profile</span>
+</header>
+
+<div class="edit-wrap">
+
+  <img id="avatar" class="avatar-big"
+    src="https://img.icons8.com/fluency/96/user-male-circle.png"/>
+
+  <input type="file" id="photoFile" accept="image/*">
+  <input id="username" placeholder="Username">
+  <input id="fullName" placeholder="Full Name">
+  <textarea id="bio" placeholder="Bio"></textarea>
+  <input id="contactInfo" placeholder="Contact Info (phone/email)">
+
+  <button id="saveBtn" class="login-btn" style="margin-top:20px" disabled>
+    Save Changes
+  </button>
+
+</div>
+
+<script>
+const supa = window.supabase;
+
+const avatar = document.getElementById("avatar");
+const photoFile = document.getElementById("photoFile");
+const username = document.getElementById("username");
+const fullName = document.getElementById("fullName");
+const bio = document.getElementById("bio");
+const contactInfo = document.getElementById("contactInfo");
+const saveBtn = document.getElementById("saveBtn");
+
+let CURRENT_USER = null;
+let NEW_PHOTO_FILE = null;
+
+/* 🔐 LOAD PROFILE */
+async function loadProfile(){
+
+  const { data } = await supa.auth.getSession();
+  if(!data.session){
+    location.href = "login.html";
+    return;
+  }
+
+  CURRENT_USER = data.session.user;
+  saveBtn.disabled = false;
+
+  const { data: profile } = await supa
+    .from("users")
+    .select("username, photo, full_name, bio, contact_info")
+    .eq("user_id", CURRENT_USER.id)
+    .maybeSingle();
+
+  const metaName =
+    CURRENT_USER.user_metadata?.full_name ||
+    CURRENT_USER.user_metadata?.name ||
+    "";
+  const metaPhoto =
+    CURRENT_USER.user_metadata?.avatar_url ||
+    CURRENT_USER.user_metadata?.picture ||
+    null;
+
+  if(profile){
+    username.value = profile.username || metaName || "";
+    fullName.value = profile.full_name || metaName || "";
+    bio.value = profile.bio || "";
+    contactInfo.value = profile.contact_info || "";
+    if(profile.photo) avatar.src = profile.photo;
+    else if(metaPhoto) avatar.src = metaPhoto;
+  }else{
+    username.value = metaName || "";
+    fullName.value = metaName || "";
+    if(metaPhoto) avatar.src = metaPhoto;
+  }
+}
+
+/* 📸 PREVIEW */
+photoFile.onchange = e=>{
+  NEW_PHOTO_FILE = e.target.files[0];
+  if(NEW_PHOTO_FILE){
+    avatar.src = URL.createObjectURL(NEW_PHOTO_FILE);
+  }
+};
+
+/* 💾 SAVE */
+saveBtn.onclick = async ()=>{
+
+  const usernameVal = username.value.trim();
+  const fullNameVal = fullName.value.trim();
+  const bioVal = bio.value.trim();
+  const contactInfoVal = contactInfo.value.trim();
+  if(!usernameVal){
+    alert("Username required");
+    return;
+  }
+
+  let photoURL = null;
+
+  if(NEW_PHOTO_FILE){
+    photoURL = await new Promise((resolve, reject)=>{
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error("Photo read failed"));
+      reader.readAsDataURL(NEW_PHOTO_FILE);
+    });
+  }
+
+  const payload = {
+    username: usernameVal,
+    full_name: fullNameVal,
+    bio: bioVal,
+    contact_info: contactInfoVal
+  };
+
+  if(photoURL) payload.photo = photoURL;
+
+  /* ✅ FIRST TRY UPDATE (CORRECT WAY) */
+  const { error, data } = await supa
+    .from("users")
+    .update(payload)
+    .eq("user_id", CURRENT_USER.id)
+    .select();
+
+  /* ✅ FALLBACK: AGAR ROW NA HO TO INSERT */
+  if(!data || data.length === 0){
+    const insertPayload = {
+      user_id: CURRENT_USER.id,
+      ...payload
+    };
+
+    const { error: insertError } = await supa
+      .from("users")
+      .insert(insertPayload);
+
+    if(insertError){
+      alert(insertError.message);
+      return;
+    }
+  }
+
+  if(error){
+    alert(error.message);
+    return;
+  }
+
+  alert("Profile updated successfully");
+  location.href = "account.html";
+};
+
+loadProfile();
+</script>
+
+</body>
+</html>

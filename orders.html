@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>My Orders</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body{margin:0;font-family:Arial;background:#f4f6f8}
+.header{background:#fff;padding:15px;border-bottom:1px solid #ddd;font-weight:bold}
+.order{background:#fff;margin:10px;padding:12px;display:flex;gap:12px;border-radius:10px}
+.order img{width:70px;height:70px;object-fit:cover;border-radius:6px}
+.order{cursor:pointer}
+.name{font-weight:bold}
+.meta{font-size:13px;color:#666}
+.price{font-weight:bold;margin-top:4px}
+.status{font-size:13px;font-weight:600;text-transform:capitalize}
+.status.pending{color:#6b7280}
+.status.approved{color:#b45309}
+.status.rejected{color:#b91c1c}
+.status.progress{color:#0369a1}
+.status.done{color:#15803d}
+.empty{text-align:center;padding:60px;color:#666}
+.remove-btn{
+  margin-top:6px;border:none;background:#ef4444;color:#fff;
+  border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer
+}
+</style>
+
+<!-- ðŸ”¥ SUPABASE -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<script src="global.js"></script>
+</head>
+
+<body>
+
+<div class="header">My Orders</div>
+<div id="ordersBox"></div>
+
+<script>
+const supa =
+  window.supa ||
+  window.supabase?.createClient(
+    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+  );
+
+const box = document.getElementById("ordersBox");
+let HIDDEN_IDS = new Set();
+let HIDDEN_KEY = "hiddenCancelledOrders_guest";
+function openOrder(orderId){
+  if(!orderId) return;
+  location.href = "order-details.html?order_id=" + encodeURIComponent(orderId);
+}
+function loadHiddenIds(){
+  try{
+    HIDDEN_IDS = new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || "[]"));
+  }catch{
+    HIDDEN_IDS = new Set();
+  }
+}
+function hideCancelledOrder(rowKey, e){
+  if(e){
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  if(!rowKey) return;
+  HIDDEN_IDS.add(rowKey);
+  localStorage.setItem(HIDDEN_KEY, JSON.stringify([...HIDDEN_IDS]));
+  renderOrders(currentOrders);
+}
+function isRemovableStatus(status){
+  const s = String(status || "").trim().toLowerCase().replaceAll(" ", "_");
+  return ["cancelled", "rejected", "declined", "order_rejected"].includes(s);
+}
+
+function normalizeStatus(status){
+  return String(status || "").trim().toLowerCase().replaceAll(" ", "_");
+}
+
+function itemStatus(item, order){
+  return normalizeStatus(order?.status || "pending");
+}
+
+function statusText(status){
+  const s = normalizeStatus(status);
+  if(!s) return "Pending";
+  return s.replaceAll("_", " ");
+}
+
+function statusClass(status){
+  const s = normalizeStatus(status);
+  if(["rejected","declined","cancelled","order_rejected"].includes(s)) return "rejected";
+  if(["approved","seller_approved"].includes(s)) return "approved";
+  if(["shipped","hub_reached","out_for_delivery"].includes(s)) return "progress";
+  if(["delivered"].includes(s)) return "done";
+  return "pending";
+}
+let currentOrders = [];
+function renderOrders(orders){
+  currentOrders = Array.isArray(orders) ? orders : [];
+  box.innerHTML = "";
+
+  const rows = [];
+  currentOrders.forEach(o=>{
+    const items = Array.isArray(o.items) && o.items.length ? o.items : [{}];
+    items.forEach((i, idx)=>{
+      const rowKey = `${o.id}::${i?.id || idx}`;
+      if(HIDDEN_IDS.has(rowKey)) return;
+      rows.push({ order: o, item: i, rowKey });
+    });
+  });
+
+  if(rows.length === 0){
+    box.innerHTML = `
+      <div class="empty">
+        <h3>No orders yet</h3>
+        <p>Your real orders will appear here</p>
+      </div>
+    `;
+    return;
+  }
+
+  rows.forEach(({ order, item, rowKey })=>{
+    const image = (Array.isArray(item.images) && item.images[0]) || item.image || "images/no-image.jpg";
+    const qty = Number(item.qty || 1);
+    const lineTotal = (Number(item.price || 0) * qty) || Number(order.total || 0);
+    const rowStatus = itemStatus(item, order);
+    const canRemove = isRemovableStatus(rowStatus);
+    const statusCls = statusClass(rowStatus);
+    const statusLabel = statusText(rowStatus);
+    box.innerHTML += `
+      <div class="order" onclick="location.href='order-details.html?order_id=${encodeURIComponent(order.id)}'">
+        <img src="${image}">
+        <div>
+          <div class="name">${translateProductName(item.name || "Order Item")}</div>
+          <div class="meta">
+            Order ID: ${order.id}<br>
+            Qty: ${qty}<br>
+            ${new Date(order.created_at).toLocaleDateString()}
+          </div>
+          <div class="price">${moneyTag(lineTotal, item.currency || order.currency || "USD")}</div>
+          <div class="status ${statusCls}">${statusLabel}</div>
+          ${canRemove ? `<button class="remove-btn" onclick="hideCancelledOrder('${rowKey}', event)">Remove</button>` : ""}
+        </div>
+      </div>
+    `;
+  });
+}
+
+/* ðŸ” AUTH + ORDERS */
+(async function(){
+  const { data } = await supa.auth.getSession();
+  loadHiddenIds();
+
+  // ðŸ”´ GUEST â†’ show local orders only
+  if(!data.session){
+    box.innerHTML = `
+      <div class="empty">
+        <h3>Please login to view orders</h3>
+      </div>
+    `;
+    return;
+  }
+
+  const user = data.session.user;
+  HIDDEN_KEY = "hiddenCancelledOrders_" + user.id;
+  loadHiddenIds();
+
+  /* ðŸ”¥ REAL ORDERS FROM SUPABASE */
+  const { data: orders, error } = await supa
+    .from("orders")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending:false });
+
+  if(error){
+    console.error(error);
+    box.innerHTML = `
+      <div class="empty">
+        <h3>Failed to load orders</h3>
+      </div>
+    `;
+    return;
+  }
+
+  renderOrders(orders || []);
+  subscribeOrderChanges(user.id);
+})();
+
+let ordersChannel = null;
+function subscribeOrderChanges(userId){
+  if(!userId) return;
+  if(ordersChannel){
+    supa.removeChannel(ordersChannel);
+  }
+  ordersChannel = supa
+    .channel("buyer-orders-" + userId)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "orders", filter: `user_id=eq.${userId}` },
+      async ()=>{
+        const { data: latest, error } = await supa
+          .from("orders")
+          .select("*")
+          .eq("user_id", userId)
+          .order("created_at", { ascending:false });
+        if(error){
+          console.error(error);
+          return;
+        }
+        renderOrders(latest || []);
+      }
+    )
+    .subscribe();
+}
+
+</script>
+
+</body>
+</html>
+

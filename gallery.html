@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Upload - NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<script src="social.js"></script>
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:Arial}
+body{background:#f7f7f7;color:#111;min-height:100vh}
+
+.topbar{
+  height:54px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 12px;
+  border-bottom:1px solid #e5e5e5;
+  background:#fff;
+  position:sticky;
+  top:0;
+  z-index:10;
+}
+.topbar .title{font-weight:700}
+.back-btn{
+  border:none;background:#111;color:#fff;border-radius:20px;
+  padding:6px 12px;font-size:12px;cursor:pointer;
+}
+.spacer{width:60px}
+
+.container{max-width:640px;margin:18px auto;padding:0 14px}
+.card{
+  background:#fff;border-radius:16px;padding:16px;
+  box-shadow:0 10px 24px rgba(0,0,0,0.08);
+}
+.type-pill{
+  display:inline-block;background:#111;color:#fff;
+  padding:4px 10px;border-radius:999px;font-size:12px;margin-bottom:8px;
+}
+.hint{color:#666;font-size:13px;margin-bottom:12px}
+
+.uploader{
+  border:2px dashed #ccc;border-radius:14px;padding:18px;
+  text-align:center;cursor:pointer;background:#fafafa;
+}
+.uploader:hover{border-color:#ff6a00}
+.uploader input{display:none}
+.uploader .label{font-weight:600}
+.uploader small{display:block;color:#777;margin-top:6px}
+
+.preview{margin-top:14px}
+.preview img,.preview video{
+  width:100%;border-radius:12px;background:#000;
+}
+.preview-track{
+  display:flex;
+  gap:8px;
+  overflow-x:auto;
+  scroll-snap-type:x mandatory;
+  -ms-overflow-style:none;
+  scrollbar-width:none;
+}
+.preview-track::-webkit-scrollbar{display:none}
+.preview-track img,
+.preview-track video{
+  flex:0 0 100%;
+  scroll-snap-align:start;
+  aspect-ratio:1/1;
+  object-fit:cover;
+}
+.post-tools{
+  display:none;
+  gap:8px;
+  margin-top:10px;
+}
+.post-tools.show{display:flex}
+.mini-btn{
+  border:1px solid #ddd;
+  background:#fff;
+  color:#333;
+  border-radius:999px;
+  padding:6px 10px;
+  font-size:12px;
+  cursor:pointer;
+}
+.mini-btn.danger{
+  border-color:#ffb3b3;
+  color:#b30000;
+}
+
+.fields{margin-top:16px;display:flex;flex-direction:column;gap:10px}
+.field label{font-size:12px;color:#555}
+.field input,.field textarea{
+  width:100%;padding:10px;border:1px solid #ddd;border-radius:10px;
+  font-size:13px;margin-top:6px;
+}
+.field textarea{min-height:90px;resize:vertical}
+
+.upload-btn{
+  width:100%;margin-top:16px;padding:12px;border:none;border-radius:28px;
+  background:#ff6a00;color:#fff;font-weight:700;font-size:14px;cursor:pointer;
+}
+.upload-btn:disabled{background:#ddd;color:#999;cursor:not-allowed}
+
+.note{margin-top:10px;color:#777;font-size:12px}
+.music-selected{
+  margin-top:8px;
+  padding:8px 10px;
+  border:1px solid #e6e6e6;
+  border-radius:10px;
+  background:#fafafa;
+  font-size:12px;
+  color:#333;
+}
+.music-selected strong{display:block;font-size:13px;color:#111}
+.music-search-backdrop{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.45);
+  opacity:0;
+  pointer-events:none;
+  transition:opacity 0.2s;
+  z-index:65;
+}
+.music-search-modal{
+  position:fixed;
+  left:50%;
+  top:50%;
+  transform:translate(-50%, -40%);
+  width:min(92vw, 560px);
+  max-height:78vh;
+  background:#fff;
+  border-radius:16px;
+  box-shadow:0 20px 40px rgba(0,0,0,0.25);
+  display:flex;
+  flex-direction:column;
+  opacity:0;
+  pointer-events:none;
+  transition:transform 0.2s, opacity 0.2s;
+  z-index:66;
+}
+.music-search-backdrop.show{
+  opacity:1;
+  pointer-events:auto;
+}
+.music-search-modal.show{
+  transform:translate(-50%, -50%);
+  opacity:1;
+  pointer-events:auto;
+}
+.music-search-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:12px;
+  border-bottom:1px solid #eee;
+  font-weight:700;
+}
+.music-search-close{
+  border:none;
+  border-radius:999px;
+  background:#f2f2f2;
+  padding:6px 10px;
+  font-size:12px;
+  cursor:pointer;
+}
+.music-search-bar{
+  display:flex;
+  gap:8px;
+  padding:12px;
+  border-bottom:1px solid #eee;
+}
+.music-search-bar input{
+  flex:1;
+  border:1px solid #ddd;
+  border-radius:10px;
+  padding:10px;
+  font-size:13px;
+}
+.music-search-bar button{
+  border:none;
+  border-radius:10px;
+  background:#111;
+  color:#fff;
+  padding:0 14px;
+  cursor:pointer;
+  font-size:12px;
+  font-weight:700;
+}
+.music-results{
+  overflow:auto;
+  padding:6px 10px 12px;
+}
+.music-empty{
+  padding:24px 8px;
+  text-align:center;
+  color:#777;
+  font-size:12px;
+}
+.music-result-item{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:10px 4px;
+  border-bottom:1px solid #f0f0f0;
+}
+.music-result-item:last-child{border-bottom:none}
+.music-result-art{
+  width:44px;
+  height:44px;
+  border-radius:8px;
+  object-fit:cover;
+  background:#efefef;
+}
+.music-result-meta{
+  flex:1;
+  min-width:0;
+}
+.music-result-title{
+  font-size:13px;
+  font-weight:700;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.music-result-sub{
+  font-size:12px;
+  color:#666;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.music-result-actions{
+  display:flex;
+  gap:6px;
+}
+.music-result-actions button{
+  border:1px solid #ddd;
+  border-radius:999px;
+  background:#fff;
+  padding:6px 10px;
+  font-size:11px;
+  cursor:pointer;
+}
+.music-result-actions button.apply{
+  background:#111;
+  color:#fff;
+  border-color:#111;
+}
+
+.progress-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,0.5);
+  display:none;align-items:center;justify-content:center;z-index:50;
+}
+.progress-overlay.show{display:flex}
+.progress-card{
+  width:86%;max-width:360px;background:#fff;border-radius:14px;
+  padding:18px;text-align:center;
+}
+.progress-title{font-weight:700;margin-bottom:10px}
+.progress-bar{
+  height:8px;border-radius:999px;background:#eee;overflow:hidden;margin:10px 0;
+}
+.progress-fill{
+  height:100%;width:0;background:#ff6a00;transition:width 0.2s;
+}
+.progress-text{font-size:12px;color:#666}
+</style>
+</head>
+
+<body>
+
+<div class="topbar">
+  <button class="back-btn" onclick="history.back()">Back</button>
+  <div class="title" id="pageTitle">Upload</div>
+  <div class="spacer"></div>
+</div>
+
+<div class="container">
+  <div class="card">
+    <div class="type-pill" id="typePill">Reel</div>
+    <div class="hint" id="hintText"></div>
+
+    <label class="uploader" id="uploader">
+      <div class="label" id="uploadLabel">Tap to choose media</div>
+      <small id="uploadSub">Open gallery or files</small>
+      <input type="file" id="fileInput">
+    </label>
+
+    <div class="preview" id="preview"></div>
+    <div class="post-tools" id="postTools">
+      <button type="button" class="mini-btn" id="addMoreBtn">Add More Media</button>
+      <button type="button" class="mini-btn danger" id="clearMediaBtn">Clear Media</button>
+    </div>
+
+    <div class="fields">
+      <div class="field">
+        <label for="titleInput">Title (optional)</label>
+        <input type="text" id="titleInput" placeholder="Add a title">
+      </div>
+      <div class="field">
+        <label for="descInput">Description (optional)</label>
+        <textarea id="descInput" placeholder="Write a description"></textarea>
+      </div>
+      <div class="field">
+        <label for="keywordsInput">Keywords (optional)</label>
+        <input type="text" id="keywordsInput" placeholder="e.g. travel, vlog, food">
+      </div>
+      <div class="field">
+        <label for="thumbInput">Thumbnail (optional)</label>
+        <input type="file" id="thumbInput" accept="image/*">
+      </div>
+      <div class="field" id="musicField">
+        <label>Music (optional, for post)</label>
+        <div class="post-tools show" style="margin-top:6px;">
+          <button type="button" class="mini-btn" id="musicSearchBtn">Search Music</button>
+          <button type="button" class="mini-btn danger" id="musicClearBtn">Remove Music</button>
+        </div>
+        <div class="music-selected" id="musicSelected">No music selected</div>
+      </div>
+    </div>
+
+    <button class="upload-btn" id="uploadBtn" disabled>Upload</button>
+    <div class="note" id="noteText"></div>
+  </div>
+</div>
+
+<div class="progress-overlay" id="progressOverlay">
+  <div class="progress-card">
+    <div class="progress-title" id="progressTitle">Uploading...</div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+    <div class="progress-text" id="progressText">Starting...</div>
+  </div>
+</div>
+
+<div class="music-search-backdrop" id="musicSearchBackdrop"></div>
+<div class="music-search-modal" id="musicSearchModal">
+  <div class="music-search-head">
+    <span>Search Music</span>
+    <button type="button" class="music-search-close" id="musicSearchClose">Close</button>
+  </div>
+  <div class="music-search-bar">
+    <input type="text" id="musicSearchInput" placeholder="Search songs, artist...">
+    <button type="button" id="musicSearchRun">Search</button>
+  </div>
+  <div class="music-results" id="musicResults"></div>
+</div>
+
+<script>
+const fileInput = document.getElementById("fileInput");
+const thumbInput = document.getElementById("thumbInput");
+const uploadBtn = document.getElementById("uploadBtn");
+const preview = document.getElementById("preview");
+const uploadLabel = document.getElementById("uploadLabel");
+const uploadSub = document.getElementById("uploadSub");
+const noteText = document.getElementById("noteText");
+const pageTitle = document.getElementById("pageTitle");
+const typePill = document.getElementById("typePill");
+const hintText = document.getElementById("hintText");
+const postTools = document.getElementById("postTools");
+const addMoreBtn = document.getElementById("addMoreBtn");
+const clearMediaBtn = document.getElementById("clearMediaBtn");
+const musicField = document.getElementById("musicField");
+const musicSearchBtn = document.getElementById("musicSearchBtn");
+const musicClearBtn = document.getElementById("musicClearBtn");
+const musicSelected = document.getElementById("musicSelected");
+const musicSearchBackdrop = document.getElementById("musicSearchBackdrop");
+const musicSearchModal = document.getElementById("musicSearchModal");
+const musicSearchClose = document.getElementById("musicSearchClose");
+const musicSearchInput = document.getElementById("musicSearchInput");
+const musicSearchRun = document.getElementById("musicSearchRun");
+const musicResults = document.getElementById("musicResults");
+const progressOverlay = document.getElementById("progressOverlay");
+const progressFill = document.getElementById("progressFill");
+const progressText = document.getElementById("progressText");
+const progressTitle = document.getElementById("progressTitle");
+
+const titleInput = document.getElementById("titleInput");
+const descInput = document.getElementById("descInput");
+const keywordsInput = document.getElementById("keywordsInput");
+
+const TYPE_CONFIG = {
+  reel:{
+    label:"Reel",
+    accept:"video/*",
+    hint:"9:16 vertical video, max 2 minutes.",
+    bucket:"reels",
+    redirect:"reel.html",
+    maxDuration:120,
+    aspect:9/16,
+    tolerance:0.18
+  },
+  long:{
+    label:"Long Video",
+    accept:"video/*",
+    hint:"16:9 horizontal video, no time limit.",
+    bucket:"long_videos",
+    redirect:"m-video.html",
+    aspect:16/9,
+    tolerance:0.2
+  },
+  post:{
+    label:"Post",
+    accept:"image/*,video/*",
+    hint:"Photo/video post. You can select multiple media.",
+    bucket:"posts",
+    redirect:"post.html"
+  },
+  story:{
+    label:"Story",
+    accept:"image/*,video/*",
+    hint:"Photo or video. Stories disappear after 24 hours.",
+    bucket:"stories",
+    redirect:"post.html"
+  }
+};
+
+const params = new URLSearchParams(location.search);
+const typeKey = (params.get("type") || "reel").toLowerCase();
+const config = TYPE_CONFIG[typeKey] || TYPE_CONFIG.reel;
+
+pageTitle.textContent = config.label + " Upload";
+typePill.textContent = config.label;
+hintText.textContent = config.hint;
+fileInput.accept = config.accept;
+fileInput.multiple = typeKey === "post";
+uploadBtn.textContent = "Upload " + config.label;
+if(postTools) postTools.classList.toggle("show", typeKey === "post");
+if(musicField) musicField.style.display = typeKey === "post" ? "block" : "none";
+if(uploadSub){
+  uploadSub.textContent = typeKey === "post"
+    ? "Tap multiple times to keep adding media"
+    : "Open gallery or files";
+}
+
+let selectedFiles = [];
+let selectedMeta = null;
+let selectedIsVideo = false;
+let previewUrls = [];
+let selectedMusicMeta = null;
+let musicSearchResults = [];
+let activeMusicPreviewAudio = null;
+const MUSIC_MARKER = "__NOVA_MUSIC__";
+renderSelectedMusic();
+
+function escapeHtml(value){
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function releasePreviewUrls(){
+  previewUrls.forEach(url => {
+    try{ URL.revokeObjectURL(url); }catch(_){}
+  });
+  previewUrls = [];
+}
+
+function fileKey(file){
+  return [file?.name || "", file?.size || 0, file?.lastModified || 0, file?.type || ""].join("|");
+}
+
+function mergeUniqueFiles(existing, incoming){
+  const result = [...(existing || [])];
+  const seen = new Set(result.map(fileKey));
+  (incoming || []).forEach(file => {
+    const key = fileKey(file);
+    if(seen.has(key)) return;
+    seen.add(key);
+    result.push(file);
+  });
+  return result;
+}
+
+function toBase64Utf8(value){
+  const utf8 = encodeURIComponent(String(value || "")).replace(/%([0-9A-F]{2})/g, (_, hex) => {
+    return String.fromCharCode(parseInt(hex, 16));
+  });
+  return btoa(utf8);
+}
+
+function appendMusicInKeywords(rawKeywords, musicMeta){
+  const base = String(rawKeywords || "").trim();
+  if(!musicMeta || !musicMeta.url){
+    return base;
+  }
+  const encoded = toBase64Utf8(JSON.stringify({
+    url: musicMeta.url,
+    title: musicMeta.title || "",
+    artist: musicMeta.artist || ""
+  }));
+  const marker = MUSIC_MARKER + ":" + encoded;
+  return base ? `${base}\n${marker}` : marker;
+}
+
+function renderSelectedMusic(){
+  if(!musicSelected) return;
+  if(!selectedMusicMeta){
+    musicSelected.textContent = "No music selected";
+    if(musicClearBtn) musicClearBtn.style.display = "none";
+    return;
+  }
+  if(musicClearBtn) musicClearBtn.style.display = "inline-block";
+  const title = escapeHtml(selectedMusicMeta.title || "Music");
+  const artist = escapeHtml(selectedMusicMeta.artist || "Unknown Artist");
+  musicSelected.innerHTML = `<strong>${title}</strong>${artist}`;
+}
+
+function stopMusicPreview(){
+  if(activeMusicPreviewAudio){
+    activeMusicPreviewAudio.pause();
+    activeMusicPreviewAudio = null;
+  }
+}
+
+function openMusicSearch(){
+  musicSearchBackdrop.classList.add("show");
+  musicSearchModal.classList.add("show");
+  document.body.style.overflow = "hidden";
+  if(musicSearchInput){
+    setTimeout(() => musicSearchInput.focus(), 20);
+  }
+}
+
+function closeMusicSearch(){
+  musicSearchModal.classList.remove("show");
+  musicSearchBackdrop.classList.remove("show");
+  document.body.style.overflow = "";
+  stopMusicPreview();
+}
+
+async function searchMusicCatalog(term){
+  const q = String(term || "").trim();
+  if(!q) return [];
+  const url = "https://itunes.apple.com/search?media=music&entity=song&limit=30&term=" + encodeURIComponent(q);
+  const res = await fetch(url);
+  if(!res.ok){
+    throw new Error("music_search_failed");
+  }
+  const payload = await res.json();
+  const rows = Array.isArray(payload?.results) ? payload.results : [];
+  return rows
+    .filter(row => row && row.previewUrl)
+    .map(row => ({
+      title: String(row.trackName || "Unknown"),
+      artist: String(row.artistName || "Unknown Artist"),
+      previewUrl: String(row.previewUrl || ""),
+      artwork: String(row.artworkUrl60 || row.artworkUrl100 || "")
+    }));
+}
+
+function renderMusicResults(list){
+  const rows = Array.isArray(list) ? list : [];
+  if(!rows.length){
+    musicResults.innerHTML = "<div class='music-empty'>No songs found.</div>";
+    return;
+  }
+  const html = rows.map((row, index) => `
+    <div class="music-result-item">
+      <img class="music-result-art" src="${row.artwork ? escapeHtml(row.artwork) : ""}" alt="">
+      <div class="music-result-meta">
+        <div class="music-result-title">${escapeHtml(row.title)}</div>
+        <div class="music-result-sub">${escapeHtml(row.artist)}</div>
+      </div>
+      <div class="music-result-actions">
+        <button type="button" data-music-preview="${index}">Preview</button>
+        <button type="button" class="apply" data-music-apply="${index}">Apply</button>
+      </div>
+    </div>
+  `).join("");
+  musicResults.innerHTML = html;
+}
+
+async function runMusicSearch(){
+  const term = String(musicSearchInput?.value || "").trim();
+  if(!term){
+    musicResults.innerHTML = "<div class='music-empty'>Type song or artist name.</div>";
+    return;
+  }
+  musicResults.innerHTML = "<div class='music-empty'>Searching...</div>";
+  try{
+    const results = await searchMusicCatalog(term);
+    musicSearchResults = results;
+    renderMusicResults(results);
+  }catch(_){
+    musicResults.innerHTML = "<div class='music-empty'>Music search failed. Check internet and retry.</div>";
+  }
+}
+
+function renderPreview(){
+  releasePreviewUrls();
+  if(!selectedFiles.length){
+    preview.innerHTML = "";
+    return;
+  }
+
+  previewUrls = selectedFiles.map(file => URL.createObjectURL(file));
+  if(typeKey === "post"){
+    const slides = previewUrls.map((url, index) => {
+      const isVideo = String(selectedFiles[index]?.type || "").startsWith("video");
+      if(isVideo){
+        return `<video src="${url}" controls preload="metadata"></video>`;
+      }
+      return `<img src="${url}" alt="">`;
+    }).join("");
+    preview.innerHTML = `<div class="preview-track">${slides}</div>`;
+  }else{
+    const firstUrl = previewUrls[0];
+    preview.innerHTML = selectedIsVideo
+      ? `<video src="${firstUrl}" controls></video>`
+      : `<img src="${firstUrl}" alt="">`;
+  }
+}
+
+function resetSelection(){
+  releasePreviewUrls();
+  selectedFiles = [];
+  selectedMeta = null;
+  selectedIsVideo = false;
+  selectedMusicMeta = null;
+  renderSelectedMusic();
+  stopMusicPreview();
+  preview.innerHTML = "";
+  uploadLabel.textContent = "Tap to choose media";
+  uploadBtn.disabled = true;
+  noteText.textContent = "";
+}
+
+async function validateVideo(file){
+  const meta = await window.NOVA.getVideoMeta(file);
+  if(config.aspect){
+    const ok = window.NOVA.validateAspect(meta.width, meta.height, config.aspect, config.tolerance);
+    if(!ok){
+      throw new Error("Wrong video ratio. " + config.hint);
+    }
+  }
+  if(config.maxDuration && meta.duration > config.maxDuration){
+    throw new Error("Max length is " + config.maxDuration + " seconds.");
+  }
+  return meta;
+}
+
+fileInput.addEventListener("change", async () => {
+  const files = Array.from(fileInput.files || []);
+  if(!files.length){
+    fileInput.value = "";
+    return;
+  }
+
+  if(typeKey !== "post" && files.length > 1){
+    alert(config.label + " upload supports only one file at a time.");
+    fileInput.value = "";
+    resetSelection();
+    return;
+  }
+
+  const first = files[0];
+  const isFirstVideo = String(first.type || "").startsWith("video");
+  const isFirstImage = String(first.type || "").startsWith("image");
+
+  try{
+    if(typeKey === "reel" || typeKey === "long"){
+      if(!isFirstVideo) throw new Error(config.label + " must be a video.");
+      selectedMeta = await validateVideo(first);
+    }else if(typeKey === "post"){
+      const invalid = files.find(file => {
+        const t = String(file.type || "");
+        return !(t.startsWith("image") || t.startsWith("video"));
+      });
+      if(invalid) throw new Error("Post files must be image or video.");
+    }else if(typeKey === "story"){
+      if(!isFirstVideo && !isFirstImage) throw new Error("Story must be a photo or video.");
+      if(isFirstVideo){
+        selectedMeta = await window.NOVA.getVideoMeta(first);
+      }
+    }
+  }catch(err){
+    alert(err.message || "Invalid media.");
+    fileInput.value = "";
+    if(typeKey !== "post" || !selectedFiles.length){
+      resetSelection();
+    }
+    return;
+  }
+
+  if(typeKey === "post"){
+    selectedFiles = mergeUniqueFiles(selectedFiles, files);
+  }else{
+    selectedFiles = [first];
+  }
+  selectedIsVideo = isFirstVideo;
+  uploadLabel.textContent = typeKey === "post"
+    ? `${selectedFiles.length} media selected`
+    : (first.name || "Media selected");
+  renderPreview();
+
+  uploadBtn.disabled = false;
+  noteText.textContent = typeKey === "post"
+    ? "Ready. Tap again on upload area or Add More to append more media."
+    : "Ready to upload.";
+  fileInput.value = "";
+});
+
+if(addMoreBtn){
+  addMoreBtn.addEventListener("click", () => fileInput.click());
+}
+if(clearMediaBtn){
+  clearMediaBtn.addEventListener("click", () => {
+    resetSelection();
+    fileInput.value = "";
+  });
+}
+if(musicSearchBtn){
+  musicSearchBtn.addEventListener("click", () => {
+    openMusicSearch();
+    if(!musicResults.innerHTML.trim()){
+      musicResults.innerHTML = "<div class='music-empty'>Type song or artist and search.</div>";
+    }
+  });
+}
+if(musicClearBtn){
+  musicClearBtn.addEventListener("click", () => {
+    selectedMusicMeta = null;
+    renderSelectedMusic();
+  });
+}
+if(musicSearchBackdrop){
+  musicSearchBackdrop.addEventListener("click", closeMusicSearch);
+}
+if(musicSearchClose){
+  musicSearchClose.addEventListener("click", closeMusicSearch);
+}
+if(musicSearchRun){
+  musicSearchRun.addEventListener("click", runMusicSearch);
+}
+if(musicSearchInput){
+  musicSearchInput.addEventListener("keydown", e => {
+    if(e.key === "Enter") runMusicSearch();
+  });
+}
+document.addEventListener("keydown", e => {
+  if(e.key === "Escape" && musicSearchModal.classList.contains("show")){
+    closeMusicSearch();
+  }
+});
+if(musicResults){
+  musicResults.addEventListener("click", e => {
+    const previewBtn = e.target.closest("[data-music-preview]");
+    if(previewBtn){
+      const index = Number(previewBtn.getAttribute("data-music-preview"));
+      const row = musicSearchResults[index];
+      if(!row || !row.previewUrl) return;
+      if(activeMusicPreviewAudio && activeMusicPreviewAudio.src === row.previewUrl && !activeMusicPreviewAudio.paused){
+        activeMusicPreviewAudio.pause();
+        activeMusicPreviewAudio = null;
+        return;
+      }
+      stopMusicPreview();
+      const audio = new Audio(row.previewUrl);
+      activeMusicPreviewAudio = audio;
+      audio.play().catch(()=>{});
+      audio.addEventListener("ended", () => {
+        if(activeMusicPreviewAudio === audio){
+          activeMusicPreviewAudio = null;
+        }
+      });
+      return;
+    }
+
+    const applyBtn = e.target.closest("[data-music-apply]");
+    if(applyBtn){
+      const index = Number(applyBtn.getAttribute("data-music-apply"));
+      const row = musicSearchResults[index];
+      if(!row || !row.previewUrl) return;
+      selectedMusicMeta = {
+        url: row.previewUrl,
+        title: row.title,
+        artist: row.artist
+      };
+      renderSelectedMusic();
+      closeMusicSearch();
+    }
+  });
+}
+
+function getSupabaseErrorText(error){
+  return [error?.message, error?.details, error?.hint]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function getMissingColumnName(error){
+  const text = getSupabaseErrorText(error);
+  if(!text) return "";
+
+  const pgrstMatch = text.match(/'([a-zA-Z0-9_]+)' column/i);
+  if(pgrstMatch && pgrstMatch[1]) return pgrstMatch[1].toLowerCase();
+
+  const pgMatch = text.match(/column\s+\"?([a-zA-Z0-9_.]+)\"?\s+does not exist/i);
+  if(pgMatch && pgMatch[1]){
+    const normalized = pgMatch[1].replace(/\"/g, "").toLowerCase();
+    return normalized.split(".").pop() || "";
+  }
+
+  return "";
+}
+
+async function insertRowWithFallback(table, payload, requiredColumns){
+  const row = { ...(payload || {}) };
+  const required = new Set(requiredColumns || []);
+
+  while(true){
+    const { error } = await window.NOVA.supa.from(table).insert(row);
+    if(!error){
+      return { error:null };
+    }
+
+    const missingColumn = getMissingColumnName(error);
+    if(
+      !missingColumn ||
+      !Object.prototype.hasOwnProperty.call(row, missingColumn) ||
+      required.has(missingColumn)
+    ){
+      return { error };
+    }
+    delete row[missingColumn];
+  }
+}
+
+function createPostBatchId(){
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+function getFileExt(file){
+  const rawName = String(file?.name || "file");
+  const ext = rawName.includes(".") ? rawName.split(".").pop() : "";
+  return (ext || "bin").toLowerCase();
+}
+
+function makePostBatchPath(userId, file, batchId, index){
+  const safeUser = String(userId || "user");
+  const ext = getFileExt(file);
+  const rand = Math.random().toString(36).slice(2, 7);
+  return `${safeUser}/post-${batchId}-${index}-${rand}.${ext}`;
+}
+
+function startProgress(){
+  progressTitle.textContent = "Uploading...";
+  progressText.textContent = "Starting...";
+  progressFill.style.width = "0%";
+  progressOverlay.classList.add("show");
+
+  let pct = 0;
+  const timer = setInterval(() => {
+    pct = Math.min(90, pct + Math.random() * 8 + 2);
+    progressFill.style.width = Math.round(pct) + "%";
+    progressText.textContent = "Uploading... " + Math.round(pct) + "%";
+  }, 300);
+
+  return function finish(ok, message){
+    clearInterval(timer);
+    if(ok){
+      progressFill.style.width = "100%";
+      progressTitle.textContent = "Upload complete";
+      progressText.textContent = "Redirecting...";
+    }else{
+      progressTitle.textContent = "Upload failed";
+      progressText.textContent = message || "Please try again.";
+      progressFill.style.width = "0%";
+      setTimeout(() => progressOverlay.classList.remove("show"), 800);
+    }
+  };
+}
+
+uploadBtn.addEventListener("click", async () => {
+  if(!selectedFiles.length) return;
+  uploadBtn.disabled = true;
+  noteText.textContent = "Uploading...";
+
+  const finish = startProgress();
+  try{
+    const user = await window.NOVA.requireUser();
+    const primaryFile = selectedFiles[0];
+    const title = titleInput.value.trim();
+    const description = descInput.value.trim();
+    const keywords = keywordsInput.value.trim();
+    let postKeywords = keywords;
+    const reelKeywords = keywords.split(",").map(k => k.trim());
+
+    let thumbUrl = null;
+    const thumbFile = thumbInput.files && thumbInput.files[0] ? thumbInput.files[0] : null;
+    if(thumbFile){
+      const thumbPath = window.NOVA.makePath(user.id, thumbFile);
+      thumbUrl = await window.NOVA.uploadToBucket("thumbnails", thumbFile, thumbPath);
+    }
+
+    if(typeKey === "post" && selectedMusicMeta && selectedMusicMeta.url){
+      postKeywords = appendMusicInKeywords(keywords, selectedMusicMeta);
+    }
+
+    if(typeKey === "reel"){
+      const path = window.NOVA.makePath(user.id, primaryFile);
+      const mediaUrl = await window.NOVA.uploadToBucket(config.bucket, primaryFile, path);
+      const reelPayload = {
+        user_id: user.id,
+        video_url: mediaUrl,
+        thumb_url: thumbUrl,
+        title: title || null,
+        description: description || null,
+        keywords: reelKeywords,
+        duration: Math.round(selectedMeta?.duration || 0),
+        width: selectedMeta?.width || null,
+        height: selectedMeta?.height || null
+      };
+      const { error: insertError } = await window.NOVA.supa
+        .from("reels")
+        .insert(reelPayload);
+      if(insertError) throw insertError;
+
+      try{
+        const { data: latest } = await window.NOVA.supa
+          .from("reels")
+          .select("id,user_id,video_url,title,description,created_at")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending:false })
+          .limit(1)
+          .maybeSingle();
+        if(latest){
+          sessionStorage.setItem("nova_last_reel_upload", JSON.stringify(latest));
+        }
+      }catch(_){}
+    }else if(typeKey === "long"){
+      const path = window.NOVA.makePath(user.id, primaryFile);
+      const mediaUrl = await window.NOVA.uploadToBucket(config.bucket, primaryFile, path);
+      const { error } = await window.NOVA.supa.from("long_videos").insert({
+        user_id: user.id,
+        video_url: mediaUrl,
+        thumb_url: thumbUrl,
+        title: title || null,
+        description: description || null,
+        keywords: keywords || null,
+        duration: Math.round(selectedMeta?.duration || 0),
+        width: selectedMeta?.width || null,
+        height: selectedMeta?.height || null
+      });
+      if(error) throw error;
+    }else if(typeKey === "post"){
+      const batchId = createPostBatchId();
+      let uploadedCount = 0;
+      let lastError = null;
+
+      for(let index = 0; index < selectedFiles.length; index += 1){
+        const file = selectedFiles[index];
+        const isVideo = String(file.type || "").startsWith("video");
+        const path = makePostBatchPath(user.id, file, batchId, index);
+
+        try{
+          const mediaUrl = await window.NOVA.uploadToBucket(config.bucket, file, path);
+          const { error } = await insertRowWithFallback("posts", {
+            user_id: user.id,
+            media_url: mediaUrl,
+            media_type: isVideo ? "video" : "image",
+            thumb_url: thumbUrl,
+            title: title || null,
+            description: description || null,
+            keywords: postKeywords || null
+          }, ["user_id", "media_url"]);
+          if(error) throw error;
+          uploadedCount += 1;
+        }catch(err){
+          console.error("Post media upload failed", err);
+          lastError = err;
+        }
+      }
+
+      if(uploadedCount === 0){
+        throw (lastError || new Error("Post upload failed."));
+      }
+      noteText.textContent = uploadedCount > 1
+        ? `${uploadedCount} media uploaded.`
+        : "Post uploaded.";
+    }else if(typeKey === "story"){
+      const path = window.NOVA.makePath(user.id, primaryFile);
+      const mediaUrl = await window.NOVA.uploadToBucket(config.bucket, primaryFile, path);
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const payload = {
+        user_id: user.id,
+        media_url: mediaUrl,
+        media_type: selectedIsVideo ? "video" : "image",
+        thumb_url: thumbUrl,
+        title: title || null,
+        description: description || null,
+        keywords: keywords || null,
+        expires_at: expiresAt
+      };
+      const { error } = await insertRowWithFallback(
+        "stories",
+        payload,
+        ["user_id", "media_url", "media_type", "expires_at"]
+      );
+      if(error) throw error;
+    }
+
+    finish(true);
+    setTimeout(() => {
+      location.href = config.redirect;
+    }, 600);
+  }catch(err){
+    console.error(err);
+    finish(false, err.message || "Upload failed.");
+    uploadBtn.disabled = false;
+    noteText.textContent = "Upload failed. Try again.";
+  }
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Seller Notification Details - NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+:root{
+  --brand:#ff6a00;
+  --ok:#16a34a;
+  --danger:#dc2626;
+  --line:#e5e7eb;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#f3f4f6;color:#111827}
+.header{background:linear-gradient(135deg,#ff7a00,#ff5a00);color:#fff;padding:14px 16px;font-size:18px;font-weight:700}
+.wrap{max-width:760px;margin:0 auto;padding:14px}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+.row{display:grid;grid-template-columns:160px 1fr;gap:10px;padding:6px 0;border-bottom:1px dashed #eee}
+.row:last-child{border-bottom:none}
+.label{font-size:13px;color:#6b7280}
+.value{font-size:14px;font-weight:600;word-break:break-word}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.btn{border:none;border-radius:10px;padding:12px;font-weight:700;cursor:pointer}
+.btn-accept{background:var(--ok);color:#fff}
+.btn-reject{background:var(--danger);color:#fff}
+.note{font-size:12px;color:#6b7280;margin-top:10px}
+@media (max-width:640px){.row{grid-template-columns:1fr}}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<script src="global.js"></script>
+</head>
+<body>
+<div class="header">Seller Notification Details</div>
+<div class="wrap">
+  <div class="card" id="detailsBox">Loading...</div>
+  <div class="card">
+    <div class="actions">
+      <button id="acceptBtn" class="btn btn-accept" onclick="acceptOrder()" disabled>ACCEPT ORDER</button>
+      <button id="rejectBtn" class="btn btn-reject" onclick="rejectOrder()" disabled>REJECT ORDER</button>
+    </div>
+    <div class="note">Only one decision is allowed for pending orders.</div>
+  </div>
+</div>
+
+<script>
+const supa =
+  window.supa ||
+  window.supabase?.createClient(
+    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+  );
+
+const params = new URLSearchParams(location.search);
+const ORDER_ID =
+  params.get("order_id") ||
+  params.get("orderId") ||
+  params.get("Order_id") ||
+  params.get("OrderId") ||
+  "";
+const NOTIF_ID =
+  params.get("notif_id") ||
+  params.get("notifId") ||
+  params.get("Notif_id") ||
+  params.get("NotifId") ||
+  "";
+
+let CURRENT_USER = null;
+let ORDER = null;
+let NOTIF = null;
+
+(async function init(){
+  disableDecisionButtons();
+
+  const { data } = await supa.auth.getSession();
+  if(!data?.session){
+    location.href = "login.html";
+    return;
+  }
+  CURRENT_USER = data.session.user;
+
+  if(NOTIF_ID){
+    await loadNotification();
+    await markRead();
+  }
+
+  await loadOrder();
+  renderDetails();
+})();
+
+function disableDecisionButtons(){
+  document.getElementById("acceptBtn").disabled = true;
+  document.getElementById("rejectBtn").disabled = true;
+}
+
+async function loadNotification(){
+  const { data, error } = await supa
+    .from("notifications")
+    .select("*")
+    .eq("id", NOTIF_ID)
+    .eq("receiver_user_id", CURRENT_USER.id)
+    .maybeSingle();
+
+  if(error){
+    console.error(error);
+    NOTIF = null;
+    return;
+  }
+
+  NOTIF = data || null;
+}
+
+async function loadOrder(){
+  const targetOrderId = String(ORDER_ID || NOTIF?.order_id || "").trim();
+  if(!targetOrderId){
+    ORDER = null;
+    return;
+  }
+
+  const { data, error } = await supa
+    .from("orders")
+    .select("*")
+    .eq("id", targetOrderId)
+    .maybeSingle();
+
+  if(error){
+    console.error(error);
+    ORDER = null;
+    return;
+  }
+
+  ORDER = data || null;
+}
+
+async function markRead(){
+  if(!NOTIF_ID) return;
+  await supa
+    .from("notifications")
+    .update({ is_read: true })
+    .eq("id", NOTIF_ID);
+}
+
+function renderDetails(){
+  const box = document.getElementById("detailsBox");
+  if(!ORDER){
+    box.innerHTML = "<div>Order not found</div>";
+    disableDecisionButtons();
+    return;
+  }
+
+  const buyerAddr = ORDER.buyer_address || ORDER.address || {};
+  const buyerAddrText = typeof buyerAddr === "string"
+    ? buyerAddr
+    : [buyerAddr.address, buyerAddr.city, buyerAddr.pincode].filter(Boolean).join(", ");
+
+  box.innerHTML = `
+    <div class="row"><div class="label">Order ID</div><div class="value">${ORDER.id || ""}</div></div>
+    <div class="row"><div class="label">Buyer</div><div class="value">${ORDER.buyer_name || ORDER.email || ""}</div></div>
+    <div class="row"><div class="label">Address</div><div class="value">${buyerAddrText || ""}</div></div>
+    <div class="row"><div class="label">Payment</div><div class="value">${ORDER.payment_status || "pending"} (${ORDER.payment_method || "Pending Payment"})</div></div>
+    <div class="row"><div class="label">Status</div><div class="value">${ORDER.status || "placed"}</div></div>
+  `;
+
+  updateDecisionButtons();
+}
+
+function updateDecisionButtons(){
+  const status = String(ORDER?.status || "placed").toLowerCase();
+  const canDecide = ["placed", "pending", "pending_approval"].includes(status);
+  document.getElementById("acceptBtn").disabled = !canDecide;
+  document.getElementById("rejectBtn").disabled = !canDecide;
+}
+
+async function updateStatus(nextStatus){
+  if(!ORDER?.id) return;
+  const { error, data } = await supa
+    .from("orders")
+    .update({ status: nextStatus })
+    .eq("id", ORDER.id)
+    .select("*")
+    .maybeSingle();
+
+  if(error){
+    alert("Failed to update order");
+    console.error(error);
+    return;
+  }
+
+  ORDER = data || ORDER;
+  renderDetails();
+}
+
+async function acceptOrder(){
+  await updateStatus("approved");
+}
+
+async function rejectOrder(){
+  await updateStatus("rejected");
+}
+</script>
+</body>
+</html>
+

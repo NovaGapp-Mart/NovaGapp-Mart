@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Payment - NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- Razorpay -->
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<script src="global.js"></script>
+
+<style>
+*{box-sizing:border-box;font-family:system-ui}
+body{margin:0;background:#f2f3f5}
+.header{
+  background:#fff;padding:14px;display:flex;align-items:center;
+  gap:10px;border-bottom:1px solid #ddd;
+}
+.header h2{margin:0;font-size:18px}
+.secure{margin-left:auto;color:#1aa34a;font-size:13px;font-weight:600}
+.amount-box{
+  background:#eef4ff;margin:14px;padding:16px;border-radius:10px;
+  display:flex;justify-content:space-between;align-items:center;
+}
+.amount{font-size:22px;font-weight:700;color:#1a4fff}
+.offer{
+  background:#eafff0;margin:14px;padding:14px;border-radius:10px;
+  font-size:14px;
+}
+.offer b{color:#1aa34a}
+.box{
+  background:#fff;margin:14px;padding:14px;border-radius:12px;
+}
+.pay-option{
+  display:flex;gap:12px;align-items:center;
+  padding:12px 0;border-bottom:1px solid #eee;
+}
+.pay-option input{margin-left:auto}
+.pay-option:last-child{border:none}
+.pay-option img{width:26px}
+.footer{
+  position:fixed;bottom:0;left:0;right:0;
+  background:#fff;padding:14px;border-top:1px solid #ddd;
+}
+.footer button{
+  width:100%;background:#fb641b;border:none;color:#fff;
+  font-size:16px;padding:14px;border-radius:10px;font-weight:700;
+}
+.footer .secondary{
+  margin-top:8px;
+  background:#fff;
+  color:#fb641b;
+  border:1px solid #fb641b;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+  <span onclick="history.back()" style="cursor:pointer">Back</span>
+  <h2>Payment</h2>
+  <div class="secure">Secure Payment</div>
+</div>
+
+<div class="amount-box">
+  <span>Total Amount</span>
+  <div class="amount" id="amount">-</div>
+</div>
+
+<div class="offer">
+  <b>Available offers</b>
+  <span>Final amount will be confirmed after payment</span>
+</div>
+
+<div class="box">
+  <div class="pay-option">
+    <img src="https://img.icons8.com/color/48/google-pay.png">
+    <span>UPI / Wallets</span>
+    <input type="radio" name="payMethod" value="online" checked>
+  </div>
+  <div class="pay-option">
+    <img src="https://img.icons8.com/color/48/bank.png">
+    <span>Net Banking</span>
+    <input type="radio" name="payMethod" value="online">
+  </div>
+  <div class="pay-option">
+    <img src="https://img.icons8.com/color/48/bank-card-back-side.png">
+    <span>Credit / Debit Card</span>
+    <input type="radio" name="payMethod" value="online">
+  </div>
+  <div class="pay-option">
+    <img src="https://img.icons8.com/color/48/cash-in-hand.png">
+    <span>Cash on Delivery</span>
+    <input type="radio" name="payMethod" value="cod">
+  </div>
+</div>
+
+<div class="footer">
+  <button onclick="continuePayment()" id="payBtn">Pay Securely</button>
+  <button class="secondary" onclick="payCOD()">Cash on Delivery</button>
+</div>
+
+<script>
+const supa =
+  window.supa ||
+  window.supabase?.createClient(
+    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+  );
+
+function normalizeBase(base){
+  return String(base || "").trim().replace(/\/+$/g, "");
+}
+
+function resolveApiBase(){
+  const q = new URLSearchParams(location.search);
+  const fromQuery = normalizeBase(q.get("api_base"));
+  if(fromQuery){
+    try{ localStorage.setItem("api_base", fromQuery); }catch(_){ }
+    return fromQuery;
+  }
+
+  if(String(location.port || "") === "3000"){
+    return "";
+  }
+
+  let fromStorage = "";
+  try{
+    fromStorage = normalizeBase(localStorage.getItem("api_base") || "");
+  }catch(_){ }
+  if(fromStorage) return fromStorage;
+
+  const fromGlobal = normalizeBase(window.API_BASE || window.CONTEST_API_BASE || "");
+  if(fromGlobal) return fromGlobal;
+
+  if(location.protocol === "file:"){
+    return "http://127.0.0.1:3000";
+  }
+  return "http://127.0.0.1:3000";
+}
+
+const API_BASE = resolveApiBase();
+
+function apiUrl(path){
+  return API_BASE ? (API_BASE + path) : path;
+}
+
+async function apiJson(path, options){
+  const response = await fetch(apiUrl(path), options || {});
+  const payload = await response.json().catch(() => ({}));
+  if(!response.ok || !payload?.ok){
+    throw new Error(payload?.message || payload?.error || `Request failed (${response.status})`);
+  }
+  return payload;
+}
+
+const params = new URLSearchParams(location.search);
+const ORDER_ID = params.get("order_id") || localStorage.getItem("lastOrderId") || "";
+let ORDER = null;
+let CURRENT_USER = null;
+let PAYMENT_CONFIG = { ready: false, key_id: "" };
+
+const ORDER_STATUS_CANDIDATES = [
+  "pending",
+  "pending_approval",
+  "placed",
+  "approved",
+  "seller_approved",
+  "shipped",
+  "hub_reached",
+  "out_for_delivery",
+  "delivered",
+  "cancelled",
+  "rejected",
+  "declined",
+  "order_rejected"
+];
+
+(async function init(){
+  const { data } = await supa.auth.getSession();
+  if(!data.session){
+    location.href = "login.html";
+    return;
+  }
+  CURRENT_USER = data.session.user;
+  await loadPaymentConfig();
+
+  if(!ORDER_ID){
+    alert("Order not found");
+    location.href = "checkout.html";
+    return;
+  }
+
+  const { data: row, error } = await supa
+    .from("orders")
+    .select("*")
+    .eq("id", ORDER_ID)
+    .single();
+
+  if(error || !row){
+    alert("Order not found");
+    location.href = "checkout.html";
+    return;
+  }
+
+  ORDER = row;
+  const amount = Number(ORDER.total || ORDER.amount || 0);
+  const orderCur = ORDER.currency || "USD";
+  const amountEl = document.getElementById("amount");
+  if(amountEl){
+    amountEl.dataset.money = String(amount || 0);
+    amountEl.dataset.currency = orderCur;
+    amountEl.innerHTML = window.moneyTag ? moneyTag(amount, orderCur) : (window.money ? money(amount, orderCur) : amount);
+  }
+})();
+
+function setOnlineMethodAvailability(isReady){
+  const onlineOptions = document.querySelectorAll('input[name="payMethod"][value="online"]');
+  onlineOptions.forEach((node) => {
+    node.disabled = !isReady;
+  });
+
+  if(!isReady){
+    const cod = document.querySelector('input[name="payMethod"][value="cod"]');
+    if(cod) cod.checked = true;
+  }
+}
+
+async function loadPaymentConfig(){
+  try{
+    const payload = await apiJson("/api/payment/config", { method: "GET" });
+    PAYMENT_CONFIG = {
+      ready: Boolean(payload?.ready && payload?.key_id),
+      key_id: String(payload?.key_id || "")
+    };
+  }catch(err){
+    console.error(err);
+    PAYMENT_CONFIG = { ready: false, key_id: "" };
+  }
+  setOnlineMethodAvailability(PAYMENT_CONFIG.ready);
+}
+
+function selectedMethod(){
+  const opt = document.querySelector('input[name="payMethod"]:checked');
+  return opt?.value || "online";
+}
+
+function getUsdToInrRate(){
+  const usdPerInr = Number(window.USD_RATE?.INR || 0);
+  if(usdPerInr > 0) return 1 / usdPerInr;
+  return null;
+}
+
+function toInrPaise(amount, currency){
+  const cur = String(currency || "USD").toUpperCase();
+  const total = Number(amount || 0);
+  if(cur === "INR") return Math.round(total * 100);
+
+  if(cur === "USD"){
+    const rate = getUsdToInrRate();
+    if(!rate) throw new Error("USD to INR rate unavailable");
+    return Math.round(total * rate * 100);
+  }
+
+  const rateToUsd = Number(window.USD_RATE?.[cur] || 0);
+  if(rateToUsd > 0){
+    const usd = total * rateToUsd;
+    const rate = getUsdToInrRate();
+    if(!rate) throw new Error("USD to INR rate unavailable");
+    return Math.round(usd * rate * 100);
+  }
+
+  throw new Error("Currency conversion unavailable");
+}
+
+function normalizeOrderStatus(value){
+  return String(value || "").trim().toLowerCase().replaceAll(" ", "_");
+}
+
+async function ensureValidOrderStatus(preferred){
+  if(!ORDER?.id) return false;
+  const tried = new Set();
+  const candidates = [];
+  const push = (value)=>{
+    const v = normalizeOrderStatus(value);
+    if(!v || tried.has(v)) return;
+    tried.add(v);
+    candidates.push(v);
+  };
+
+  push(preferred);
+  push(ORDER?.status);
+  ORDER_STATUS_CANDIDATES.forEach(push);
+
+  for(const status of candidates){
+    const { data, error } = await supa
+      .from("orders")
+      .update({ status })
+      .eq("id", ORDER.id)
+      .select("*")
+      .single();
+    if(!error && data){
+      ORDER = data;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function setOrderPayment(fields){
+  if(!ORDER?.id) return null;
+  const payload = { ...fields };
+  const { data, error } = await supa
+    .from("orders")
+    .update(payload)
+    .eq("id", ORDER.id)
+    .select("*")
+    .single();
+
+  if(error){
+    if(String(error?.code || "") !== "23514"){
+      console.error(error);
+      return null;
+    }
+
+    const fixed = await ensureValidOrderStatus("pending");
+    if(!fixed) return null;
+
+    const retry = await supa
+      .from("orders")
+      .update(payload)
+      .eq("id", ORDER.id)
+      .select("*")
+      .single();
+    if(retry.error){
+      console.error(retry.error);
+      return null;
+    }
+    ORDER = retry.data;
+    return retry.data;
+  }
+
+  ORDER = data;
+  return data;
+}
+
+async function createRazorpayOrder(amountPaise){
+  if(!ORDER?.id){
+    throw new Error("order_not_ready");
+  }
+
+  const payload = await apiJson("/api/payment/razorpay/order", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      order_id: ORDER.id,
+      user_id: CURRENT_USER?.id || "",
+      user_name: CURRENT_USER?.user_metadata?.full_name || CURRENT_USER?.email || "",
+      amount_paise: amountPaise,
+      currency: "INR",
+      notes: {
+        app_order_id: ORDER.id,
+        buyer_email: CURRENT_USER?.email || ""
+      }
+    })
+  });
+
+  return payload?.order || null;
+}
+
+async function verifyRazorpayPayment(payload){
+  return apiJson("/api/payment/razorpay/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {})
+  });
+}
+
+async function continuePayment(){
+  if(!ORDER) return;
+  const method = selectedMethod();
+  if(method === "cod"){
+    await payCOD();
+    return;
+  }
+  if(!PAYMENT_CONFIG.ready){
+    alert("Online payment is not configured right now.");
+    return;
+  }
+
+  let amountPaise = 0;
+  try{
+    amountPaise = toInrPaise(ORDER.total || ORDER.amount || 0, ORDER.currency || "USD");
+  }catch(err){
+    console.error(err);
+    alert("Payment currency not supported right now.");
+    return;
+  }
+
+  let gatewayOrder = null;
+  try{
+    gatewayOrder = await createRazorpayOrder(amountPaise);
+  }catch(err){
+    console.error(err);
+    alert("Unable to start online payment right now.");
+    return;
+  }
+
+  if(!gatewayOrder?.razorpay_order_id){
+    alert("Payment order creation failed.");
+    return;
+  }
+
+  const paymentKey = String(gatewayOrder.key_id || PAYMENT_CONFIG.key_id || "").trim();
+  if(!paymentKey){
+    alert("Payment gateway key missing.");
+    return;
+  }
+
+  const options = {
+    key: paymentKey,
+    order_id: gatewayOrder.razorpay_order_id,
+    amount: Number(gatewayOrder.amount_paise || amountPaise),
+    currency: String(gatewayOrder.currency || "INR").toUpperCase(),
+    name: "NOVAGAPP",
+    description: "Order payment",
+    handler: async function(res){
+      const orderId = String(res?.razorpay_order_id || gatewayOrder.razorpay_order_id || "").trim();
+      const paymentId = String(res?.razorpay_payment_id || "").trim();
+      const signature = String(res?.razorpay_signature || "").trim();
+      if(!orderId || !paymentId || !signature){
+        alert("Payment verification failed.");
+        return;
+      }
+
+      try{
+        const verifyResult = await verifyRazorpayPayment({
+          order_id: ORDER.id,
+          user_id: CURRENT_USER?.id || "",
+          razorpay_order_id: orderId,
+          razorpay_payment_id: paymentId,
+          razorpay_signature: signature
+        });
+        if(!verifyResult?.verified){
+          alert("Payment verification failed.");
+          return;
+        }
+      }catch(err){
+        console.error(err);
+        alert("Payment verification failed.");
+        return;
+      }
+
+      await setOrderPayment({
+        payment_id: paymentId,
+        payment_method: "Online Payment",
+        payment_status: "pending"
+      });
+
+      const settled = await settlePaidOrderWithStatusFix(paymentId);
+      if(!settled){
+        alert("Payment captured but verification failed. Please contact support.");
+        return;
+      }
+
+      await setOrderPayment({ payment_status: "paid" });
+      location.href = "orders.html";
+    },
+    modal: {
+      ondismiss: function(){
+        // User closed the popup without completing payment
+      }
+    },
+    theme: { color: "#fb641b" }
+  };
+
+  const rzp = new Razorpay(options);
+  rzp.on("payment.failed", function(){
+    alert("Payment failed. Please try again.");
+  });
+  rzp.open();
+}
+
+async function payCOD(){
+  const ok = await setOrderPayment({
+    payment_method: "Cash on Delivery",
+    payment_status: "pending"
+  });
+
+  if(ok){
+    alert("Order placed with Cash on Delivery.");
+    location.href = "orders.html";
+  }
+}
+
+async function settlePaidOrderWithStatusFix(paymentId){
+  if(!ORDER?.id) return false;
+  const usdToInr = getUsdToInrRate() || 1;
+
+  const fixed = await ensureValidOrderStatus("pending");
+  if(!fixed) return false;
+
+  const { error } = await supa.rpc("settle_paid_order", {
+    p_order_id: ORDER.id,
+    p_payment_id: paymentId || null,
+    p_payment_method: "Online Payment",
+    p_usd_inr_rate: usdToInr
+  });
+
+  if(error){
+    console.error(error);
+    return false;
+  }
+  return true;
+}
+</script>
+
+</body>
+</html>

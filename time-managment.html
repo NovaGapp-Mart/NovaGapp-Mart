@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Time management</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- SUPABASE -->
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial}
+body{background:#fff;color:#000}
+
+/* HEADER */
+.header{
+  display:flex;
+  align-items:center;
+  padding:14px;
+  border-bottom:1px solid #eee;
+}
+.header svg{
+  width:22px;
+  height:22px;
+  margin-right:10px;
+  cursor:pointer;
+}
+.header h2{font-size:18px}
+
+/* SECTION */
+.section{
+  padding:14px;
+}
+.card{
+  border:1px solid #eee;
+  border-radius:10px;
+  padding:14px;
+  margin-bottom:12px;
+}
+.card h3{
+  font-size:16px;
+  margin-bottom:6px;
+}
+.card p{
+  font-size:14px;
+  color:#666;
+}
+.time{
+  font-size:28px;
+  font-weight:bold;
+  margin-top:8px;
+}
+.btn{
+  margin-top:10px;
+  padding:10px;
+  border-radius:8px;
+  border:1px solid #000;
+  background:#000;
+  color:#fff;
+  cursor:pointer;
+  text-align:center;
+  font-size:14px;
+}
+.btn.outline{
+  background:#fff;
+  color:#000;
+}
+</style>
+</head>
+
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <svg onclick="history.back()" viewBox="0 0 24 24">
+    <path d="M15 18l-6-6 6-6"/>
+  </svg>
+  <h2>Time management</h2>
+</div>
+
+<div class="section">
+  <div class="card">
+    <h3>Today</h3>
+    <p>Total time spent on NOVAGAPP today</p>
+    <div class="time" id="todayTime">0m</div>
+  </div>
+
+  <div class="card">
+    <h3>Daily reminder</h3>
+    <p>Get notified when you reach your daily limit</p>
+    <div class="btn outline" onclick="setReminder()">Set reminder</div>
+  </div>
+
+  <div class="card">
+    <h3>Take a break</h3>
+    <p>Pause notifications and activity for some time</p>
+    <div class="btn" onclick="takeBreak()">Take a break</div>
+  </div>
+</div>
+
+<script>
+/* 🔐 SUPABASE CONFIG */
+const supabase = supabase.createClient(
+  window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+  window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+);
+
+/* AUTH CHECK */
+(async()=>{
+  const { data } = await supabase.auth.getUser();
+  if(!data.user){
+    location.href="login.html";
+    return;
+  }
+
+  // Session tracking (local, real)
+  const start = Date.now();
+  const todayKey = "time_" + new Date().toDateString();
+
+  let spent = Number(localStorage.getItem(todayKey)) || 0;
+  document.getElementById("todayTime").innerText =
+    Math.floor(spent/60000) + "m";
+
+  window.addEventListener("beforeunload",()=>{
+    const now = Date.now();
+    spent += (now - start);
+    localStorage.setItem(todayKey, spent);
+  });
+})();
+
+/* ACTIONS */
+function setReminder(){
+  alert("Daily reminder will be available soon.");
+}
+
+function takeBreak(){
+  alert("Break mode activated.");
+}
+</script>
+
+</body>
+</html>

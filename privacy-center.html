@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Privacy Center</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial}
+body{background:#fff;color:#000}
+
+/* HEADER */
+.header{
+  display:flex;
+  align-items:center;
+  padding:14px;
+  border-bottom:1px solid #eee;
+}
+.header svg{
+  width:22px;
+  height:22px;
+  margin-right:10px;
+  cursor:pointer;
+}
+.header h2{font-size:18px}
+
+/* SECTION */
+.section{padding:14px}
+.card{
+  border:1px solid #eee;
+  border-radius:10px;
+  padding:14px;
+  margin-bottom:12px;
+}
+.card h3{
+  font-size:16px;
+  margin-bottom:6px;
+}
+.card p{
+  font-size:14px;
+  color:#555;
+  line-height:1.5;
+}
+
+/* LIST */
+ul{padding-left:18px}
+li{
+  font-size:14px;
+  color:#555;
+  margin-bottom:6px;
+}
+.small{
+  font-size:13px;
+  color:#777;
+  margin-top:8px;
+}
+</style>
+</head>
+
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <svg onclick="history.back()" viewBox="0 0 24 24">
+    <path d="M15 18l-6-6 6-6"/>
+  </svg>
+  <h2>Privacy Center</h2>
+</div>
+
+<div class="section">
+
+  <div class="card">
+    <h3>Your privacy matters</h3>
+    <p>
+      We are committed to protecting your personal information and giving you
+      full control over how your data is used on Fluence.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>What data we collect</h3>
+    <ul>
+      <li>Account information (email, username)</li>
+      <li>Profile details you choose to share</li>
+      <li>Messages, comments, and interactions</li>
+      <li>Usage data to improve app experience</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>How your data is used</h3>
+    <ul>
+      <li>To provide core app features</li>
+      <li>To keep your account secure</li>
+      <li>To personalize content and settings</li>
+      <li>To improve performance and reliability</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Your controls</h3>
+    <p>
+      You can control who can see your content, message you, or comment on your
+      posts from the Settings pages.
+    </p>
+    <p class="small">
+      Go to Settings → Privacy, Messages, or Comments to update your preferences.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>Data security</h3>
+    <p>
+      Your data is protected using secure infrastructure, encrypted storage,
+      and strict access controls.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>Need more help?</h3>
+    <p>
+      If you have questions or concerns about your privacy, you can contact our
+      support team anytime from the Help & Support section.
+    </p>
+  </div>
+
+</div>
+
+</body>
+</html>

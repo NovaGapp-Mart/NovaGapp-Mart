@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Become Seller | NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<script>
+  window.supabase = supabase.createClient(
+    window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+    window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+  );
+</script>
+<script src="global.js"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+<style>
+body{margin:0;font-family:Arial;background:#f6f6f6}
+.header{background:#ff6f00;color:#fff;padding:15px;font-size:22px;font-weight:bold}
+.container{max-width:900px;margin:30px auto;padding:15px}
+.card{background:#fff;padding:25px;border-radius:12px}
+button{
+  width:100%;
+  padding:15px;
+  font-size:18px;
+  border:none;
+  background:#2e7d32;
+  color:#fff;
+  border-radius:8px;
+  cursor:pointer
+}
+.badge{
+  display:none;
+  margin:15px 0;
+  padding:12px;
+  background:#e8f5e9;
+  color:#2e7d32;
+  font-weight:bold;
+  border-radius:8px
+}
+.note{
+  margin-top:12px;
+  font-size:13px;
+  color:#666
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">NOVAGAPP Seller Hub</div>
+
+<div class="container">
+  <div class="card">
+    <h2>Become a Professional Seller</h2>
+
+    <div id="badge" class="badge">
+      🚀 Seller Account Active
+    </div>
+
+    <button id="payBtn">Pay <span class="money" data-money="500" data-currency="INR">₹500</span> & Start Selling</button>
+
+    <div class="note">
+      One-time activation • No hidden charges
+    </div>
+  </div>
+</div>
+
+<script>
+const supa = window.supabase;
+let CURRENT_USER = null;
+
+/* AUTH + STATUS */
+(async function init(){
+  const { data } = await supa.auth.getSession();
+  if(!data.session){
+    location.href = "login.html";
+    return;
+  }
+
+  CURRENT_USER = data.session.user;
+
+  const { data: seller } = await supa
+    .from("sellers")
+    .select("is_paid")
+    .eq("user_id", CURRENT_USER.id)
+    .maybeSingle();
+
+  if(!seller){
+    await supa.from("sellers").insert({ user_id: CURRENT_USER.id });
+  }
+
+  if(seller && seller.is_paid){
+    badge.style.display = "block";
+    payBtn.style.display = "none";
+  }
+})();
+
+/* RAZORPAY */
+payBtn.onclick = () => {
+
+  const rzp = new Razorpay({
+    key: window.NOVA_PUBLIC_CONFIG?.razorpayKeyId || "",
+    amount: 50000,
+    currency: "INR",
+    name: "NOVAGAPP",
+    description: "Seller Account Activation",
+
+    handler: async function(res){
+
+      const { error } = await supa.rpc("verify_seller_payment", {
+        p_user_id: CURRENT_USER.id,
+        p_payment_id: res.razorpay_payment_id
+      });
+
+      if(error){
+        alert("Payment verification failed");
+        console.error(error);
+        return;
+      }
+
+      await supa.from("sellers").update({
+        is_paid: true,
+        seller_plan: "active",
+        show_badge: true,
+        paid_at: new Date().toISOString()
+      }).eq("user_id", CURRENT_USER.id);
+
+      alert("Seller account activated");
+      location.href = "seller.html";
+    }
+  });
+
+  rzp.open();
+};
+</script>
+
+</body>
+</html>

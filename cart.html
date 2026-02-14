@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Your Cart - NOVAGAPP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<!-- 🔥 GLOBAL (currency, money, etc.) -->
+<script src="global.js"></script>
+
+<style>
+body{
+  margin:0;
+  font-family: Arial, sans-serif;
+  background:#f5f5f5;
+}
+.header{
+  background:#ff7a00;
+  color:#fff;
+  padding:15px;
+  font-size:20px;
+  font-weight:bold;
+}
+.cart-container{
+  padding:15px;
+}
+.cart-item{
+  background:#fff;
+  border-radius:10px;
+  padding:10px;
+  margin-bottom:15px;
+  display:flex;
+  gap:10px;
+}
+.cart-item img{
+  width:90px;
+  height:90px;
+  object-fit:cover;
+  border-radius:8px;
+}
+.cart-info{ flex:1; }
+.cart-title{
+  font-weight:bold;
+  font-size:16px;
+}
+.cart-price{
+  color:#ff7a00;
+  margin:5px 0;
+  font-size:16px;
+}
+.qty{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin:8px 0;
+}
+.qty button{
+  width:30px;
+  height:30px;
+  border:1px solid #ccc;
+  background:#fff;
+  font-size:18px;
+}
+.actions{
+  font-size:14px;
+  color:#007bff;
+  cursor:pointer;
+}
+.summary{
+  background:#fff;
+  border-radius:10px;
+  padding:15px;
+  margin-top:20px;
+}
+.summary div{
+  display:flex;
+  justify-content:space-between;
+  margin-bottom:8px;
+  font-size:16px;
+}
+.summary .total{
+  font-weight:bold;
+  font-size:18px;
+}
+.place-order{
+  position:fixed;
+  bottom:0;
+  left:0;
+  right:0;
+  background:#fff;
+  padding:10px;
+}
+.place-order button{
+  width:100%;
+  background:#ff7a00;
+  color:#fff;
+  border:none;
+  padding:15px;
+  font-size:18px;
+  border-radius:8px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">Your Cart</div>
+
+<div class="cart-container" id="cart"></div>
+
+<div class="cart-container">
+  <div class="summary">
+    <div><span>Price</span><span id="price">$0</span></div>
+    <div><span>Discount</span><span id="discount">-$0</span></div>
+    <div class="total"><span>Total</span><span id="total">$0</span></div>
+  </div>
+</div>
+
+<div class="place-order">
+  <button onclick="goCheckout()">Place Order</button>
+</div>
+
+<script>
+/* ======================
+   CART LOGIC (LOCAL ONLY)
+====================== */
+
+// READ CART
+let cart = JSON.parse(localStorage.getItem("cart")) || [];
+
+// FIX BROKEN DATA (keep product + seller fields used by checkout/notifications)
+cart = cart.filter(p =>
+  p &&
+  p.id &&
+  p.name &&
+  !isNaN(p.price) &&
+  Number(p.price) > 0
+).map(p => {
+  const image = (Array.isArray(p.images) && p.images[0]) || p.image || "images/no-image.jpg";
+  return {
+    id: p.id,
+    name: p.name,
+    price: Number(p.price),
+    currency: p.currency || "USD",
+    image,
+    images: Array.isArray(p.images) && p.images.length ? p.images : [image],
+    qty: Math.max(1, Number(p.qty) || 1),
+    owner_id: p.owner_id || ""
+  };
+});
+
+localStorage.setItem("cart", JSON.stringify(cart));
+
+let box = document.getElementById("cart");
+
+function toUserCurrency(amount, fromCur){
+  if(typeof window.convertCurrency === "function"){
+    return convertCurrency(Number(amount) || 0, fromCur || "USD", window.USER_CURRENCY || "USD");
+  }
+  return Number(amount) || 0;
+}
+
+function render(){
+  box.innerHTML = "";
+  let total = 0;
+
+  if(cart.length === 0){
+    box.innerHTML = "<p>Your cart is empty</p>";
+  }
+
+  cart.forEach((p,i)=>{
+    total += toUserCurrency(p.price * p.qty, p.currency);
+
+    box.innerHTML += `
+    <div class="cart-item">
+      <img src="${p.image}">
+      <div class="cart-info">
+        <div class="cart-title">${translateProductName(p.name)}</div>
+        <div class="cart-price">${money(p.price, p.currency)}</div>
+
+        <div class="qty">
+          <button onclick="changeQty(${i},-1)">−</button>
+          <span>${p.qty}</span>
+          <button onclick="changeQty(${i},1)">+</button>
+        </div>
+
+        <div class="actions" onclick="removeItem(${i})">Remove</div>
+      </div>
+    </div>`;
+  });
+
+  document.getElementById("price").innerText = money(total, window.USER_CURRENCY || "USD");
+  document.getElementById("discount").innerText = "-" + money(0, window.USER_CURRENCY || "USD");
+  document.getElementById("total").innerText = money(total, window.USER_CURRENCY || "USD");
+}
+
+document.addEventListener("ratesUpdated", render);
+
+function changeQty(i,val){
+  let q = cart[i].qty + val;
+  if(q < 1) return;
+  if(q > 20){ alert("Maximum 20 quantity allowed"); return; }
+  cart[i].qty = q;
+  save();
+}
+
+function removeItem(i){
+  cart.splice(i,1);
+  save();
+}
+
+function save(){
+  localStorage.setItem("cart", JSON.stringify(cart));
+  render();
+}
+
+function goCheckout(){
+  if(cart.length === 0){
+    alert("Your cart is empty");
+    return;
+  }
+  location.href = "checkout.html";
+}
+
+render();
+</script>
+
+</body>
+</html>

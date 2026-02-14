@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Privacy</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- SUPABASE -->
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial}
+body{background:#fff;color:#000}
+
+/* HEADER */
+.header{
+  display:flex;
+  align-items:center;
+  padding:14px;
+  border-bottom:1px solid #eee;
+}
+.header svg{
+  width:22px;
+  height:22px;
+  margin-right:10px;
+  cursor:pointer;
+}
+.header h2{font-size:18px}
+
+/* SECTION */
+.section{
+  padding:14px;
+}
+.item{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:14px 0;
+  border-bottom:1px solid #eee;
+}
+.item span{
+  font-size:15px;
+}
+
+/* TOGGLE */
+.switch{
+  position:relative;
+  width:42px;
+  height:24px;
+}
+.switch input{display:none}
+.slider{
+  position:absolute;
+  inset:0;
+  background:#ccc;
+  border-radius:24px;
+  transition:.3s;
+}
+.slider:before{
+  content:"";
+  position:absolute;
+  width:18px;
+  height:18px;
+  left:3px;
+  top:3px;
+  background:#fff;
+  border-radius:50%;
+  transition:.3s;
+}
+input:checked + .slider{
+  background:#000;
+}
+input:checked + .slider:before{
+  transform:translateX(18px);
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+  <svg onclick="history.back()" viewBox="0 0 24 24">
+    <path d="M15 18l-6-6 6-6"/>
+  </svg>
+  <h2>Privacy</h2>
+</div>
+
+<div class="section">
+  <div class="item">
+    <span>Private account</span>
+    <label class="switch">
+      <input type="checkbox" id="privateAccount">
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="item">
+    <span>Show activity status</span>
+    <label class="switch">
+      <input type="checkbox" id="activityStatus">
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="item">
+    <span>Allow messages</span>
+    <label class="switch">
+      <input type="checkbox" id="messages">
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="item">
+    <span>Allow comments</span>
+    <label class="switch">
+      <input type="checkbox" id="comments">
+      <span class="slider"></span>
+    </label>
+  </div>
+</div>
+
+<script>
+/* 🔐 SUPABASE CONFIG */
+const supabase = supabase.createClient(
+  window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "",
+  window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || ""
+);
+
+const fields = [
+  "privateAccount",
+  "activityStatus",
+  "messages",
+  "comments"
+];
+
+/* AUTH + LOAD */
+(async()=>{
+  const { data } = await supabase.auth.getUser();
+  if(!data.user){
+    location.href="login.html";
+    return;
+  }
+
+  /* LOAD LOCAL (FAST & SAFE) */
+  fields.forEach(f=>{
+    const v = localStorage.getItem("privacy_"+f);
+    if(v !== null){
+      document.getElementById(f).checked = v === "true";
+    }
+  });
+
+  /* SAVE ON CHANGE */
+  fields.forEach(f=>{
+    document.getElementById(f).addEventListener("change",e=>{
+      localStorage.setItem("privacy_"+f, e.target.checked);
+
+      // 🔮 FUTURE DB SYNC (ADD LATER, NO UI CHANGE)
+    });
+  });
+})();
+</script>
+
+</body>
+</html>
