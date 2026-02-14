@@ -61,6 +61,8 @@
 </div>
 
 <script>
+const APP_PUBLIC_ORIGIN = "https://novagapp-mart.onrender.com";
+
 function normalizeConfig(raw){
   return {
     supabaseUrl: String(raw?.supabaseUrl || "").trim(),
@@ -218,7 +220,12 @@ async function googleSignup(){
     return;
   }
 
-  await supa.auth.signInWithOAuth({ provider:"google" });
+  await supa.auth.signInWithOAuth({
+    provider:"google",
+    options:{
+      redirectTo: APP_PUBLIC_ORIGIN + "/onboarding.html"
+    }
+  });
 }
 </script>
 

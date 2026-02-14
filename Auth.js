@@ -2,6 +2,7 @@
 let supabase = null;
 let supabaseReadyPromise = null;
 const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
+const APP_PUBLIC_ORIGIN = "https://novagapp-mart.onrender.com";
 
 function normalizePublicConfig(raw){
   return {
@@ -186,7 +187,7 @@ async function googleLogin(){
   await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
-      redirectTo: window.location.origin + "/index.html"
+      redirectTo: APP_PUBLIC_ORIGIN + "/index.html"
     }
   });
 }

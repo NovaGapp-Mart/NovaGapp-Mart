@@ -1,4 +1,18 @@
 (function(){
+  const RENDER_ORIGIN = "https://novagapp-mart.onrender.com";
+  try{
+    const host = String(location.hostname || "").toLowerCase();
+    const isFile = String(location.protocol || "") === "file:";
+    const isRenderHost = host === "novagapp-mart.onrender.com";
+    if(host && !isFile && !isRenderHost){
+      const target = RENDER_ORIGIN + String(location.pathname || "/") + String(location.search || "") + String(location.hash || "");
+      if(target && target !== location.href){
+        location.replace(target);
+        return;
+      }
+    }
+  }catch(_){ }
+
   const STORAGE_KEY = "nova_public_config_v1";
   const EMPTY_CONFIG = Object.freeze({
     supabaseUrl: "",

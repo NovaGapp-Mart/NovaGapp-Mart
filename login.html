@@ -114,6 +114,8 @@
 </div>
 
 <script>
+const APP_PUBLIC_ORIGIN = "https://novagapp-mart.onrender.com";
+
 function buildContestApiCandidates(){
   const out = [];
   const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
@@ -225,7 +227,7 @@ async function googleLogin(){
   await supa.auth.signInWithOAuth({
     provider:"google",
     options:{
-      redirectTo: window.location.origin + "/onboarding.html"
+      redirectTo: APP_PUBLIC_ORIGIN + "/onboarding.html"
     }
   });
 }
@@ -247,7 +249,7 @@ async function forgotPassword(){
   }
 
   const { error } = await supa.auth.resetPasswordForEmail(email,{
-    redirectTo: window.location.origin + "/reset-password.html"
+    redirectTo: APP_PUBLIC_ORIGIN + "/reset-password.html"
   });
 
   if(error){
