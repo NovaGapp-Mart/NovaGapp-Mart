@@ -46,7 +46,7 @@ const BlobCtor = global.Blob;
 
 const app = express();
 const upload = multer();
-const PORT = Math.max(1, Number(process.env.PORT || 3000) || 3000);
+const PORT = process.env.PORT || 3000;
 const UPLOADS_DIR = path.join(__dirname, "uploads");
 const MANUAL_DIR = path.join(UPLOADS_DIR, "manual-requests");
 const MANUAL_JSON_PATH = path.join(MANUAL_DIR, "requests.json");
@@ -2272,23 +2272,9 @@ app.use((err, req, res, next) => {
 });
 
 function startServer(){
-  try{
-    const server = app.listen(PORT, () => {
-      console.log("Server running on https://novagapp-mart.onrender.com
-");
-    });
-
-    server.on("error", (err) => {
-      console.error("Server startup error:", err?.stack || err);
-      if(err && err.code === "EADDRINUSE"){
-        console.error("Port 3000 is already in use.");
-      }
-      process.exit(1);
-    });
-  }catch(err){
-    console.error("Server failed to start:", err?.stack || err);
-    process.exit(1);
-  }
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on port ${PORT}`);
+  });
 }
 
 process.on("uncaughtException", (err) => {
