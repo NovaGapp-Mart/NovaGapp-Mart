@@ -122,7 +122,7 @@ function renderOrders(orders){
   }
 
   rows.forEach(({ order, item, rowKey })=>{
-    const image = (Array.isArray(item.images) && item.images[0]) || item.image || "images/no-image.jpg";
+    const image = (Array.isArray(item.images) && item.images[0]) || item.image || "Images/no-image.jpg";
     const qty = Number(item.qty || 1);
     const lineTotal = (Number(item.price || 0) * qty) || Number(order.total || 0);
     const rowStatus = itemStatus(item, order);
@@ -219,4 +219,3 @@ function subscribeOrderChanges(userId){
 
 </body>
 </html>
-

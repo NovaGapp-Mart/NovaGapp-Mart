@@ -13,3 +13,7 @@ node_modules/
 .DS_Store
 Thumbs.db
 .vscode/
+
+# local temp artifacts
+__tmp_readmore_head.html
+__tmp_readmore_head_utf8.html

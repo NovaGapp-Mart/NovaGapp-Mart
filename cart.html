@@ -136,7 +136,7 @@ cart = cart.filter(p =>
   !isNaN(p.price) &&
   Number(p.price) > 0
 ).map(p => {
-  const image = (Array.isArray(p.images) && p.images[0]) || p.image || "images/no-image.jpg";
+  const image = (Array.isArray(p.images) && p.images[0]) || p.image || "Images/no-image.jpg";
   return {
     id: p.id,
     name: p.name,

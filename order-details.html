@@ -315,7 +315,7 @@ function renderItems(){
     row.className = "item";
     const img = Array.isArray(i.images) ? i.images[0] : i.image;
     row.innerHTML = `
-      <img src="${img || 'images/no-image.png'}" />
+      <img src="${img || 'Images/no-image.png'}" />
       <div class="item-info">
         <div class="item-name">${translateProductName(i.name || "Item")}</div>
         <div class="item-meta">Qty: ${Number(i.qty || 0)}</div>
@@ -405,5 +405,3 @@ function goBack(){
 
 </body>
 </html>
-
-

@@ -336,7 +336,7 @@ async function searchUsers(){
         ? `<span class="seller-star">&#11088; Seller</span>`
         : "";
       d.innerHTML = `
-        <img src="${u.photo || 'images/user.png'}">
+        <img src="${u.photo || 'Images/user.png'}">
         <div class="info">
           <div class="name-row">
             <b>${u.username || "User"}</b>
@@ -408,7 +408,7 @@ async function searchUsers(){
       const productText = productNames.length ? productNames.join(", ") : "No products listed";
       const badgeHtml = sellerSet.has(u.user_id) ? `<span class="seller-badge">Seller</span>` : "";
       d.innerHTML = `
-        <img src="${u.photo || 'images/user.png'}">
+        <img src="${u.photo || 'Images/user.png'}">
         <div class="info">
           <div class="name-row">
             <b>${name}</b>

@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Details – NOVAGAPP</title>
+<title>Publish Details - NOVAGAPP</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <style>
@@ -18,6 +18,24 @@ body{
   align-items:center;
   border-bottom:1px solid #ddd;
 }
+.controls{
+  padding:12px 15px 0;
+}
+label{
+  display:block;
+  font-size:13px;
+  color:#555;
+  margin-bottom:6px;
+}
+select{
+  width:100%;
+  border:1px solid #ddd;
+  border-radius:10px;
+  padding:10px;
+  font-size:14px;
+  outline:none;
+  background:#fff;
+}
 textarea{
   width:100%;
   height:120px;
@@ -25,6 +43,7 @@ textarea{
   padding:15px;
   font-size:15px;
   outline:none;
+  box-sizing:border-box;
 }
 button{
   background:#ff6a00;
@@ -36,10 +55,9 @@ button{
 }
 .preview{
   padding:15px;
-}
-.preview img,.preview video{
-  width:100%;
-  border-radius:14px;
+  color:#444;
+  font-size:14px;
+  line-height:1.4;
 }
 </style>
 </head>
@@ -51,46 +69,46 @@ button{
   <button onclick="publish()">Share</button>
 </div>
 
+<div class="controls">
+  <label for="type">Publish as</label>
+  <select id="type">
+    <option value="post">Post</option>
+    <option value="reel">Reel</option>
+  </select>
+</div>
+
 <div class="preview" id="preview"></div>
 
-<textarea id="caption" placeholder="Write a caption… #hashtag"></textarea>
+<textarea id="caption" placeholder="Write a caption... #hashtag"></textarea>
 
 <script>
-/* ======================
-   SECURITY CHECK
-====================== */
-if(!window.selectedMedia || !window.selectedType){
-  alert("Media not found. Please select again.");
-  location.href = "create.html";
-}
+const typeSelect = document.getElementById("type");
+const preview = document.getElementById("preview");
+const caption = document.getElementById("caption");
 
-/* ======================
-   PREVIEW
-====================== */
-const file = window.selectedMedia;
-const type = window.selectedType;
+(function init(){
+  const params = new URLSearchParams(location.search);
+  const type = String(params.get("type") || "").toLowerCase();
+  if(type === "reel" || type === "post"){
+    typeSelect.value = type;
+  }
+  preview.textContent = "Continue to the creator. Media upload is handled in the selected page.";
+})();
 
-const url = URL.createObjectURL(file);
-
-preview.innerHTML = type === "reel"
-  ? `<video src="${url}" controls></video>`
-  : `<img src="${url}">`;
-
-/* ======================
-   PUBLISH
-====================== */
 function publish(){
   const text = caption.value.trim();
-
-  // store caption in memory (optional)
-  window.selectedCaption = text;
-
-  // 🚀 NEXT STEP: REAL UPLOAD PAGE
-  if(type === "reel"){
-    location.href = "upload-reel.html";
-  }else{
-    location.href = "upload-post.html";
+  if(text){
+    try{
+      sessionStorage.setItem("nova_draft_caption", text);
+    }catch(_){ }
   }
+
+  const type = typeSelect.value === "reel" ? "reel" : "post";
+  if(type === "reel"){
+    location.href = "reel.html?create=1";
+    return;
+  }
+  location.href = "post.html?create=1&type=post";
 }
 </script>
 

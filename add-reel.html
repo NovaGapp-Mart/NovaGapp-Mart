@@ -68,10 +68,7 @@ button{
 </div>
 
 <script>
-/* ======================
-   GLOBAL MEDIA HOLDER
-   (NO TEMP STORAGE)
-====================== */
+/* Legacy compatibility page: route to active creators. */
 window.selectedMedia = null;
 window.selectedType  = null;
 
@@ -99,7 +96,11 @@ function next(){
 
   // 🚨 IMPORTANT:
   // Do NOT reload between pages
-  location.href = "add-details.html";
+  if(window.selectedType === "reel"){
+    location.href = "reel.html?create=1";
+    return;
+  }
+  location.href = "post.html?create=1&type=post";
 }
 </script>
 

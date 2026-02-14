@@ -249,7 +249,7 @@
 <body>
 
 <header class="top">
-  <img src="images/logo.png" class="logo">
+  <img src="Images/logo.png" class="logo">
   <span class="company-name">NovaGapp Mart</span>
   <div class="notif-bar" id="notifBar" onclick="location.href='notifications.html'">
     <span class="bell">&#128276;</span>
@@ -268,7 +268,7 @@
     <h2 id="bannerTitle"></h2>
     <p id="bannerSub"></p>
   </div>
-  <img src="images/main.jpg" class="banner-img">
+  <img src="Images/main.jpg" class="banner-img">
 </div>
 
 <h3 class="section-title" id="recommendTitle" style="padding:15px 0 0 15px;"></h3>
@@ -280,7 +280,7 @@
 
 <div class="contest-poster-overlay" id="contestPosterOverlay" aria-hidden="true">
   <div class="contest-poster-card">
-    <button type="button" class="contest-poster-close" id="contestPosterClose" aria-label="Close">×</button>
+    <button type="button" class="contest-poster-close" id="contestPosterClose" aria-label="Close">ï¿½</button>
     <img class="contest-poster-image" id="contestPosterImage" src="Images/rolls-royce.png" alt="Contest Poster">
     <div class="contest-poster-dots" id="contestPosterDots"></div>
     <button type="button" class="contest-poster-vote" id="contestPosterVoteBtn">Vote Now</button>
@@ -446,7 +446,7 @@ async function renderProducts(searchText = ""){
   data.forEach(p => {
 
     // safe JSON image handling
-    let image = "images/no-image.png";
+    let image = "Images/no-image.png";
     if (Array.isArray(p.images) && p.images.length > 0) {
       image = p.images[0];
     } else if (typeof p.images === "string") {
