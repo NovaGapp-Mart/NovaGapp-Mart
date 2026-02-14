@@ -47,7 +47,8 @@
       const onLiveServer = String(location.port || "") === "5500";
       if(local && onLiveServer){
         push("http://127.0.0.1:3000/api/public/config");
-        push("http://localhost:3000/api/public/config");
+        push("https://novagapp-mart.onrender.com
+/api/public/config");
       }
     }catch(_){ }
 

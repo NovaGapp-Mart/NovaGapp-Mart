@@ -87,7 +87,8 @@
       const liveServer = String(location.port || "") === "5500";
       if(isLocal && liveServer){
         pushEndpoint("http://127.0.0.1:3000/api/public/config");
-        pushEndpoint("http://localhost:3000/api/public/config");
+        pushEndpoint("https://novagapp-mart.onrender.com
+/api/public/config");
       }
     }catch(_){ }
 

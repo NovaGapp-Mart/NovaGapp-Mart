@@ -104,7 +104,8 @@ const supa = window.supa;
 let currentUser = null;
 let productData = null;
 let NEW_IMAGES = [];
-const API_BASE = localStorage.getItem("tryonApiBase") || "http://localhost:3000";
+const API_BASE = localStorage.getItem("tryonApiBase") || "https://novagapp-mart.onrender.com
+";
 
 async function cacheProductImage(productId, productUrl){
   if(!productId || !productUrl) return;

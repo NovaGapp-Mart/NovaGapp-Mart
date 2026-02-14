@@ -91,7 +91,8 @@ let currentUser = null;
 let SELLER_PROFILE = null;
 let SELECTED_IMAGES = [];
 const FILE_KEYS = new Set();
-const API_BASE = localStorage.getItem("tryonApiBase") || "http://localhost:3000";
+const API_BASE = localStorage.getItem("tryonApiBase") || "https://novagapp-mart.onrender.com
+";
 
 async function cacheProductImage(productId, productUrl){
   if(!productId || !productUrl) return;

@@ -118,7 +118,8 @@ function buildContestApiCandidates(){
   push(window.CONTEST_API_BASE || window.API_BASE || "");
   if(isLocal){
     push("http://127.0.0.1:3000");
-    push("http://localhost:3000");
+    push("https://novagapp-mart.onrender.com
+");
   }
   if(!out.length && /^https?:\/\//i.test(location.origin)){
     out.push(location.origin.replace(/\/+$/g, ""));

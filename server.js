@@ -2274,7 +2274,8 @@ app.use((err, req, res, next) => {
 function startServer(){
   try{
     const server = app.listen(PORT, () => {
-      console.log("Server running on http://localhost:3000");
+      console.log("Server running on https://novagapp-mart.onrender.com
+");
     });
 
     server.on("error", (err) => {
