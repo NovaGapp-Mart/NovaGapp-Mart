@@ -178,6 +178,23 @@ async function fetchLongVideosViaApi(opts){
   if(!payload||payload.ok!==true||!Array.isArray(payload.data)) throw new Error("public_api_bad_payload");
   return payload.data;
 }
+async function fetchLongVideosViaSupa(opts){
+  let q=window.NOVA.supa
+    .from("long_videos")
+    .select("id,user_id,video_url,thumb_url,title,description,created_at")
+    .order("created_at",{ascending:false});
+  if(opts?.focus){
+    q=q.eq("id",String(opts.focus||"")).limit(1);
+  }else{
+    const from=Math.max(0,Number(opts?.page)||0)*Math.max(1,Math.min(20,Number(opts?.size)||PAGE_SIZE));
+    const to=from+Math.max(1,Math.min(20,Number(opts?.size)||PAGE_SIZE))-1;
+    q=q.range(from,to);
+    if(feedUserId&&creatorOnly) q=q.eq("user_id",feedUserId);
+    if(opts?.search) q=q.ilike("title",`%${String(opts.search||"").trim()}%`);
+  }
+  const {data,error}=await q;
+  return {data:Array.isArray(data)?data:[],error:error||null};
+}
 function loadSaved(){try{const a=JSON.parse(localStorage.getItem(SAVE_KEY)||"[]");return new Set((Array.isArray(a)?a:[]).map(v=>String(v||"")))}catch{return new Set()}}
 function persistSaved(){localStorage.setItem(SAVE_KEY,JSON.stringify(Array.from(saved)))}
 function normalizeKeywords(raw){const t=String(raw||"").trim();if(!t)return null;if(!t.includes(","))return t;const list=t.split(",").map(s=>s.trim()).filter(Boolean);return list.length?list.join(", "):null}
@@ -195,17 +212,31 @@ function getMissingColumnName(error){
   return "";
 }
 async function insertLongVideoPublic(payload){
-  const row={...(payload||{}),is_public:true,visibility:"public",public:true};
+  const base={...(payload||{}),is_public:true,visibility:"public",public:true};
   const required=new Set(Object.keys(payload||{}).map(k=>String(k||"").toLowerCase()));
-  while(true){
-    const {error}=await window.NOVA.supa.from("long_videos").insert(row);
-    if(!error) return;
-    const missing=getMissingColumnName(error);
-    if(!missing||!Object.prototype.hasOwnProperty.call(row,missing)||required.has(missing)){
-      throw error;
+  const rawKeywords=String(base.keywords||"").trim();
+  const keywordList=rawKeywords?rawKeywords.split(",").map(s=>s.trim()).filter(Boolean):[];
+  const keywordVariants=[];
+  if(rawKeywords) keywordVariants.push(rawKeywords);
+  if(keywordList.length) keywordVariants.push(keywordList);
+  keywordVariants.push(null);
+
+  let lastError=null;
+  for(const kw of keywordVariants){
+    const row={...base,keywords:kw};
+    while(true){
+      const {error}=await window.NOVA.supa.from("long_videos").insert(row);
+      if(!error) return;
+      const missing=getMissingColumnName(error);
+      if(missing&&Object.prototype.hasOwnProperty.call(row,missing)&&!required.has(missing)){
+        delete row[missing];
+        continue;
+      }
+      lastError=error;
+      break;
     }
-    delete row[missing];
   }
+  throw(lastError||new Error("long_video_insert_failed"));
 }
 function setMode(m){mode=String(m||"feed");if(mode==="detail"){detailPane.classList.add("show");detailPane.setAttribute("aria-hidden","false");mini.hidden=true;return}if(mode==="mini"){detailPane.classList.remove("show");detailPane.setAttribute("aria-hidden","true");mini.hidden=false;return}detailPane.classList.remove("show");detailPane.setAttribute("aria-hidden","true");mini.hidden=true}
 function setReactionUi(r){btnLike.classList.toggle("active",r==="like");btnDislike.classList.toggle("active",r==="dislike")}
@@ -327,27 +358,30 @@ async function loadMore(){
     return;
   }
 
-  let data=null,error=null;
+  let apiData=[],supaData=[],apiError=null,supaError=null;
   try{
-    data=await fetchLongVideosViaApi({
+    apiData=await fetchLongVideosViaApi({
       page,
       size:PAGE_SIZE,
       search:searchQuery
     });
   }catch(apiErr){
-    let q=window.NOVA.supa
-      .from("long_videos")
-      .select("id,user_id,video_url,thumb_url,title,description,created_at")
-      .order("created_at",{ascending:false})
-      .range(page*PAGE_SIZE,page*PAGE_SIZE+PAGE_SIZE-1);
-
-    if(feedUserId&&creatorOnly) q=q.eq("user_id",feedUserId);
-    if(searchQuery) q=q.ilike("title",`%${searchQuery}%`);
-
-    const res=await q;
-    data=res.data;
-    error=res.error;
+    apiError=apiErr;
   }
+  try{
+    const supaRes=await fetchLongVideosViaSupa({
+      page,
+      size:PAGE_SIZE,
+      search:searchQuery
+    });
+    supaData=supaRes.data||[];
+    supaError=supaRes.error||null;
+  }catch(err){
+    supaError=err;
+  }
+
+  const data=(supaData&&supaData.length)?supaData:(apiData||[]);
+  const error=(data&&data.length)?null:(supaError&&apiError?supaError:null);
 
   if(error){
     console.error(error);
@@ -379,16 +413,18 @@ async function loadMore(){
 async function ensureFocus(){
   if(!focusId||map.has(String(focusId))) return;
   try{
-    const viaApi=await fetchLongVideosViaApi({focus:focusId,page:0,size:1});
-    if(Array.isArray(viaApi)&&viaApi.length&&viaApi[0]?.id){
-      await renderCard(viaApi[0],{prepend:true});
+    const supaRes=await fetchLongVideosViaSupa({focus:focusId,page:0,size:1});
+    if(Array.isArray(supaRes.data)&&supaRes.data.length&&supaRes.data[0]?.id){
+      await renderCard(supaRes.data[0],{prepend:true});
       return;
     }
   }catch{}
-  let q=window.NOVA.supa.from("long_videos").select("id,user_id,video_url,thumb_url,title,description,created_at").eq("id",focusId).maybeSingle();
-  if(feedUserId&&creatorOnly) q=q.eq("user_id",feedUserId);
-  const {data,error}=await q;
-  if(!error&&data?.id) await renderCard(data,{prepend:true});
+  try{
+    const viaApi=await fetchLongVideosViaApi({focus:focusId,page:0,size:1});
+    if(Array.isArray(viaApi)&&viaApi.length&&viaApi[0]?.id){
+      await renderCard(viaApi[0],{prepend:true});
+    }
+  }catch{}
 }
 
 async function setVideo(video,time,play){

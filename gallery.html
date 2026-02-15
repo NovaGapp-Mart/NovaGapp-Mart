@@ -836,6 +836,32 @@ async function insertRowWithFallback(table, payload, requiredColumns){
   }
 }
 
+async function insertLongVideoLoose(payload){
+  const base = { ...(payload || {}) };
+  const rawKeywords = String(base.keywords || "").trim();
+  const listKeywords = rawKeywords
+    ? rawKeywords.split(",").map(k => k.trim()).filter(Boolean)
+    : [];
+  const variants = [];
+  if(rawKeywords) variants.push(rawKeywords);
+  if(listKeywords.length) variants.push(listKeywords);
+  variants.push(null);
+
+  let lastError = null;
+  for(const variant of variants){
+    const { error } = await insertRowWithFallback("long_videos", {
+      ...base,
+      keywords: variant,
+      is_public: true,
+      visibility: "public",
+      public: true
+    }, ["user_id", "video_url"]);
+    if(!error) return { error:null };
+    lastError = error;
+  }
+  return { error:lastError };
+}
+
 function createPostBatchId(){
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
@@ -941,7 +967,7 @@ uploadBtn.addEventListener("click", async () => {
     }else if(typeKey === "long"){
       const path = window.NOVA.makePath(user.id, primaryFile);
       const mediaUrl = await window.NOVA.uploadToBucket(config.bucket, primaryFile, path);
-      const { error } = await insertRowWithFallback("long_videos", {
+      const { error } = await insertLongVideoLoose({
         user_id: user.id,
         video_url: mediaUrl,
         thumb_url: thumbUrl,
@@ -950,11 +976,8 @@ uploadBtn.addEventListener("click", async () => {
         keywords: keywords || null,
         duration: Math.round(selectedMeta?.duration || 0),
         width: selectedMeta?.width || null,
-        height: selectedMeta?.height || null,
-        is_public: true,
-        visibility: "public",
-        public: true
-      }, ["user_id", "video_url"]);
+        height: selectedMeta?.height || null
+      });
       if(error) throw error;
     }else if(typeKey === "post"){
       const batchId = createPostBatchId();
