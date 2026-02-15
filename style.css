@@ -7,6 +7,8 @@ html,body{
   width:100%;
   max-width:100%;
   overflow-x:hidden;
+  -webkit-text-size-adjust:100%;
+  text-size-adjust:100%;
 }
 img,video,canvas{
   max-width:100%;
@@ -171,6 +173,81 @@ button{
 @media (max-width:520px){
   .products{
     grid-template-columns:1fr;
+  }
+}
+
+/* HOME PAGE MOBILE TUNING */
+@media (max-width:768px){
+  .home-page{
+    padding-bottom:116px;
+  }
+  .home-page .top{
+    padding:14px 12px;
+  }
+  .home-page .logo{
+    height:34px;
+  }
+  .home-page .company-name{
+    font-size:17px;
+  }
+  .home-page .search-box{
+    margin:12px;
+    padding:11px;
+  }
+  .home-page .search-box input{
+    font-size:15px;
+  }
+  .home-page .search-btn{
+    width:40px;
+    height:40px;
+    font-size:15px;
+  }
+  .home-page .banner{
+    margin:12px;
+    padding:14px;
+  }
+  .home-page .banner h2{
+    font-size:28px;
+    line-height:1.15;
+    margin:0 0 8px;
+  }
+  .home-page .banner p{
+    font-size:14px;
+    margin:0;
+  }
+  .home-page .banner-img{
+    width:86px;
+    height:86px;
+    object-fit:cover;
+  }
+  .home-page .section-title{
+    font-size:22px;
+  }
+  .home-page .bottom-nav{
+    padding:8px 0;
+  }
+  .home-page .bottom-nav img{
+    width:23px;
+  }
+  .home-page .bottom-nav div{
+    font-size:12px;
+  }
+  .home-page .upgrade-box{
+    bottom:72px;
+    padding:10px 14px;
+  }
+  .home-page .upgrade-box button{
+    padding:11px 18px;
+    font-size:13px;
+  }
+}
+
+@media (max-width:520px){
+  .home-page .products{
+    grid-template-columns:1fr;
+  }
+  .home-page .product img{
+    height:180px;
   }
 }
 /* LOGIN PAGE */
