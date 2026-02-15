@@ -148,7 +148,7 @@ const commentsBg=$("commentsBg"),comments=$("comments"),commentsClose=$("comment
 const displayName=$("displayName"),handle=$("handle"),avatar=$("avatar");
 const downloadLabel=$("downloadLabel");
 
-const params=new URLSearchParams(location.search),focusId=params.get("focus")||"",creatorOnly=params.get("only")==="1",SAVE_KEY="nova_saved_long_videos",VIEW_KEY="nova_long_views_",PAGE_SIZE=8;
+const params=new URLSearchParams(location.search),focusId=params.get("focus")||"",SAVE_KEY="nova_saved_long_videos",VIEW_KEY="nova_long_views_",PAGE_SIZE=8;
 let me=null,page=0,loading=false,done=false,searchQuery="",mode="feed",active=null,activeReaction=null,reactionBusy=false,activeFollow=false,activeFollowers=0,focusApplied=false,searchTimer=null,startX=0,startY=0,downloadBusy=false;
 const rendered=new Set(),items=[],map=new Map(),cards=new Map(),creatorCache={},followersCache={},sessionViews=new Set();
 let saved=loadSaved();
@@ -368,17 +368,13 @@ async function loadMore(){
   }
 
   let data=[],error=null;
-  if(!creatorOnly){
-    try{
-      data=await fetchLongVideosViaApi({
-        page,
-        size:PAGE_SIZE,
-        search:searchQuery
-      });
-    }catch(apiErr){
-      error=apiErr;
-    }
-  }else{
+  try{
+    data=await fetchLongVideosViaApi({
+      page,
+      size:PAGE_SIZE,
+      search:searchQuery
+    });
+  }catch(apiErr){
     try{
       const supaRes=await fetchLongVideosViaSupa({
         page,
@@ -388,7 +384,7 @@ async function loadMore(){
       data=supaRes.data||[];
       error=supaRes.error||null;
     }catch(err){
-      error=err;
+      error=err||apiErr;
     }
   }
 
@@ -397,9 +393,7 @@ async function loadMore(){
     loading=false;
     if(!items.length){
       feedEmpty.hidden=false;
-      feedEmpty.textContent=creatorOnly
-        ? "Unable to load videos."
-        : "Public feed unavailable. Admin fix needed: configure SUPABASE_SERVICE_ROLE_KEY and run public RLS SQL.";
+      feedEmpty.textContent="Public feed unavailable. Admin fix needed: configure SUPABASE_SERVICE_ROLE_KEY and run public RLS SQL.";
     }
     return;
   }
@@ -423,19 +417,17 @@ async function loadMore(){
 
 async function ensureFocus(){
   if(!focusId||map.has(String(focusId))) return;
-  if(!creatorOnly){
-    try{
-      const viaApi=await fetchLongVideosViaApi({focus:focusId,page:0,size:1});
-      if(Array.isArray(viaApi)&&viaApi.length&&viaApi[0]?.id){
-        await renderCard(viaApi[0],{prepend:true});
-      }
-    }catch{}
-    return;
-  }
   try{
-    const supaRes=await fetchLongVideosViaSupa({focus:focusId,page:0,size:1});
-    if(Array.isArray(supaRes.data)&&supaRes.data.length&&supaRes.data[0]?.id){
-      await renderCard(supaRes.data[0],{prepend:true});
+    const viaApi=await fetchLongVideosViaApi({focus:focusId,page:0,size:1});
+    if(Array.isArray(viaApi)&&viaApi.length&&viaApi[0]?.id){
+      await renderCard(viaApi[0],{prepend:true});
+      return;
+    }
+  }catch{}
+  try{
+    const viaSupa=await fetchLongVideosViaSupa({focus:focusId,page:0,size:1});
+    if(Array.isArray(viaSupa.data)&&viaSupa.data.length&&viaSupa.data[0]?.id){
+      await renderCard(viaSupa.data[0],{prepend:true});
     }
   }catch{}
 }
