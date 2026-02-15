@@ -5,8 +5,10 @@
 <title>MVideo - NOVAGAPP</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="global.js"></script>
 <script src="public-config.js"></script>
 <script src="social.js"></script>
+<script src="offline-video.js"></script>
 <style>
 :root{--bg:#fff;--tx:#111;--mut:#666;--line:#e8e8e8;--soft:#f4f4f4;--acc:#ff6a00}
 *{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:var(--tx)}
@@ -34,7 +36,7 @@
 .detail-player video{width:100%;max-height:40vh;aspect-ratio:16/9;object-fit:contain;background:#000}
 .detail-tools{display:flex;justify-content:flex-end;align-items:center;padding:7px 10px;border-bottom:1px solid var(--line)}
 .desc-toggle{border:none;background:var(--soft);color:#333;height:30px;padding:0 12px;border-radius:999px;font-size:12px;cursor:pointer}
-.detail-actions{min-height:60px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:repeat(6,minmax(0,1fr));padding:8px 4px;gap:2px}
+.detail-actions{min-height:60px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:repeat(7,minmax(0,1fr));padding:8px 4px;gap:2px}
 .action-item{border:none;background:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:4px 0;cursor:pointer;color:#222}
 .action-item svg{width:19px;height:19px;fill:#222}
 .action-item.active svg{fill:var(--acc)}
@@ -110,6 +112,7 @@
     <button class="action-item" id="btnComment" type="button"><svg viewBox="0 0 24 24"><path d="M21 6h-18v12h4v4l4-4h10z"/></svg><span class="action-count" id="countComment">0</span><span class="action-label">Comment</span></button>
     <button class="action-item" id="btnShare" type="button"><svg viewBox="0 0 24 24"><path d="M12 3l9 9-9 9-9-9 9-9z"/></svg><span class="action-count" id="countShare">0</span><span class="action-label">Share</span></button>
     <button class="action-item" id="btnSave" type="button"><svg viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v16l7-3 7 3V5a2 2 0 0 0-2-2z"/></svg><span class="action-count">&nbsp;</span><span class="action-label">Save</span></button>
+    <button class="action-item" id="btnDownload" type="button"><svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zm7-18v10.17l3.59-3.58L17 10l-5 5-5-5 1.41-1.41L11 12.17V2h1z"/></svg><span class="action-count">&nbsp;</span><span class="action-label" id="downloadLabel">Download</span></button>
     <button class="action-item" id="btnFull" type="button"><svg viewBox="0 0 24 24"><path d="M7 14h-2v7h7v-2H7v-5zm0-4h2V5h5V3H5v7zm10 9h-5v2h7v-7h-2v5zm0-16v2h5v5h2V3h-7z"/></svg><span class="action-count">&nbsp;</span><span class="action-label">Full</span></button>
   </div>
   <div class="detail-channel" id="channelRow"><div class="channel-avatar" id="channelAvatar">U</div><div class="channel-meta"><div class="channel-name" id="channelName">User</div><small id="channelSub">0 followers . 0 views</small></div><button class="follow-btn" id="followBtn" type="button">Follow</button></div>
@@ -138,14 +141,15 @@
 <script>
 const $=id=>document.getElementById(id);
 const feed=$("feed"),feedEmpty=$("feedEmpty"),sentinel=$("sentinel"),searchInput=$("searchInput"),videoInput=$("videoInput");
-const detailPane=$("detailPane"),detailVideo=$("detailVideo"),backBtn=$("backBtn"),miniBtn=$("miniBtn"),btnLike=$("btnLike"),btnDislike=$("btnDislike"),btnComment=$("btnComment"),btnShare=$("btnShare"),btnSave=$("btnSave"),btnFull=$("btnFull"),btnDescToggle=$("btnDescToggle"),detailMeta=$("detailMeta"),btnCommentView=$("btnCommentView");
+const detailPane=$("detailPane"),detailVideo=$("detailVideo"),backBtn=$("backBtn"),miniBtn=$("miniBtn"),btnLike=$("btnLike"),btnDislike=$("btnDislike"),btnComment=$("btnComment"),btnShare=$("btnShare"),btnSave=$("btnSave"),btnDownload=$("btnDownload"),btnFull=$("btnFull"),btnDescToggle=$("btnDescToggle"),detailMeta=$("detailMeta"),btnCommentView=$("btnCommentView");
 const countLike=$("countLike"),countDislike=$("countDislike"),countComment=$("countComment"),countShare=$("countShare"),commentViewCount=$("commentViewCount"),detailTitle=$("detailTitle"),detailDesc=$("detailDesc"),channelRow=$("channelRow"),channelAvatar=$("channelAvatar"),channelName=$("channelName"),channelSub=$("channelSub"),followBtn=$("followBtn"),recommend=$("recommend");
 const mini=$("mini"),miniVideo=$("miniVideo"),miniExpand=$("miniExpand"),miniClose=$("miniClose");
 const commentsBg=$("commentsBg"),comments=$("comments"),commentsClose=$("commentsClose"),commentsList=$("commentsList"),commentInput=$("commentInput"),commentSend=$("commentSend");
 const displayName=$("displayName"),handle=$("handle"),avatar=$("avatar");
+const downloadLabel=$("downloadLabel");
 
-const params=new URLSearchParams(location.search),feedUserId=params.get("uid")||"",focusId=params.get("focus")||"",SAVE_KEY="nova_saved_long_videos",VIEW_KEY="nova_long_views_",PAGE_SIZE=8;
-let me=null,page=0,loading=false,done=false,searchQuery="",mode="feed",active=null,activeReaction=null,reactionBusy=false,activeFollow=false,activeFollowers=0,focusApplied=false,searchTimer=null,startX=0,startY=0;
+const params=new URLSearchParams(location.search),feedUserId=params.get("uid")||"",focusId=params.get("focus")||"",creatorOnly=params.get("only")==="1",SAVE_KEY="nova_saved_long_videos",VIEW_KEY="nova_long_views_",PAGE_SIZE=8;
+let me=null,page=0,loading=false,done=false,searchQuery="",mode="feed",active=null,activeReaction=null,reactionBusy=false,activeFollow=false,activeFollowers=0,focusApplied=false,searchTimer=null,startX=0,startY=0,downloadBusy=false;
 const rendered=new Set(),items=[],map=new Map(),cards=new Map(),creatorCache={},followersCache={},sessionViews=new Set();
 let saved=loadSaved();
 
@@ -191,6 +195,32 @@ function setMode(m){mode=String(m||"feed");if(mode==="detail"){detailPane.classL
 function setReactionUi(r){btnLike.classList.toggle("active",r==="like");btnDislike.classList.toggle("active",r==="dislike")}
 function setFollowUi(){if(!active){followBtn.textContent="Follow";followBtn.classList.remove("following");followBtn.disabled=true;return}if(me&&me.id&&String(me.id)===String(active.user_id)){followBtn.textContent="You";followBtn.classList.remove("following");followBtn.disabled=true;return}followBtn.disabled=false;followBtn.textContent=activeFollow?"Followed":"Follow";followBtn.classList.toggle("following",activeFollow)}
 function renderSaveUi(){if(!active){btnSave.classList.remove("active");return}btnSave.classList.toggle("active",saved.has(String(active.id)))}
+function hasOfflineStore(){return !!(window.NOVA_OFFLINE&&typeof window.NOVA_OFFLINE.save==="function"&&typeof window.NOVA_OFFLINE.has==="function")}
+async function renderDownloadUi(){
+  if(!btnDownload||!downloadLabel) return;
+  if(!active){
+    btnDownload.classList.remove("active");
+    downloadLabel.textContent="Download";
+    return;
+  }
+  if(downloadBusy){
+    downloadLabel.textContent="Saving...";
+    return;
+  }
+  if(!hasOfflineStore()){
+    btnDownload.classList.remove("active");
+    downloadLabel.textContent="Download";
+    return;
+  }
+  try{
+    const stored=await window.NOVA_OFFLINE.has("long",active.id);
+    btnDownload.classList.toggle("active",!!stored);
+    downloadLabel.textContent=stored?"Saved":"Download";
+  }catch{
+    btnDownload.classList.remove("active");
+    downloadLabel.textContent="Download";
+  }
+}
 function renderChannelSub(){if(!active){channelSub.textContent="0 followers . 0 views";return}channelSub.textContent=`${compact(activeFollowers)} followers . ${fmt(viewCount(active.id))} views`}
 function setDescriptionVisible(show){detailMeta.hidden=!show}
 function syncCommentViewCount(){commentViewCount.textContent=countComment.textContent||"0"}
@@ -287,7 +317,7 @@ async function loadMore(){
     .order("created_at",{ascending:false})
     .range(page*PAGE_SIZE,page*PAGE_SIZE+PAGE_SIZE-1);
 
-  if(feedUserId) q=q.eq("user_id",feedUserId);
+  if(feedUserId&&creatorOnly) q=q.eq("user_id",feedUserId);
   if(searchQuery) q=q.ilike("title",`%${searchQuery}%`);
 
   const {data,error}=await q;
@@ -321,7 +351,7 @@ async function loadMore(){
 async function ensureFocus(){
   if(!focusId||map.has(String(focusId))) return;
   let q=window.NOVA.supa.from("long_videos").select("id,user_id,video_url,thumb_url,title,description,created_at").eq("id",focusId).maybeSingle();
-  if(feedUserId) q=q.eq("user_id",feedUserId);
+  if(feedUserId&&creatorOnly) q=q.eq("user_id",feedUserId);
   const {data,error}=await q;
   if(!error&&data?.id) await renderCard(data,{prepend:true});
 }
@@ -409,6 +439,7 @@ async function openDetail(id,opt){
   renderChannelSub();
   await hydrateDetail(it);
   renderSaveUi();
+  await renderDownloadUi();
   await renderRecommend(it.id);
 
   await setVideo(detailVideo,opt?.start||0,opt?.play!==false);
@@ -560,7 +591,6 @@ async function doShare(){
   if(!active) return;
   const text=active.title||"Long Video";
   const url=new URL("m-video.html",location.href);
-  if(active.user_id) url.searchParams.set("uid",active.user_id);
   url.searchParams.set("focus",active.id);
 
   let shared=false,channel="native";
@@ -594,6 +624,34 @@ async function doShare(){
       await window.NOVA.trackShare("long",active.id,channel);
       countShare.textContent=fmt(await window.NOVA.getShareCount("long",active.id));
     }catch{}
+  }
+}
+
+async function downloadActiveVideo(){
+  if(!active||downloadBusy) return;
+  if(!hasOfflineStore()){
+    alert("Offline download is unavailable on this browser.");
+    return;
+  }
+  downloadBusy=true;
+  await renderDownloadUi();
+  try{
+    await window.NOVA_OFFLINE.save({
+      id: active.id,
+      type: "long",
+      title: active.title || "Long Video",
+      sourceUrl: active.video_url,
+      thumbUrl: active.thumb_url || "",
+      creatorName: channelName.textContent || "User"
+    });
+    await renderDownloadUi();
+    alert("Video saved. Open dowlond.html to watch offline.");
+  }catch(err){
+    console.error("offline_download_failed",err);
+    alert("Download failed. Please try again.");
+  }finally{
+    downloadBusy=false;
+    await renderDownloadUi();
   }
 }
 
@@ -677,6 +735,7 @@ function wire(){
   btnCommentView.onclick=openComments;
   btnShare.onclick=doShare;
   btnSave.onclick=toggleSave;
+  btnDownload.onclick=downloadActiveVideo;
   btnFull.onclick=()=>{ if(detailVideo.requestFullscreen) detailVideo.requestFullscreen().catch(()=>{}); };
   followBtn.onclick=e=>{ e.stopPropagation(); toggleFollow(); };
   channelRow.onclick=()=>{ if(active&&active.user_id) location.href="m-account.html?uid="+encodeURIComponent(active.user_id); };

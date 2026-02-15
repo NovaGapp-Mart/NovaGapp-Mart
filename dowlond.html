@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Downloads - NOVAGAPP</title>
+<script src="global.js"></script>
+<script src="offline-video.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#f6f6f7;color:#111}
+.page{max-width:900px;margin:0 auto;padding:14px 12px 92px}
+.head h1{margin:0;font-size:22px}
+.head p{margin:5px 0 0;color:#666;font-size:13px}
+.player{margin-top:12px;background:#fff;border:1px solid #e7e7e7;border-radius:14px;padding:10px;box-shadow:0 4px 16px rgba(0,0,0,.04)}
+.player[hidden]{display:none}
+.player video{width:100%;max-height:360px;background:#000;border-radius:10px}
+.player-meta{margin-top:8px}
+.player-meta strong{display:block;font-size:14px}
+.player-meta small{color:#666}
+.list{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.card{display:flex;gap:10px;background:#fff;border:1px solid #e8e8e8;border-radius:14px;padding:10px;align-items:center}
+.thumb{width:120px;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:#000;flex-shrink:0}
+.thumb img{width:100%;height:100%;object-fit:cover}
+.thumb-fallback{width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;background:radial-gradient(circle at 20% 20%,#4f4f4f,#111)}
+.meta{min-width:0;flex:1}
+.meta h3{margin:0 0 5px;font-size:14px;line-height:1.35}
+.meta .sub{font-size:12px;color:#666}
+.chip{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:#ffe9d7;color:#a24a00;font-size:11px;margin-right:6px}
+.actions{display:flex;gap:8px;margin-top:8px}
+.btn{border:1px solid #d7d7d7;background:#fff;border-radius:999px;padding:6px 12px;font-size:12px;cursor:pointer}
+.btn.primary{background:#111;color:#fff;border-color:#111}
+.empty{margin-top:16px;background:#fff;border:1px dashed #d2d2d2;border-radius:14px;padding:18px;text-align:center;color:#666;font-size:13px}
+.nav{position:fixed;left:0;right:0;bottom:0;height:64px;background:#111;display:flex;z-index:30}
+.nav div{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer}
+.nav svg{width:20px;height:20px;fill:#888}
+.nav .active svg{fill:#ff6a00}
+.nav-label{font-size:10px;line-height:1;color:#8d8d8d}
+.nav .active .nav-label{color:#ff6a00}
+@media (max-width:560px){
+  .card{align-items:flex-start;flex-direction:column}
+  .thumb{width:100%}
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <h1>Downloads</h1>
+    <p>Your saved reels and long videos are available here for offline watching.</p>
+  </div>
+
+  <section class="player" id="playerBox" hidden>
+    <video id="player" controls playsinline></video>
+    <div class="player-meta">
+      <strong id="playerTitle">Offline Video</strong>
+      <small id="playerSub"></small>
+    </div>
+  </section>
+
+  <div class="empty" id="emptyState" hidden>No downloaded videos yet.</div>
+  <div class="list" id="list"></div>
+</div>
+
+<div class="nav">
+  <div onclick="go('index.html')"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3l-10-9-10 9h3v8z"/></svg><span class="nav-label">Home</span></div>
+  <div onclick="go('m-video.html')"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg><span class="nav-label">Videos</span></div>
+  <div onclick="go('reel.html')"><svg viewBox="0 0 24 24"><path d="M17 10.5v-7l-12 9 12 9v-7l7 4v-12z"/></svg><span class="nav-label">Reel</span></div>
+  <div onclick="go('post.html')"><svg viewBox="0 0 24 24"><path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14z"/></svg><span class="nav-label">Post</span></div>
+  <div onclick="go('m-account.html')"><svg viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0-5-5"/></svg><span class="nav-label">Account</span></div>
+  <div class="active" data-nav-download="1"><svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zm7-18v10.17l3.59-3.58L17 10l-5 5-5-5 1.41-1.41L11 12.17V2h1z"/></svg><span class="nav-label">Download</span></div>
+</div>
+
+<script>
+const listEl = document.getElementById("list");
+const emptyState = document.getElementById("emptyState");
+const playerBox = document.getElementById("playerBox");
+const player = document.getElementById("player");
+const playerTitle = document.getElementById("playerTitle");
+const playerSub = document.getElementById("playerSub");
+
+let activeObjectUrl = "";
+let activeKey = "";
+
+function esc(value){
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function prettyBytes(size){
+  const bytes = Math.max(0, Number(size) || 0);
+  if(bytes >= 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+  if(bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + " MB";
+  if(bytes >= 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return bytes + " B";
+}
+
+function fmtTime(ts){
+  const value = Number(ts || 0);
+  if(!value) return "";
+  return new Date(value).toLocaleString();
+}
+
+function revokePlayerUrl(){
+  if(activeObjectUrl){
+    try{ URL.revokeObjectURL(activeObjectUrl); }catch(_){}
+    activeObjectUrl = "";
+  }
+}
+
+async function openOfflineVideo(key){
+  if(!(window.NOVA_OFFLINE && typeof window.NOVA_OFFLINE.get === "function")){
+    alert("Offline videos are unavailable on this browser.");
+    return;
+  }
+  const row = await window.NOVA_OFFLINE.get(key);
+  if(!row || !row.blob){
+    alert("Saved file not found.");
+    return;
+  }
+  revokePlayerUrl();
+  activeObjectUrl = URL.createObjectURL(row.blob);
+  activeKey = key;
+  player.src = activeObjectUrl;
+  playerTitle.textContent = row.title || "Offline video";
+  playerSub.textContent = `${row.type || "video"} | ${prettyBytes(row.size)} | Saved ${fmtTime(row.saved_at)}`;
+  playerBox.hidden = false;
+  player.play().catch(()=>{});
+}
+
+async function removeOfflineVideo(key){
+  if(!(window.NOVA_OFFLINE && typeof window.NOVA_OFFLINE.remove === "function")) return;
+  await window.NOVA_OFFLINE.remove(key);
+  if(activeKey === key){
+    activeKey = "";
+    player.pause();
+    player.removeAttribute("src");
+    player.load();
+    revokePlayerUrl();
+    playerBox.hidden = true;
+  }
+  await loadDownloads();
+}
+
+function renderList(rows){
+  listEl.innerHTML = "";
+  if(!rows.length){
+    emptyState.hidden = false;
+    return;
+  }
+  emptyState.hidden = true;
+  rows.forEach(row => {
+    const card = document.createElement("article");
+    card.className = "card";
+    const typeLabel = row.type === "reel" ? "Reel" : "Long Video";
+    const thumbHtml = row.thumb_url
+      ? `<img src="${esc(row.thumb_url)}" alt="">`
+      : `<div class="thumb-fallback">No thumbnail</div>`;
+    card.innerHTML = `
+      <div class="thumb">${thumbHtml}</div>
+      <div class="meta">
+        <h3>${esc(row.title || typeLabel)}</h3>
+        <div class="sub">
+          <span class="chip">${esc(typeLabel)}</span>
+          <span>${esc(row.creator_name || "User")}</span>
+          <span> | ${esc(prettyBytes(row.size))}</span>
+        </div>
+        <div class="sub">Saved: ${esc(fmtTime(row.saved_at) || "-")}</div>
+        <div class="actions">
+          <button class="btn primary" type="button" data-play="${esc(row.key)}">Watch Offline</button>
+          <button class="btn" type="button" data-remove="${esc(row.key)}">Remove</button>
+        </div>
+      </div>
+    `;
+    listEl.appendChild(card);
+  });
+}
+
+async function loadDownloads(){
+  if(!(window.NOVA_OFFLINE && typeof window.NOVA_OFFLINE.list === "function")){
+    emptyState.hidden = false;
+    emptyState.textContent = "Offline downloads are unavailable on this browser.";
+    listEl.innerHTML = "";
+    return;
+  }
+  try{
+    const rows = await window.NOVA_OFFLINE.list();
+    renderList(rows);
+  }catch(_){
+    emptyState.hidden = false;
+    emptyState.textContent = "Unable to load downloaded videos.";
+    listEl.innerHTML = "";
+  }
+}
+
+listEl.addEventListener("click", async event => {
+  const playBtn = event.target.closest("[data-play]");
+  if(playBtn){
+    const key = playBtn.getAttribute("data-play") || "";
+    if(key) await openOfflineVideo(key);
+    return;
+  }
+  const removeBtn = event.target.closest("[data-remove]");
+  if(removeBtn){
+    const key = removeBtn.getAttribute("data-remove") || "";
+    if(!key) return;
+    const ok = window.confirm("Remove this downloaded video?");
+    if(ok) await removeOfflineVideo(key);
+  }
+});
+
+window.addEventListener("beforeunload", revokePlayerUrl);
+loadDownloads();
+
+function go(page){
+  location.href = page;
+}
+</script>
+</body>
+</html>

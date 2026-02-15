@@ -17,3 +17,4 @@ Thumbs.db
 # local temp artifacts
 __tmp_readmore_head.html
 __tmp_readmore_head_utf8.html
+__tmp_check_*.js

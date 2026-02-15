@@ -592,3 +592,47 @@ window.translateProductName = function(name){
   const map = window.PRODUCT_TRANSLATIONS[lang];
   return (map && map[key]) ? map[key] : name;
 };
+
+/* =====================================
+   BOTTOM NAV DOWNLOAD ICON
+===================================== */
+(function(){
+  function ensureDownloadNavIcon(){
+    const navs = Array.from(document.querySelectorAll(".nav"));
+    navs.forEach(nav => {
+      if(!nav || nav.nodeType !== 1) return;
+      const itemCount = nav.children ? nav.children.length : 0;
+      if(itemCount < 3 || itemCount > 10) return;
+      if(nav.querySelector("[data-nav-download='1']")) return;
+      if(nav.querySelector("[onclick*='dowlond.html'],[href*='dowlond.html']")) return;
+
+      const hasSvg = !!nav.querySelector("svg");
+      if(!hasSvg) return;
+
+      const item = document.createElement("div");
+      item.setAttribute("data-nav-download", "1");
+      item.setAttribute("role", "button");
+      item.tabIndex = 0;
+      item.onclick = () => { location.href = "dowlond.html"; };
+      item.onkeydown = (event) => {
+        if(event.key === "Enter" || event.key === " "){
+          event.preventDefault();
+          location.href = "dowlond.html";
+        }
+      };
+
+      const icon = "<svg viewBox='0 0 24 24' aria-hidden='true'><path d='M5 20h14v-2H5v2zm7-18v10.17l3.59-3.58L17 10l-5 5-5-5 1.41-1.41L11 12.17V2h1z'/></svg>";
+      const hasLabel = !!nav.querySelector(".nav-label");
+      item.innerHTML = hasLabel
+        ? icon + "<span class='nav-label'>Download</span>"
+        : icon;
+
+      if(/dowlond\.html$/i.test(String(location.pathname || ""))){
+        item.classList.add("active");
+      }
+      nav.appendChild(item);
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", ensureDownloadNavIcon);
+})();
