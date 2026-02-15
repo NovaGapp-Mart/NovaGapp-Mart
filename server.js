@@ -97,6 +97,93 @@ app.get("/api/public/config", (req, res) => {
   });
 });
 
+function getSocialSupabaseBase(){
+  return String(PUBLIC_SUPABASE_URL || CONTEST_SUPABASE_URL || "").trim().replace(/\/+$/g, "");
+}
+
+function getSocialSupabaseReadKey(){
+  const candidates = [
+    CONTEST_SUPABASE_SERVICE_ROLE_KEY,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    process.env.CONTEST_SUPABASE_SERVICE_ROLE_KEY,
+    PUBLIC_SUPABASE_ANON_KEY
+  ];
+  for(const value of candidates){
+    const key = String(value || "").trim();
+    if(key) return key;
+  }
+  return "";
+}
+
+async function fetchPublicLongVideos(params){
+  const base = getSocialSupabaseBase();
+  const key = getSocialSupabaseReadKey();
+  if(!base || !key){
+    throw new Error("social_supabase_unconfigured");
+  }
+
+  const page = Math.max(0, Math.floor(Number(params?.page) || 0));
+  const size = Math.max(1, Math.min(20, Math.floor(Number(params?.size) || 8)));
+  const focus = sanitizeToken(params?.focus, 80);
+  const only = String(params?.only || "") === "1";
+  const userId = sanitizeUserId(params?.uid);
+  const searchRaw = String(params?.q || "").trim().replace(/[\r\n]/g, " ");
+  const search = searchRaw.replace(/[*%]/g, "").slice(0, 120);
+
+  const endpoint = new URL("/rest/v1/long_videos", base + "/");
+  endpoint.searchParams.set("select", "id,user_id,video_url,thumb_url,title,description,created_at");
+  endpoint.searchParams.set("order", "created_at.desc");
+  if(focus){
+    endpoint.searchParams.set("id", "eq." + focus);
+  }else{
+    if(only && userId){
+      endpoint.searchParams.set("user_id", "eq." + userId);
+    }
+    if(search){
+      endpoint.searchParams.set("title", "ilike.*" + search + "*");
+    }
+  }
+
+  const headers = {
+    apikey: key,
+    Authorization: `Bearer ${key}`
+  };
+  if(!focus){
+    const from = page * size;
+    const to = from + size - 1;
+    headers.Range = `${from}-${to}`;
+  }else{
+    headers.Range = "0-0";
+  }
+
+  const response = await fetch(endpoint.toString(), {
+    method: "GET",
+    headers
+  });
+  if(!response.ok){
+    const body = await response.text().catch(() => "");
+    throw new Error(`social_long_videos_fetch_failed_${response.status}:${body.slice(0, 200)}`);
+  }
+  const rows = await response.json().catch(() => []);
+  return Array.isArray(rows) ? rows : [];
+}
+
+app.get("/api/public/long-videos", async (req, res) => {
+  try{
+    const rows = await fetchPublicLongVideos(req.query || {});
+    res.setHeader("Cache-Control", "no-store");
+    return res.json({ ok:true, data:rows });
+  }catch(err){
+    const message = String(err?.message || "public_long_videos_failed");
+    const status = message.includes("unconfigured") ? 503 : 500;
+    return res.status(status).json({
+      ok:false,
+      error:"public_long_videos_failed",
+      message
+    });
+  }
+});
+
 async function ensureDir(dir){
   await fs.mkdir(dir, { recursive: true });
 }
