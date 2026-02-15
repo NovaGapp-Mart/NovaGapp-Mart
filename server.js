@@ -1347,7 +1347,13 @@ function buildReferralRanks(state, profileMap, limit){
 
 async function buildReferralRanksWithProfiles(state, limit){
   const userIds = collectReferralRankUserIds(state);
-  const profiles = await fetchContestUserProfilesByIds(userIds);
+  let profiles = {};
+  try{
+    profiles = await fetchContestUserProfilesByIds(userIds);
+  }catch(err){
+    console.error("contest_rank_profiles_error:", err?.stack || err);
+    profiles = {};
+  }
   return buildReferralRanks(state, profiles, limit);
 }
 
@@ -1972,7 +1978,13 @@ app.get("/api/contest/ranks", async (req, res) => {
     const limit = Math.max(1, Math.min(1000, Math.floor(Number(req.query?.limit) || 200)));
     const userId = sanitizeUserId(req.query?.user_id);
     const state = await readContestState();
-    const allRows = await buildReferralRanksWithProfiles(state, 5000);
+    let allRows = [];
+    try{
+      allRows = await buildReferralRanksWithProfiles(state, 5000);
+    }catch(rankErr){
+      console.error("contest_ranks_profile_fallback:", rankErr?.stack || rankErr);
+      allRows = buildReferralRanks(state, {}, 5000);
+    }
     const rows = allRows.slice(0, limit);
     const topReferrer = allRows[0] || null;
     const userRank = userId

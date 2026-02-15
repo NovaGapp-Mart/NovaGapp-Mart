@@ -216,9 +216,9 @@ listEl.addEventListener("click", async event => {
 window.addEventListener("beforeunload", revokePlayerUrl);
 loadDownloads();
 
-function go(page){
+window.go = function(page){
   location.href = page;
-}
+};
 </script>
 </body>
 </html>
