@@ -358,30 +358,33 @@ async function loadMore(){
     return;
   }
 
-  let apiData=[],supaData=[],apiError=null,supaError=null;
+  let apiData=[],supaData=[],apiError=null,supaError=null,apiWorked=false;
   try{
     apiData=await fetchLongVideosViaApi({
       page,
       size:PAGE_SIZE,
       search:searchQuery
     });
+    apiWorked=true;
   }catch(apiErr){
     apiError=apiErr;
   }
-  try{
-    const supaRes=await fetchLongVideosViaSupa({
-      page,
-      size:PAGE_SIZE,
-      search:searchQuery
-    });
-    supaData=supaRes.data||[];
-    supaError=supaRes.error||null;
-  }catch(err){
-    supaError=err;
+  if(!apiWorked){
+    try{
+      const supaRes=await fetchLongVideosViaSupa({
+        page,
+        size:PAGE_SIZE,
+        search:searchQuery
+      });
+      supaData=supaRes.data||[];
+      supaError=supaRes.error||null;
+    }catch(err){
+      supaError=err;
+    }
   }
 
-  const data=(supaData&&supaData.length)?supaData:(apiData||[]);
-  const error=(data&&data.length)?null:(supaError&&apiError?supaError:null);
+  const data=apiWorked?(apiData||[]):(supaData||[]);
+  const error=apiWorked?null:(supaError||apiError||null);
 
   if(error){
     console.error(error);
@@ -413,16 +416,16 @@ async function loadMore(){
 async function ensureFocus(){
   if(!focusId||map.has(String(focusId))) return;
   try{
-    const supaRes=await fetchLongVideosViaSupa({focus:focusId,page:0,size:1});
-    if(Array.isArray(supaRes.data)&&supaRes.data.length&&supaRes.data[0]?.id){
-      await renderCard(supaRes.data[0],{prepend:true});
+    const viaApi=await fetchLongVideosViaApi({focus:focusId,page:0,size:1});
+    if(Array.isArray(viaApi)&&viaApi.length&&viaApi[0]?.id){
+      await renderCard(viaApi[0],{prepend:true});
       return;
     }
   }catch{}
   try{
-    const viaApi=await fetchLongVideosViaApi({focus:focusId,page:0,size:1});
-    if(Array.isArray(viaApi)&&viaApi.length&&viaApi[0]?.id){
-      await renderCard(viaApi[0],{prepend:true});
+    const supaRes=await fetchLongVideosViaSupa({focus:focusId,page:0,size:1});
+    if(Array.isArray(supaRes.data)&&supaRes.data.length&&supaRes.data[0]?.id){
+      await renderCard(supaRes.data[0],{prepend:true});
     }
   }catch{}
 }
