@@ -92,7 +92,7 @@ button.secondary{background:#fff;color:#fa7508;border:1px solid var(--line)}
 button.ghost{background:#fff7ee;color:#f1720a;border:1px solid var(--line)}
 .must-read h2{margin:0}
 .must-read ul{margin:10px 0 0;padding-left:18px;display:grid;gap:7px;color:#5f3310;line-height:1.4}
-.extra-actions{margin-top:12px;display:grid;grid-template-columns:repeat(2,minmax(140px,1fr));gap:8px}
+.extra-actions{margin-top:12px;display:grid;grid-template-columns:repeat(3,minmax(140px,1fr));gap:8px}
 .muted{margin-top:6px;color:var(--muted);font-size:13px;line-height:1.4}
 .hidden{display:none !important}
 .referral-panel input{margin-top:10px;width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 11px;font-weight:600;color:#5e300c;background:#fffdfb}
@@ -100,6 +100,17 @@ button.ghost{background:#fff7ee;color:#f1720a;border:1px solid var(--line)}
 .notice{margin-top:8px;font-size:12px;color:var(--muted)}
 .notice.ok{color:#1f8b4b}
 .notice.warn{color:#f85f07}
+.live-votes-list,.rank-preview-list{display:grid;gap:10px;margin-top:10px}
+.vote-card{border:1px solid var(--line);border-radius:10px;background:#fffaf5;padding:10px}
+.vote-card h3{margin:0;font-size:14px;line-height:1.3}
+.vote-total{margin-top:4px;color:var(--muted);font-size:12px}
+.vote-side{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px dashed #ffd6ad;font-size:13px}
+.vote-side:first-of-type{margin-top:6px}
+.rank-row{display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:10px;background:#fffaf5;padding:9px 10px}
+.rank-avatar{width:44px;height:44px;border-radius:999px;border:1px solid #ffc28a;background:#ffe4c9;background-size:cover;background-position:center;display:grid;place-items:center;color:#8f430b;font-weight:800}
+.rank-name{font-size:13px;font-weight:700;line-height:1.25}
+.rank-meta{margin-top:2px;font-size:12px;color:var(--muted)}
+.rank-count{font-size:13px;font-weight:800;color:#c34f00}
 .toast{position:fixed;right:14px;bottom:14px;max-width:320px;border-radius:9px;padding:10px 12px;color:#fff;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:90}
 .toast.show{opacity:1}
 .toast.ok{background:#1f8b4b}
@@ -195,6 +206,7 @@ button.ghost{background:#fff7ee;color:#f1720a;border:1px solid var(--line)}
     <div class="extra-actions">
       <button class="ghost" id="readMoreBtn">Read More</button>
       <button id="refersAnyoneBtn">Reffers Anyone</button>
+      <button class="secondary" id="viewRanksBtn">View Ranks</button>
     </div>
   </section>
 
@@ -207,6 +219,22 @@ button.ghost{background:#fff7ee;color:#f1720a;border:1px solid var(--line)}
       <button class="secondary" id="closeReferralBtn">Close</button>
     </div>
     <p class="notice" id="referralNotice"></p>
+  </section>
+
+  <section class="card" id="liveVotesSection">
+    <h2 id="liveVotesTitle">Live Team Votes</h2>
+    <div class="live-votes-list" id="liveVotesList">
+      <p class="muted" id="liveVotesLoading">Loading live votes...</p>
+    </div>
+  </section>
+
+  <section class="card" id="rankPreviewSection">
+    <h2 id="rankPreviewTitle">Top Referral Ranks</h2>
+    <p class="muted" id="rankPreviewSub">Ranking by new users referred (verified installs).</p>
+    <div class="rank-preview-list" id="rankPreviewList">
+      <p class="muted" id="rankPreviewLoading">Loading ranks...</p>
+    </div>
+    <p class="notice" id="topReferrerNotice"></p>
   </section>
 </main>
 
@@ -259,11 +287,21 @@ const I18N = {
     mustRead5: "Referral points are counted only for unique visits and verified installs.",
     readMoreBtn: "Read More",
     refersAnyoneBtn: "Reffers Anyone",
+    viewRanksBtn: "View Ranks",
     refPanelTitle: "Enter Referral Code",
     refPanelDesc: "Enter a valid referral code to connect referral tracking.",
     refPlaceholder: "Type referral code",
     applyReferralBtn: "Apply",
     closeReferralBtn: "Close",
+    liveVotesTitle: "Live Team Votes",
+    liveVotesLoading: "Loading live votes...",
+    liveVotesEmpty: "No contest votes yet.",
+    rankPreviewTitle: "Top Referral Ranks",
+    rankPreviewSub: "Ranking by new users referred (verified installs).",
+    rankPreviewLoading: "Loading ranks...",
+    rankPreviewEmpty: "No referral ranking yet.",
+    topReferrerLabel: "Top referrer: {name} ({count} new users).",
+    topReferrerMissing: "Top referrer data not available yet.",
     notifTitle: "New Referral Joined",
     notifMessage: "{name} used your referral code {code}.",
     errEnterCode: "Please enter a valid referral code.",
@@ -348,7 +386,14 @@ const state = {
     downloads: null,
     target: 5000000,
     resultsReady: false,
-    gateway: "pending"
+    gateway: "pending",
+    contests: []
+  },
+  ranks: {
+    rows: [],
+    top: null,
+    total: 0,
+    loading: false
   }
 };
 
@@ -379,6 +424,7 @@ const dom = {
   mustRead5: document.getElementById("mustRead5"),
   readMoreBtn: document.getElementById("readMoreBtn"),
   refersAnyoneBtn: document.getElementById("refersAnyoneBtn"),
+  viewRanksBtn: document.getElementById("viewRanksBtn"),
   referralPanel: document.getElementById("referralPanel"),
   refPanelTitle: document.getElementById("refPanelTitle"),
   refPanelDesc: document.getElementById("refPanelDesc"),
@@ -386,6 +432,12 @@ const dom = {
   applyReferralBtn: document.getElementById("applyReferralBtn"),
   closeReferralBtn: document.getElementById("closeReferralBtn"),
   referralNotice: document.getElementById("referralNotice"),
+  liveVotesTitle: document.getElementById("liveVotesTitle"),
+  liveVotesList: document.getElementById("liveVotesList"),
+  rankPreviewTitle: document.getElementById("rankPreviewTitle"),
+  rankPreviewSub: document.getElementById("rankPreviewSub"),
+  rankPreviewList: document.getElementById("rankPreviewList"),
+  topReferrerNotice: document.getElementById("topReferrerNotice"),
   toast: document.getElementById("toast")
 };
 
@@ -425,12 +477,18 @@ function applyLanguage(){
   dom.mustRead5.textContent = tr("mustRead5");
   dom.readMoreBtn.textContent = tr("readMoreBtn");
   dom.refersAnyoneBtn.textContent = tr("refersAnyoneBtn");
+  dom.viewRanksBtn.textContent = tr("viewRanksBtn");
   dom.refPanelTitle.textContent = tr("refPanelTitle");
   dom.refPanelDesc.textContent = tr("refPanelDesc");
   dom.referralInput.placeholder = tr("refPlaceholder");
   dom.applyReferralBtn.textContent = tr("applyReferralBtn");
   dom.closeReferralBtn.textContent = tr("closeReferralBtn");
+  dom.liveVotesTitle.textContent = tr("liveVotesTitle");
+  dom.rankPreviewTitle.textContent = tr("rankPreviewTitle");
+  dom.rankPreviewSub.textContent = tr("rankPreviewSub");
   renderContestMetrics();
+  renderLiveVotes();
+  renderRankPreview();
 }
 
 function showToast(message, isError){
@@ -492,14 +550,97 @@ function renderContestMetrics(){
   dom.gatewayStatus.textContent = tr("gatewayOffline");
 }
 
+function renderLiveVotes(){
+  const wrap = dom.liveVotesList;
+  if(!wrap) return;
+  const contests = Array.isArray(state.metrics.contests) ? state.metrics.contests : [];
+  if(!contests.length){
+    wrap.innerHTML = "<p class='muted'>" + escapeHtml(tr("liveVotesEmpty")) + "</p>";
+    return;
+  }
+  wrap.innerHTML = contests.map(contest => {
+    const title = String(contest?.title || "Contest").trim();
+    const totalVotes = safeInt(contest?.total_votes);
+    const sides = Array.isArray(contest?.sides) ? contest.sides : [];
+    const sideRows = sides.length
+      ? sides.map(side => (
+        "<div class='vote-side'><span>" + escapeHtml(String(side?.label || "Team")) + "</span><strong>" + escapeHtml(formatInt(side?.votes)) + "</strong></div>"
+      )).join("")
+      : "<p class='muted'>" + escapeHtml(tr("liveVotesEmpty")) + "</p>";
+    return (
+      "<article class='vote-card'>" +
+        "<h3>" + escapeHtml(title) + "</h3>" +
+        "<div class='vote-total'>Total votes: <strong>" + escapeHtml(formatInt(totalVotes)) + "</strong></div>" +
+        sideRows +
+      "</article>"
+    );
+  }).join("");
+}
+
+function rankAvatarMarkup(row){
+  const name = String(row?.display_name || "U").trim();
+  const initial = escapeHtml((name[0] || "U").toUpperCase());
+  const photo = String(row?.photo || "").trim();
+  if(photo){
+    const safePhoto = escapeHtml(photo);
+    return "<div class='rank-avatar' style=\"background-image:url('" + safePhoto + "')\">" + initial + "</div>";
+  }
+  return "<div class='rank-avatar'>" + initial + "</div>";
+}
+
+function renderRankPreview(){
+  const listWrap = dom.rankPreviewList;
+  if(!listWrap) return;
+  if(state.ranks.loading){
+    listWrap.innerHTML = "<p class='muted'>" + escapeHtml(tr("rankPreviewLoading")) + "</p>";
+    if(dom.topReferrerNotice) dom.topReferrerNotice.textContent = "";
+    return;
+  }
+  const rows = Array.isArray(state.ranks.rows) ? state.ranks.rows : [];
+  if(!rows.length){
+    listWrap.innerHTML = "<p class='muted'>" + escapeHtml(tr("rankPreviewEmpty")) + "</p>";
+    if(dom.topReferrerNotice){
+      dom.topReferrerNotice.textContent = tr("topReferrerMissing");
+    }
+    return;
+  }
+
+  listWrap.innerHTML = rows.map(row => {
+    const name = String(row?.display_name || "User").trim() || "User";
+    const newUsers = safeInt(row?.new_users);
+    const rankNum = safeInt(row?.rank) || 0;
+    return (
+      "<article class='rank-row'>" +
+        rankAvatarMarkup(row) +
+        "<div><div class='rank-name'>#" + escapeHtml(rankNum) + " " + escapeHtml(name) + "</div><div class='rank-meta'>" + escapeHtml(String(row?.user_id || "")) + "</div></div>" +
+        "<div class='rank-count'>" + escapeHtml(formatInt(newUsers)) + "</div>" +
+      "</article>"
+    );
+  }).join("");
+
+  const top = state.ranks.top && typeof state.ranks.top === "object" ? state.ranks.top : rows[0];
+  if(dom.topReferrerNotice){
+    if(top){
+      dom.topReferrerNotice.textContent = msgTemplate("topReferrerLabel", {
+        name: String(top.display_name || "User"),
+        count: formatInt(top.new_users)
+      });
+    }else{
+      dom.topReferrerNotice.textContent = tr("topReferrerMissing");
+    }
+  }
+}
+
 async function loadContestMetrics(){
   state.metrics = {
     downloads: null,
     target: 5000000,
     resultsReady: false,
-    gateway: "pending"
+    gateway: "pending",
+    contests: []
   };
   renderContestMetrics();
+  renderLiveVotes();
 
   try{
     const payload = await fetchJson(apiUrl("/api/contest/dashboard"), { method:"GET" });
@@ -508,10 +649,38 @@ async function loadContestMetrics(){
     state.metrics.target = safeInt(data.download_target) || 5000000;
     state.metrics.resultsReady = Boolean(data.results_ready);
     state.metrics.gateway = data.razorpay_ready ? "online" : "pending";
+    state.metrics.contests = Array.isArray(data.contests) ? data.contests : [];
   }catch(_){
     state.metrics.gateway = "offline";
+    state.metrics.contests = [];
   }
   renderContestMetrics();
+  renderLiveVotes();
+}
+
+async function loadReferralRanksPreview(){
+  state.ranks.loading = true;
+  state.ranks.rows = [];
+  state.ranks.top = null;
+  state.ranks.total = 0;
+  renderRankPreview();
+  try{
+    const qp = new URLSearchParams();
+    qp.set("limit", "5");
+    if(state.userId) qp.set("user_id", state.userId);
+    const payload = await fetchJson(apiUrl("/api/contest/ranks?" + qp.toString()), { method:"GET" });
+    const data = payload?.data || {};
+    state.ranks.rows = Array.isArray(data.rows) ? data.rows : [];
+    state.ranks.top = data.top_referrer || (state.ranks.rows[0] || null);
+    state.ranks.total = safeInt(data.total_rows);
+  }catch(_){
+    state.ranks.rows = [];
+    state.ranks.top = null;
+    state.ranks.total = 0;
+  }finally{
+    state.ranks.loading = false;
+    renderRankPreview();
+  }
 }
 
 function bindMetricsAutoRetry(){
@@ -883,6 +1052,7 @@ async function applyReferralCode(){
     dom.referralNotice.className = "notice ok";
     showToast(tr("toastApplied"), false);
     await loadContestMetrics();
+    await loadReferralRanksPreview();
     setTimeout(() => { dom.referralPanel.classList.add("hidden"); }, 700);
   }catch(err){
     const raw = String(err?.message || err?.payload?.error || "").toLowerCase();
@@ -1036,6 +1206,10 @@ function bindEvents(){
     handleRefersAnyone();
   });
 
+  dom.viewRanksBtn.addEventListener("click", () => {
+    window.location.href = withNavQuery("rank.html");
+  });
+
   document.addEventListener("languageUpdated", () => {
     applyLanguage();
   });
@@ -1056,6 +1230,7 @@ async function init(){
   await registerContestAccountForSession();
   await autoApplyIncomingReferral();
   await loadContestMetrics();
+  await loadReferralRanksPreview();
 }
 
 if(!window.__contestInitPromise){

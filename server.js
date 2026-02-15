@@ -101,6 +101,19 @@ function getSocialSupabaseBase(){
   return String(PUBLIC_SUPABASE_URL || CONTEST_SUPABASE_URL || "").trim().replace(/\/+$/g, "");
 }
 
+function getSocialSupabaseServiceRoleKey(){
+  const candidates = [
+    CONTEST_SUPABASE_SERVICE_ROLE_KEY,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    process.env.CONTEST_SUPABASE_SERVICE_ROLE_KEY
+  ];
+  for(const value of candidates){
+    const key = String(value || "").trim();
+    if(key) return key;
+  }
+  return "";
+}
+
 function getSocialSupabaseReadKey(){
   const candidates = [
     CONTEST_SUPABASE_SERVICE_ROLE_KEY,
@@ -111,6 +124,20 @@ function getSocialSupabaseReadKey(){
   for(const value of candidates){
     const key = String(value || "").trim();
     if(key) return key;
+  }
+  return "";
+}
+
+function detectMissingColumnName(rawText){
+  const text = String(rawText || "");
+  if(!text) return "";
+  const pgRestMatch = text.match(/'([a-zA-Z0-9_]+)' column/i);
+  if(pgRestMatch && pgRestMatch[1]){
+    return String(pgRestMatch[1]).toLowerCase();
+  }
+  const pgMatch = text.match(/column\s+\"?([a-zA-Z0-9_.]+)\"?\s+does not exist/i);
+  if(pgMatch && pgMatch[1]){
+    return String(pgMatch[1]).replace(/\"/g, "").toLowerCase().split(".").pop() || "";
   }
   return "";
 }
@@ -168,6 +195,89 @@ async function fetchPublicLongVideos(params){
   return Array.isArray(rows) ? rows : [];
 }
 
+function normalizeLongVideoPublishPayload(raw){
+  const userId = sanitizeUserId(raw?.user_id);
+  const videoUrl = String(raw?.video_url || "").trim().slice(0, 3000);
+  if(!userId || !videoUrl){
+    return null;
+  }
+  const thumbUrl = String(raw?.thumb_url || "").trim().slice(0, 3000);
+  const title = String(raw?.title || "").trim().slice(0, 180);
+  const description = String(raw?.description || "").trim().slice(0, 2500);
+  const keywordsRaw = raw?.keywords;
+  const keywordsText = Array.isArray(keywordsRaw)
+    ? keywordsRaw.map(item => String(item || "").trim()).filter(Boolean).join(", ")
+    : String(keywordsRaw || "").trim();
+  const durationValue = safeNumber(raw?.duration);
+  const widthValue = safeNumber(raw?.width);
+  const heightValue = safeNumber(raw?.height);
+
+  return {
+    user_id: userId,
+    video_url: videoUrl,
+    thumb_url: thumbUrl || null,
+    title: title || null,
+    description: description || null,
+    keywords: keywordsText ? keywordsText.slice(0, 1500) : null,
+    duration: Number.isFinite(durationValue) && durationValue > 0 ? Math.round(durationValue) : null,
+    width: Number.isFinite(widthValue) && widthValue > 0 ? Math.round(widthValue) : null,
+    height: Number.isFinite(heightValue) && heightValue > 0 ? Math.round(heightValue) : null,
+    is_public: true,
+    visibility: "public",
+    public: true
+  };
+}
+
+async function insertPublicLongVideoRow(rawPayload){
+  const base = getSocialSupabaseBase();
+  const key = getSocialSupabaseServiceRoleKey();
+  if(!base || !key){
+    throw new Error("social_supabase_service_unconfigured");
+  }
+
+  const payload = normalizeLongVideoPublishPayload(rawPayload);
+  if(!payload){
+    throw new Error("long_video_payload_invalid");
+  }
+
+  const endpoint = new URL("/rest/v1/long_videos", base + "/");
+  const headers = {
+    apikey: key,
+    Authorization: `Bearer ${key}`,
+    "Content-Type": "application/json",
+    Prefer: "return=representation"
+  };
+
+  const requiredColumns = new Set(["user_id", "video_url"]);
+  const row = { ...payload };
+  while(true){
+    const response = await fetch(endpoint.toString(), {
+      method: "POST",
+      headers,
+      body: JSON.stringify([row])
+    });
+    if(response.ok){
+      const inserted = await response.json().catch(() => []);
+      if(Array.isArray(inserted) && inserted[0]){
+        return inserted[0];
+      }
+      return row;
+    }
+
+    const body = await response.text().catch(() => "");
+    const missingColumn = detectMissingColumnName(body);
+    if(
+      missingColumn &&
+      Object.prototype.hasOwnProperty.call(row, missingColumn) &&
+      !requiredColumns.has(missingColumn)
+    ){
+      delete row[missingColumn];
+      continue;
+    }
+    throw new Error(`social_long_videos_insert_failed_${response.status}:${body.slice(0, 220)}`);
+  }
+}
+
 app.get("/api/public/long-videos", async (req, res) => {
   try{
     const rows = await fetchPublicLongVideos(req.query || {});
@@ -179,6 +289,23 @@ app.get("/api/public/long-videos", async (req, res) => {
     return res.status(status).json({
       ok:false,
       error:"public_long_videos_failed",
+      message
+    });
+  }
+});
+
+app.post("/api/public/long-videos/publish", async (req, res) => {
+  try{
+    const inserted = await insertPublicLongVideoRow(req.body || {});
+    return res.json({ ok:true, data:inserted || null });
+  }catch(err){
+    const message = String(err?.message || "public_long_videos_publish_failed");
+    const code = message.includes("payload_invalid")
+      ? 400
+      : (message.includes("service_unconfigured") ? 503 : 500);
+    return res.status(code).json({
+      ok:false,
+      error:"public_long_videos_publish_failed",
       message
     });
   }
@@ -1081,6 +1208,155 @@ function buildTopSharers(state, limit){
   }));
 }
 
+function sanitizeContestProfilePhoto(value){
+  const raw = String(value || "").trim();
+  if(!raw) return "";
+  return raw.slice(0, 3000);
+}
+
+function collectReferralRankUserIds(state){
+  return Object.entries(state.users || {})
+    .filter(([userId, rawUser]) => {
+      if(!canContestUserPay(userId)) return false;
+      return !isContestPlaceholderUser(userId, rawUser);
+    })
+    .map(([userId]) => sanitizeUserId(userId))
+    .filter(Boolean);
+}
+
+async function fetchContestUserProfilesByIds(userIds){
+  if(!Array.isArray(userIds) || !userIds.length) return {};
+  if(!isContestSupabaseConfigured()) return {};
+
+  const ids = [...new Set(userIds.map(sanitizeUserId).filter(Boolean))].slice(0, 500);
+  if(!ids.length) return {};
+
+  const quotedIds = ids
+    .map(id => `"${String(id).replace(/"/g, "")}"`)
+    .join(",");
+  if(!quotedIds){
+    return {};
+  }
+
+  const selectPlans = [
+    ["user_id", "username", "full_name", "photo"],
+    ["user_id", "username", "full_name", "avatar_url"],
+    ["user_id", "username", "photo"],
+    ["user_id", "username", "avatar_url"],
+    ["user_id", "full_name", "photo"],
+    ["user_id", "full_name", "avatar_url"],
+    ["user_id", "username", "full_name"],
+    ["user_id", "username"],
+    ["user_id", "full_name"],
+    ["user_id"]
+  ];
+
+  for(const fields of selectPlans){
+    const endpoint = new URL("/rest/v1/users", CONTEST_SUPABASE_URL + "/");
+    endpoint.searchParams.set("select", fields.join(","));
+    endpoint.searchParams.set("user_id", `in.(${quotedIds})`);
+    endpoint.searchParams.set("limit", String(ids.length));
+
+    const response = await fetch(endpoint.toString(), {
+      method: "GET",
+      headers: {
+        apikey: CONTEST_SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${CONTEST_SUPABASE_SERVICE_ROLE_KEY}`
+      }
+    });
+    if(!response.ok){
+      const body = await response.text().catch(() => "");
+      const missingColumn = detectMissingColumnName(body);
+      if(missingColumn && fields.includes(missingColumn)){
+        continue;
+      }
+      continue;
+    }
+
+    const rows = await response.json().catch(() => []);
+    if(!Array.isArray(rows)){
+      continue;
+    }
+    const map = {};
+    rows.forEach(row => {
+      const uid = sanitizeUserId(row?.user_id);
+      if(!uid) return;
+      map[uid] = {
+        user_id: uid,
+        username: sanitizeDisplayName(row?.username || ""),
+        full_name: sanitizeDisplayName(row?.full_name || ""),
+        photo: sanitizeContestProfilePhoto(row?.photo || row?.avatar_url || row?.avatar || "")
+      };
+    });
+    return map;
+  }
+
+  return {};
+}
+
+function buildReferralRanks(state, profileMap, limit){
+  const rows = Object.entries(state.users || {})
+    .filter(([userId, rawUser]) => {
+      if(!canContestUserPay(userId)) return false;
+      return !isContestPlaceholderUser(userId, rawUser);
+    })
+    .map(([userId, rawUser]) => {
+      const user = ensureContestUser(state, userId) || rawUser || {};
+      const profile = profileMap?.[userId] || {};
+      const fallbackName = sanitizeDisplayName(user.display_name || "") || `User ${String(userId || "").slice(0, 8)}`;
+      const displayName =
+        sanitizeDisplayName(profile.full_name || "") ||
+        sanitizeDisplayName(profile.username || "") ||
+        fallbackName;
+      const newUsers = safeNumber(user.verified_installs);
+      const uniqueVisits = safeNumber(user.unique_share_visits);
+      const shareActions = safeNumber(user.share_actions);
+      const paidVotes = safeNumber(user.paid_votes);
+      const weightedEntries = Math.round(computeEntryWeight(user) * 100) / 100;
+      return {
+        user_id: userId,
+        display_name: displayName || fallbackName,
+        username: sanitizeDisplayName(profile.username || ""),
+        photo: sanitizeContestProfilePhoto(profile.photo || ""),
+        referral_code: user.referral_code || "",
+        new_users: newUsers,
+        verified_installs: newUsers,
+        unique_share_visits: uniqueVisits,
+        share_actions: shareActions,
+        paid_votes: paidVotes,
+        weighted_entries
+      };
+    });
+
+  rows.sort((a, b) => {
+    if(b.new_users !== a.new_users){
+      return b.new_users - a.new_users;
+    }
+    if(b.unique_share_visits !== a.unique_share_visits){
+      return b.unique_share_visits - a.unique_share_visits;
+    }
+    if(b.share_actions !== a.share_actions){
+      return b.share_actions - a.share_actions;
+    }
+    if(b.paid_votes !== a.paid_votes){
+      return b.paid_votes - a.paid_votes;
+    }
+    return b.weighted_entries - a.weighted_entries;
+  });
+
+  const cap = Math.max(1, Math.min(5000, Math.floor(Number(limit) || rows.length || 1)));
+  return rows.slice(0, cap).map((row, index) => ({
+    rank: index + 1,
+    ...row
+  }));
+}
+
+async function buildReferralRanksWithProfiles(state, limit){
+  const userIds = collectReferralRankUserIds(state);
+  const profiles = await fetchContestUserProfilesByIds(userIds);
+  return buildReferralRanks(state, profiles, limit);
+}
+
 function parseContentRangeTotal(raw){
   const text = String(raw || "").trim();
   if(!text) return 0;
@@ -1694,6 +1970,33 @@ app.get("/api/contest/dashboard", async (req, res) => {
   }catch(err){
     console.error("contest_dashboard_error:", err?.stack || err);
     return res.status(500).json({ ok:false, error:"contest_dashboard_failed" });
+  }
+});
+
+app.get("/api/contest/ranks", async (req, res) => {
+  try{
+    const limit = Math.max(1, Math.min(1000, Math.floor(Number(req.query?.limit) || 200)));
+    const userId = sanitizeUserId(req.query?.user_id);
+    const state = await readContestState();
+    const allRows = await buildReferralRanksWithProfiles(state, 5000);
+    const rows = allRows.slice(0, limit);
+    const topReferrer = allRows[0] || null;
+    const userRank = userId
+      ? (allRows.find(item => String(item?.user_id || "") === userId) || null)
+      : null;
+    return res.json({
+      ok:true,
+      data:{
+        generated_at: new Date().toISOString(),
+        total_rows: allRows.length,
+        rows,
+        top_referrer: topReferrer,
+        user_rank: userRank
+      }
+    });
+  }catch(err){
+    console.error("contest_ranks_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"contest_ranks_failed" });
   }
 });
 

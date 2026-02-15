@@ -238,6 +238,20 @@ async function insertLongVideoPublic(payload){
   }
   throw(lastError||new Error("long_video_insert_failed"));
 }
+
+async function publishLongVideoViaApi(payload){
+  const response=await fetch("/api/public/long-videos/publish",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(payload||{})
+  });
+  const data=await response.json().catch(()=>null);
+  if(!response.ok||!data||data.ok!==true){
+    const msg=(data&&data.message)?data.message:("public_long_video_publish_failed_"+response.status);
+    throw new Error(msg);
+  }
+  return data.data||null;
+}
 function setMode(m){mode=String(m||"feed");if(mode==="detail"){detailPane.classList.add("show");detailPane.setAttribute("aria-hidden","false");mini.hidden=true;return}if(mode==="mini"){detailPane.classList.remove("show");detailPane.setAttribute("aria-hidden","true");mini.hidden=false;return}detailPane.classList.remove("show");detailPane.setAttribute("aria-hidden","true");mini.hidden=true}
 function setReactionUi(r){btnLike.classList.toggle("active",r==="like");btnDislike.classList.toggle("active",r==="dislike")}
 function setFollowUi(){if(!active){followBtn.textContent="Follow";followBtn.classList.remove("following");followBtn.disabled=true;return}if(me&&me.id&&String(me.id)===String(active.user_id)){followBtn.textContent="You";followBtn.classList.remove("following");followBtn.disabled=true;return}followBtn.disabled=false;followBtn.textContent=activeFollow?"Followed":"Follow";followBtn.classList.toggle("following",activeFollow)}
@@ -776,7 +790,7 @@ videoInput.onchange=async e=>{
     const path=window.NOVA.makePath(me.id,file);
     const videoUrl=await window.NOVA.uploadToBucket("long_videos",file,path);
 
-    await insertLongVideoPublic({
+    const publishPayload={
       user_id:me.id,
       video_url:videoUrl,
       thumb_url:info.thumbUrl||null,
@@ -786,7 +800,14 @@ videoInput.onchange=async e=>{
       duration:Math.round(meta.duration),
       width:meta.width,
       height:meta.height
-    });
+    };
+
+    try{
+      await publishLongVideoViaApi(publishPayload);
+    }catch(apiErr){
+      console.warn("Long video publish API failed; falling back to direct insert.",apiErr);
+      await insertLongVideoPublic(publishPayload);
+    }
 
     alert("Video uploaded and published.");
     location.href="m-video.html";

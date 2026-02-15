@@ -1,0 +1,298 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Contest Referral Ranks</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="public-config.js"></script>
+<script src="global.js"></script>
+<style>
+:root{
+  --bg:#fff8ef;
+  --card:#ffffff;
+  --line:#ffc48f;
+  --ink:#2f1808;
+  --muted:#8a4a18;
+  --brand:#ff6a00;
+  --brand-dark:#c54f00;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;max-width:100%;overflow-x:hidden}
+body{font-family:Arial,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:var(--brand-dark);color:#fff;padding:12px 0}
+.head-inner{width:min(980px,94vw);margin:0 auto;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px}
+.head-title{margin:0;text-align:center;font-size:clamp(15px,2.4vw,24px);font-weight:900;letter-spacing:.03em}
+.head-btn{border:1px solid rgba(255,255,255,.6);background:rgba(255,255,255,.12);color:#fff;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:700;text-decoration:none;cursor:pointer}
+.page{width:min(980px,94vw);margin:0 auto;padding:14px 0 26px;display:grid;gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;box-shadow:0 4px 14px rgba(0,0,0,.05)}
+.summary{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr));gap:8px}
+.kpi{border:1px solid var(--line);border-radius:10px;background:#fffaf4;padding:9px 10px}
+.kpi small{display:block;font-size:11px;color:var(--muted)}
+.kpi strong{display:block;margin-top:4px;font-size:15px}
+.rank-list{display:grid;gap:10px}
+.rank-row{display:grid;grid-template-columns:48px 1fr auto;align-items:center;gap:10px;border:1px solid var(--line);border-radius:11px;background:#fffaf4;padding:9px 10px}
+.avatar{width:48px;height:48px;border-radius:999px;border:1px solid #ffc995;background:#ffe4cb;display:grid;place-items:center;background-size:cover;background-position:center;font-weight:800;color:#90400a}
+.meta{min-width:0}
+.name{font-size:14px;font-weight:800;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sub{margin-top:2px;font-size:12px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap}
+.count{font-size:13px;font-weight:900;color:#c24b00;text-align:right}
+.count span{display:block;font-size:11px;color:var(--muted);font-weight:600}
+.empty{padding:12px;text-align:center;color:var(--muted)}
+.actions{display:flex;gap:8px;justify-content:flex-end}
+button{border:none;background:var(--brand);color:#fff;font-weight:800;border-radius:10px;padding:10px 12px;cursor:pointer}
+button.secondary{background:#fff;color:var(--brand-dark);border:1px solid var(--line)}
+@media (max-width:680px){
+  .summary{grid-template-columns:1fr}
+  .rank-row{grid-template-columns:42px 1fr;}
+  .count{text-align:left}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="head-inner">
+    <a class="head-btn" id="backBtn" href="contest.html">Back</a>
+    <h1 class="head-title">Referral Rank Board</h1>
+    <button class="head-btn" id="refreshBtn" type="button">Refresh</button>
+  </div>
+</header>
+
+<main class="page">
+  <section class="card summary">
+    <article class="kpi">
+      <small>Total Ranked Users</small>
+      <strong id="totalUsers">--</strong>
+    </article>
+    <article class="kpi">
+      <small>Top Referrer</small>
+      <strong id="topName">--</strong>
+    </article>
+    <article class="kpi">
+      <small>Top New Users</small>
+      <strong id="topCount">--</strong>
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="actions">
+      <button class="secondary" id="openContestBtn" type="button">Open Contest</button>
+    </div>
+    <div class="rank-list" id="rankList">
+      <div class="empty">Loading ranks...</div>
+    </div>
+  </section>
+</main>
+
+<script>
+const state = {
+  apiBase: "",
+  userId: "",
+  rows: [],
+  top: null,
+  total: 0
+};
+
+const dom = {
+  backBtn: document.getElementById("backBtn"),
+  refreshBtn: document.getElementById("refreshBtn"),
+  openContestBtn: document.getElementById("openContestBtn"),
+  totalUsers: document.getElementById("totalUsers"),
+  topName: document.getElementById("topName"),
+  topCount: document.getElementById("topCount"),
+  rankList: document.getElementById("rankList")
+};
+
+function normalizeApiBase(raw){
+  return String(raw || "").trim().replace(/\/+$/g, "");
+}
+
+function resolveApiBase(){
+  const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = normalizeApiBase(params.get("api_base") || "");
+  const allowLoopback = window.location.protocol === "file:";
+  if(fromQuery){
+    const isLoopback = /^http:\/\//i.test(fromQuery);
+    if(!(isLoopback && !allowLoopback)){
+      try{
+        localStorage.setItem("contest_api_base", fromQuery);
+        localStorage.setItem("api_base", fromQuery);
+      }catch(_){ }
+      return fromQuery;
+    }
+  }
+
+  let fromStorage = "";
+  try{
+    fromStorage = normalizeApiBase(localStorage.getItem("contest_api_base") || localStorage.getItem("api_base") || "");
+  }catch(_){ }
+  if(fromStorage){
+    const isLoopback = /^http:\/\//i.test(fromStorage);
+    if(!(isLoopback && !allowLoopback)){
+      return fromStorage;
+    }
+  }
+
+  const fromGlobal = normalizeApiBase(window.CONTEST_API_BASE || window.API_BASE || "");
+  if(fromGlobal){
+    const isLoopback = /^http:\/\//i.test(fromGlobal);
+    if(!(isLoopback && !allowLoopback)){
+      return fromGlobal;
+    }
+  }
+
+  if(window.location.protocol === "file:") return DEFAULT_REMOTE_API_BASE;
+  if(String(window.location.port || "") === "3000") return "";
+  return "";
+}
+
+function apiUrl(path){
+  if(!String(path || "").startsWith("/")) throw new Error("invalid_api_path");
+  return state.apiBase ? (state.apiBase + path) : path;
+}
+
+async function fetchJson(url, options){
+  const res = await fetch(url, options);
+  const data = await res.json().catch(() => ({}));
+  if(!res.ok || !data?.ok){
+    throw new Error(data?.message || data?.error || ("request_failed_" + res.status));
+  }
+  return data;
+}
+
+function safeInt(value){
+  const n = Number(value || 0);
+  if(!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.floor(n));
+}
+
+function fmt(value){
+  return new Intl.NumberFormat("en-US").format(safeInt(value));
+}
+
+function escapeHtml(raw){
+  return String(raw || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function readUserId(){
+  try{
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    if(user?.uid) return String(user.uid || "").trim();
+  }catch(_){ }
+  try{
+    for(let i = 0; i < localStorage.length; i += 1){
+      const key = String(localStorage.key(i) || "");
+      if(!key.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
+      const parsed = JSON.parse(localStorage.getItem(key) || "{}");
+      const u = parsed?.user || parsed?.currentSession?.user || parsed?.session?.user || null;
+      if(u?.id) return String(u.id || "").trim();
+    }
+  }catch(_){ }
+  return "";
+}
+
+function rankAvatar(row){
+  const name = String(row?.display_name || "U").trim() || "U";
+  const initial = escapeHtml((name[0] || "U").toUpperCase());
+  const photo = String(row?.photo || "").trim();
+  if(photo){
+    return "<div class='avatar' style=\"background-image:url('" + escapeHtml(photo) + "')\">" + initial + "</div>";
+  }
+  return "<div class='avatar'>" + initial + "</div>";
+}
+
+function renderRanks(){
+  const rows = Array.isArray(state.rows) ? state.rows : [];
+  dom.totalUsers.textContent = fmt(state.total);
+  if(state.top){
+    dom.topName.textContent = String(state.top.display_name || "--") || "--";
+    dom.topCount.textContent = fmt(state.top.new_users);
+  }else{
+    dom.topName.textContent = "--";
+    dom.topCount.textContent = "--";
+  }
+
+  if(!rows.length){
+    dom.rankList.innerHTML = "<div class='empty'>No rank data found yet.</div>";
+    return;
+  }
+
+  dom.rankList.innerHTML = rows.map(row => {
+    const name = String(row?.display_name || "User").trim() || "User";
+    const uid = String(row?.user_id || "").trim();
+    const newUsers = fmt(row?.new_users);
+    const visits = fmt(row?.unique_share_visits);
+    const shares = fmt(row?.share_actions);
+    return [
+      "<article class='rank-row'>",
+      rankAvatar(row),
+      "<div class='meta'><div class='name'>#" + escapeHtml(row?.rank) + " " + escapeHtml(name) + "</div><div class='sub'><span>UID: " + escapeHtml(uid) + "</span><span>Visits: " + escapeHtml(visits) + "</span><span>Shares: " + escapeHtml(shares) + "</span></div></div>",
+      "<div class='count'>" + escapeHtml(newUsers) + "<span>New users</span></div>",
+      "</article>"
+    ].join("");
+  }).join("");
+}
+
+function withNavQuery(path){
+  const params = new URLSearchParams(window.location.search);
+  if(state.apiBase) params.set("api_base", state.apiBase);
+  const qs = params.toString();
+  return qs ? (path + "?" + qs) : path;
+}
+
+async function loadRanks(){
+  dom.rankList.innerHTML = "<div class='empty'>Loading ranks...</div>";
+  const qp = new URLSearchParams();
+  qp.set("limit", "500");
+  if(state.userId) qp.set("user_id", state.userId);
+  const payload = await fetchJson(apiUrl("/api/contest/ranks?" + qp.toString()), { method:"GET" });
+  const data = payload?.data || {};
+  state.rows = Array.isArray(data.rows) ? data.rows : [];
+  state.top = data.top_referrer || (state.rows[0] || null);
+  state.total = safeInt(data.total_rows);
+  renderRanks();
+}
+
+function bind(){
+  dom.backBtn.href = withNavQuery("contest.html");
+  dom.backBtn.addEventListener("click", event => {
+    event.preventDefault();
+    if(window.history.length > 1){
+      window.history.back();
+      return;
+    }
+    window.location.href = withNavQuery("contest.html");
+  });
+
+  dom.refreshBtn.addEventListener("click", () => {
+    loadRanks().catch(err => {
+      console.error("rank_refresh_failed", err);
+      dom.rankList.innerHTML = "<div class='empty'>Unable to load ranks right now.</div>";
+    });
+  });
+
+  dom.openContestBtn.addEventListener("click", () => {
+    window.location.href = withNavQuery("contest.html");
+  });
+}
+
+async function init(){
+  state.apiBase = resolveApiBase();
+  state.userId = readUserId();
+  bind();
+  await loadRanks();
+}
+
+init().catch(err => {
+  console.error("rank_page_init_failed", err);
+  dom.rankList.innerHTML = "<div class='empty'>Unable to load ranks right now.</div>";
+});
+</script>
+</body>
+</html>
