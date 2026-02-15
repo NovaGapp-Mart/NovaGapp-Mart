@@ -515,13 +515,31 @@ function pickLang(map){
   return (map && (map[state.lang] || map.en || map.hi || map.it)) || "";
 }
 
+function normalizeApiBase(raw){
+  const next = String(raw || "").trim().replace(/\/+$/g, "");
+  if(!next) return "";
+  try{
+    const parsed = new URL(next);
+    if(parsed.protocol !== "http:" && parsed.protocol !== "https:"){
+      return "";
+    }
+    if(!parsed.hostname){
+      return "";
+    }
+    return next;
+  }catch(_){
+    return "";
+  }
+}
+
 function resolveApiBase(){
   const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
   const allowLoopback = window.location.protocol === "file:";
   const params = new URLSearchParams(window.location.search);
-  const fromQuery = String(params.get("api_base") || "").trim();
+  const queryRaw = String(params.get("api_base") || "").trim();
+  const fromQuery = normalizeApiBase(queryRaw);
   if(fromQuery){
-    const normalized = fromQuery.replace(/\/+$/g, "");
+    const normalized = fromQuery;
     const loopbackQuery = /^http:\/\//i.test(normalized);
     if(loopbackQuery && !allowLoopback){
       try{
@@ -536,11 +554,24 @@ function resolveApiBase(){
     }catch(_){ }
     return normalized;
   }
+  if(queryRaw){
+    try{
+      localStorage.removeItem("contest_api_base");
+      localStorage.removeItem("api_base");
+    }catch(_){ }
+  }
 
   let fromStorage = "";
-  try{ fromStorage = String(localStorage.getItem("contest_api_base") || localStorage.getItem("api_base") || "").trim(); }catch(_){ }
+  try{
+    const rawStorage = String(localStorage.getItem("contest_api_base") || localStorage.getItem("api_base") || "").trim();
+    fromStorage = normalizeApiBase(rawStorage);
+    if(rawStorage && !fromStorage){
+      localStorage.removeItem("contest_api_base");
+      localStorage.removeItem("api_base");
+    }
+  }catch(_){ }
   if(fromStorage){
-    const normalizedStorage = fromStorage.replace(/\/+$/g, "");
+    const normalizedStorage = fromStorage;
     const loopbackStorage = /^http:\/\//i.test(normalizedStorage);
     if(loopbackStorage && !allowLoopback){
       try{
@@ -552,9 +583,9 @@ function resolveApiBase(){
     }
   }
 
-  const fromGlobal = String(window.CONTEST_API_BASE || window.API_BASE || "").trim();
+  const fromGlobal = normalizeApiBase(window.CONTEST_API_BASE || window.API_BASE || "");
   if(fromGlobal){
-    const normalizedGlobal = fromGlobal.replace(/\/+$/g, "");
+    const normalizedGlobal = fromGlobal;
     const loopbackGlobal = /^http:\/\//i.test(normalizedGlobal);
     if(!(loopbackGlobal && !allowLoopback)){
       return normalizedGlobal;
@@ -568,7 +599,8 @@ function resolveApiBase(){
 
 function withQuery(path){
   const params = new URLSearchParams(window.location.search);
-  if(state.apiBase) params.set("api_base", state.apiBase);
+  const normalized = normalizeApiBase(state.apiBase);
+  if(normalized) params.set("api_base", normalized);
   const qs = params.toString();
   return qs ? (path + "?" + qs) : path;
 }
@@ -576,7 +608,8 @@ function withQuery(path){
 function withBattleQuery(contestId){
   const params = new URLSearchParams(window.location.search);
   params.set("contest", String(contestId || ""));
-  if(state.apiBase) params.set("api_base", state.apiBase);
+  const normalized = normalizeApiBase(state.apiBase);
+  if(normalized) params.set("api_base", normalized);
   const qs = params.toString();
   return qs ? ("contest-battle.html?" + qs) : "contest-battle.html";
 }

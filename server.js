@@ -624,10 +624,9 @@ const CONTEST_RAZORPAY_KEY_SECRET = String(
 const CONTEST_REQUIRE_LIVE_RAZORPAY = String(
   process.env.CONTEST_REQUIRE_LIVE_RAZORPAY || ""
 ).trim().toLowerCase();
-const NODE_ENV_VALUE = String(process.env.NODE_ENV || "").trim().toLowerCase();
 const CONTEST_LIVE_KEY_REQUIRED = CONTEST_REQUIRE_LIVE_RAZORPAY
   ? !["0", "false", "no", "off"].includes(CONTEST_REQUIRE_LIVE_RAZORPAY)
-  : NODE_ENV_VALUE === "production";
+  : false;
 const CONTEST_SUPABASE_URL = String(
   process.env.CONTEST_SUPABASE_URL || process.env.SUPABASE_URL || ""
 ).trim().replace(/\/+$/g, "");

@@ -1283,23 +1283,8 @@ function isLoggedInContestUser(){
   return isLikelySupabaseUserId(state.userId);
 }
 
-function getPaymentGatewayMode(){
-  return String(state.data?.payment_gateway_mode || "").trim().toLowerCase();
-}
-
 function getPaymentGatewayIssue(){
   return String(state.data?.payment_gateway_issue || "").trim().toLowerCase();
-}
-
-function isGatewayBlockedByMode(){
-  if(getPaymentGatewayIssue() === "live_key_required"){
-    return true;
-  }
-  const mode = getPaymentGatewayMode();
-  if(mode === "test" && !isLocalRuntime()){
-    return true;
-  }
-  return false;
 }
 
 function resolveInitialApiBase(){
@@ -1394,7 +1379,10 @@ async function probeApiBase(suffix){
   throw (lastError || new Error(tr("api_offline_notice")));
 }
 
-function apiUrl(path){ return state.apiBase ? state.apiBase + path : path; }
+function apiUrl(path){
+  const normalized = normalizeBase(state.apiBase);
+  return normalized ? (normalized + path) : path;
+}
 
 async function fetchJson(url,opt){
   const res = await fetch(url,opt);
@@ -1762,7 +1750,6 @@ function render(){
     ? (supabaseLiveSynced ? tr("supabase_live") : tr("supabase_online"))
     : (state.supabaseSessionReady ? tr("supabase_local") : tr("supabase_offline"));
   const gatewayIssue = getPaymentGatewayIssue();
-  const gatewayBlockedByMode = isGatewayBlockedByMode();
 
   if(state.data?.supabase_sync_ready){
     bindRealtimeSync();
@@ -1930,12 +1917,12 @@ function render(){
 
   const apiOnline = !state.apiError;
   const loginReady = isLoggedInContestUser();
-  const gatewayOnline = Boolean(state.data?.razorpay_ready) && !state.apiError && !gatewayBlockedByMode;
+  const gatewayOnline = Boolean(state.data?.razorpay_ready) && !state.apiError;
   setPill(dom.apiPill, apiOnline ? tr("api_pill_online") : tr("api_pill_offline"), apiOnline ? "good" : "bad");
   const gatewayPillText = gatewayOnline
     ? tr("gateway_pill_online")
-    : (state.apiError || gatewayBlockedByMode ? tr("gateway_pill_offline") : tr("gateway_pill_pending"));
-  const gatewayPillTone = gatewayOnline ? "good" : (state.apiError || gatewayBlockedByMode ? "bad" : "");
+    : (state.apiError ? tr("gateway_pill_offline") : tr("gateway_pill_pending"));
+  const gatewayPillTone = gatewayOnline ? "good" : (state.apiError ? "bad" : "");
   setPill(
     dom.gatewayPill,
     gatewayPillText,
@@ -1958,7 +1945,7 @@ function render(){
   }
 
   dom.payBtn.textContent = state.paymentBusy ? tr("pay_processing") : tr("pay_now");
-  dom.payBtn.disabled = state.paymentBusy || !state.selectedSide || !state.selectedPack || !gatewayOnline || !loginReady;
+  dom.payBtn.disabled = state.paymentBusy || !state.selectedSide || !state.selectedPack || !gatewayOnline;
 
   dom.shareLinkBtn.href = "contest.html" + (state.apiBase ? ("?api_base=" + encodeURIComponent(state.apiBase)) : "");
   if(state.paymentBusy){
@@ -1967,7 +1954,7 @@ function render(){
     dom.payNotice.textContent = tr("login_required_notice");
   }else if(state.apiError){
     dom.payNotice.textContent = state.apiError;
-  }else if(gatewayBlockedByMode || gatewayIssue === "live_key_required"){
+  }else if(gatewayIssue === "live_key_required"){
     dom.payNotice.textContent = tr("gateway_live_required_notice");
   }else if(!state.data?.razorpay_ready){
     dom.payNotice.textContent = tr("gateway_not_ready_notice");
@@ -2016,7 +2003,7 @@ async function startPayment(){
     showToast(state.apiError, true);
     return;
   }
-  if(isGatewayBlockedByMode() || getPaymentGatewayIssue() === "live_key_required"){
+  if(getPaymentGatewayIssue() === "live_key_required"){
     showToast(tr("gateway_live_required_notice"), true);
     return;
   }

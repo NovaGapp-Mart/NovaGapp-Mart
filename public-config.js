@@ -117,7 +117,19 @@
   function normalizeBase(value){
     const raw = String(value || "").trim();
     if(!raw) return "";
-    return raw.replace(/\/+$/g, "");
+    const next = raw.replace(/\/+$/g, "");
+    try{
+      const parsed = new URL(next);
+      if(parsed.protocol !== "http:" && parsed.protocol !== "https:"){
+        return "";
+      }
+      if(!parsed.hostname){
+        return "";
+      }
+      return next;
+    }catch(_){
+      return "";
+    }
   }
 
   function buildConfigEndpoints(){

@@ -542,13 +542,30 @@ function pickLang(map){
   return (map && (map[state.lang] || map.en || map.hi || map.it)) || "";
 }
 
+function normalizeApiBase(raw){
+  const next = String(raw || "").trim().replace(/\/+$/g, "");
+  if(!next) return "";
+  try{
+    const parsed = new URL(next);
+    if(parsed.protocol !== "http:" && parsed.protocol !== "https:"){
+      return "";
+    }
+    if(!parsed.hostname){
+      return "";
+    }
+    return next;
+  }catch(_){
+    return "";
+  }
+}
+
 function resolveApiBase(){
   const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
   const allowLoopback = window.location.protocol === "file:";
   const params = new URLSearchParams(window.location.search);
-  const fromQuery = String(params.get("api_base") || "").trim();
+  const fromQuery = normalizeApiBase(params.get("api_base") || "");
   if(fromQuery){
-    const normalized = fromQuery.replace(/\/+$/g, "");
+    const normalized = fromQuery;
     const loopbackQuery = /^http:\/\//i.test(normalized);
     if(loopbackQuery && !allowLoopback){
       return DEFAULT_REMOTE_API_BASE;
@@ -564,7 +581,8 @@ function resolveApiBase(){
 
 function withQuery(path){
   const params = new URLSearchParams(window.location.search);
-  if(state.apiBase) params.set("api_base", state.apiBase);
+  const normalized = normalizeApiBase(state.apiBase);
+  if(normalized) params.set("api_base", normalized);
   const qs = params.toString();
   return qs ? (path + "?" + qs) : path;
 }
@@ -622,7 +640,8 @@ function setGateway(labelKey, tone){
 }
 
 function apiUrl(path){
-  return state.apiBase ? (state.apiBase + path) : path;
+  const normalized = normalizeApiBase(state.apiBase);
+  return normalized ? (normalized + path) : path;
 }
 
 async function checkGateway(){

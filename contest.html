@@ -743,7 +743,20 @@ function referralActorName(){
 }
 
 function normalizeApiBase(raw){
-  return String(raw || "").trim().replace(/\/+$/g, "");
+  const next = String(raw || "").trim().replace(/\/+$/g, "");
+  if(!next) return "";
+  try{
+    const parsed = new URL(next);
+    if(parsed.protocol !== "http:" && parsed.protocol !== "https:"){
+      return "";
+    }
+    if(!parsed.hostname){
+      return "";
+    }
+    return next;
+  }catch(_){
+    return "";
+  }
 }
 
 function isLoopbackBase(raw){
@@ -823,7 +836,15 @@ function resolveApiBase(){
 
 function apiUrl(path){
   if(!String(path).startsWith("/")) throw new Error("Invalid API path");
-  return state.apiBase ? state.apiBase + path : path;
+  const normalized = normalizeApiBase(state.apiBase);
+  if(normalized){
+    return normalized + path;
+  }
+  if(state.apiBase){
+    clearStoredApiBase();
+    state.apiBase = "";
+  }
+  return path;
 }
 
 async function fetchJson(url, options){
@@ -1135,8 +1156,9 @@ function makeShareUrl(refCode){
 
 function withNavQuery(path){
   const params = new URLSearchParams(window.location.search);
-  if(state.apiBase){
-    params.set("api_base", state.apiBase);
+  const normalized = normalizeApiBase(state.apiBase);
+  if(normalized){
+    params.set("api_base", normalized);
   }
   const qs = params.toString();
   return qs ? (path + "?" + qs) : path;
