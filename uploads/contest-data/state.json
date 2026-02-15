@@ -20,7 +20,7 @@
         "contest_6": 0
       },
       "created_at": "2026-02-13T02:48:37.041Z",
-      "updated_at": "2026-02-14T05:45:32.892Z"
+      "updated_at": "2026-02-14T12:27:25.905Z"
     },
     "3ece4d57-cad4-45a3-a380-6da2b4df21b9": {
       "user_id": "3ece4d57-cad4-45a3-a380-6da2b4df21b9",
@@ -40,7 +40,27 @@
         "contest_6": 0
       },
       "created_at": "2026-02-14T03:00:24.957Z",
-      "updated_at": "2026-02-14T03:27:32.384Z"
+      "updated_at": "2026-02-14T12:27:25.905Z"
+    },
+    "56276134-833e-413d-8ce6-55cafaecbb1e": {
+      "user_id": "56276134-833e-413d-8ce6-55cafaecbb1e",
+      "display_name": "Sarthak Bhalerao",
+      "referral_code": "NVG-sarthakbhalera@2026",
+      "share_actions": 0,
+      "share_actions_by_type": {},
+      "unique_share_visits": 0,
+      "verified_installs": 0,
+      "paid_votes": 20,
+      "contest_votes": {
+        "contest_1": 0,
+        "contest_2": 20,
+        "contest_3": 0,
+        "contest_4": 0,
+        "contest_5": 0,
+        "contest_6": 0
+      },
+      "created_at": "2026-02-14T12:26:49.369Z",
+      "updated_at": "2026-02-14T12:27:25.905Z"
     }
   },
   "orders": {
@@ -171,6 +191,25 @@
       "currency": "INR",
       "created_at": "2026-02-14T05:45:32.892Z",
       "updated_at": "2026-02-14T05:45:32.892Z"
+    },
+    "order_SG1d8Uytb2kAGs": {
+      "razorpay_order_id": "order_SG1d8Uytb2kAGs",
+      "receipt": "contest_1771072008984_da1697",
+      "status": "paid",
+      "user_id": "56276134-833e-413d-8ce6-55cafaecbb1e",
+      "contest_id": "contest_2",
+      "side_id": "kohli",
+      "pack_id": "vote_20",
+      "votes": 20,
+      "amount_usd": 50,
+      "amount_inr_paise": 452778,
+      "usd_inr_rate": 90.5555128,
+      "currency": "INR",
+      "created_at": "2026-02-14T12:26:49.369Z",
+      "updated_at": "2026-02-14T12:27:25.904Z",
+      "payment_id": "pay_SG1dUrCjCffGwq",
+      "signature": "d3f7b63b13490c2e81fffcc29cf8b0495c8b4513e7f1a0394538fd14b198970e",
+      "paid_at": "2026-02-14T12:27:25.904Z"
     }
   },
   "votes": {
@@ -179,7 +218,7 @@
       "messi": 0
     },
     "contest_2": {
-      "kohli": 0,
+      "kohli": 20,
       "babar": 0
     },
     "contest_3": {
@@ -202,7 +241,7 @@
   "installs": {},
   "share_visit_log": {},
   "created_at": "2026-02-13T02:48:37.037Z",
-  "updated_at": "2026-02-14T05:45:32.892Z",
+  "updated_at": "2026-02-14T12:27:59.674Z",
   "registered_accounts": {
     "2584ad3f-b637-4cc2-a93c-1568105c91df": {
       "user_id": "2584ad3f-b637-4cc2-a93c-1568105c91df",
@@ -210,6 +249,13 @@
       "email": "prashikbhalerao0208@gmail.com",
       "registered_at": "2026-02-14T05:25:06.004Z",
       "last_seen_at": "2026-02-14T05:45:32.120Z"
+    },
+    "56276134-833e-413d-8ce6-55cafaecbb1e": {
+      "user_id": "56276134-833e-413d-8ce6-55cafaecbb1e",
+      "user_name": "Sarthak Bhalerao",
+      "email": "sarthakpbhalerao9168@gmail.com",
+      "registered_at": "2026-02-14T12:26:33.625Z",
+      "last_seen_at": "2026-02-14T12:27:59.674Z"
     }
   }
 }

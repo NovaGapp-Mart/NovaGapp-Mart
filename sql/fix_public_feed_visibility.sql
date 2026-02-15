@@ -1,6 +1,6 @@
 -- Feed visibility fix
 -- Run this in Supabase SQL Editor (once).
--- Goal: logged-in users should see public feed items from other accounts.
+-- Goal: feed items should be world-readable (anon + authenticated).
 
 create extension if not exists pgcrypto;
 
@@ -45,41 +45,41 @@ begin
 end
 $$;
 
--- Allow all authenticated users to read feed content.
-create policy posts_read_authenticated
+-- Allow everyone to read feed content.
+create policy posts_read_public
   on public.posts
   for select
-  using (auth.uid() is not null);
+  using (true);
 
-create policy reels_read_authenticated
+create policy reels_read_public
   on public.reels
   for select
-  using (auth.uid() is not null);
+  using (true);
 
-create policy long_videos_read_authenticated
+create policy long_videos_read_public
   on public.long_videos
   for select
-  using (auth.uid() is not null);
+  using (true);
 
-create policy stories_read_authenticated
+create policy stories_read_public
   on public.stories
   for select
-  using (auth.uid() is not null);
+  using (true);
 
-create policy reactions_read_authenticated
+create policy reactions_read_public
   on public.reactions
   for select
-  using (auth.uid() is not null);
+  using (true);
 
-create policy comments_read_authenticated
+create policy comments_read_public
   on public.comments
   for select
-  using (auth.uid() is not null);
+  using (true);
 
-create policy post_shares_read_authenticated
+create policy post_shares_read_public
   on public.post_shares
   for select
-  using (auth.uid() is not null);
+  using (true);
 
 drop policy if exists post_shares_insert_authenticated on public.post_shares;
 create policy post_shares_insert_authenticated
@@ -94,6 +94,13 @@ grant select on public.stories to authenticated;
 grant select on public.reactions to authenticated;
 grant select on public.comments to authenticated;
 grant select, insert on public.post_shares to authenticated;
+grant select on public.posts to anon;
+grant select on public.reels to anon;
+grant select on public.long_videos to anon;
+grant select on public.stories to anon;
+grant select on public.reactions to anon;
+grant select on public.comments to anon;
+grant select on public.post_shares to anon;
 
 -- Ensure realtime stream includes interaction tables.
 do $$

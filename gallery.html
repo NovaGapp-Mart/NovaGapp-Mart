@@ -941,7 +941,7 @@ uploadBtn.addEventListener("click", async () => {
     }else if(typeKey === "long"){
       const path = window.NOVA.makePath(user.id, primaryFile);
       const mediaUrl = await window.NOVA.uploadToBucket(config.bucket, primaryFile, path);
-      const { error } = await window.NOVA.supa.from("long_videos").insert({
+      const { error } = await insertRowWithFallback("long_videos", {
         user_id: user.id,
         video_url: mediaUrl,
         thumb_url: thumbUrl,
@@ -950,8 +950,11 @@ uploadBtn.addEventListener("click", async () => {
         keywords: keywords || null,
         duration: Math.round(selectedMeta?.duration || 0),
         width: selectedMeta?.width || null,
-        height: selectedMeta?.height || null
-      });
+        height: selectedMeta?.height || null,
+        is_public: true,
+        visibility: "public",
+        public: true
+      }, ["user_id", "video_url"]);
       if(error) throw error;
     }else if(typeKey === "post"){
       const batchId = createPostBatchId();
