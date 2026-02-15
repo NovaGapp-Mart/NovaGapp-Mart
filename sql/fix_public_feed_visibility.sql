@@ -102,6 +102,11 @@ grant select on public.reactions to anon;
 grant select on public.comments to anon;
 grant select on public.post_shares to anon;
 
+insert into storage.buckets (id, name, public)
+values ('long_videos', 'long_videos', true)
+on conflict (id) do update
+set public = excluded.public;
+
 -- Ensure realtime stream includes interaction tables.
 do $$
 begin

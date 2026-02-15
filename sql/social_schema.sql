@@ -9,7 +9,8 @@ values
   ('stories', 'stories', true),
   ('thumbnails', 'thumbnails', true),
   ('chat_media', 'chat_media', true)
-on conflict (id) do nothing;
+on conflict (id) do update
+set public = excluded.public;
 
 -- Content tables
 create table if not exists public.reels (
@@ -230,6 +231,9 @@ create policy "chat_deletes_update" on public.chat_deletes for update
   using (auth.uid() = user_id);
 create policy "chat_deletes_delete" on public.chat_deletes for delete
   using (auth.uid() = user_id);
+
+grant select on public.long_videos to anon;
+grant select on public.long_videos to authenticated;
 
 -- Storage policies
 alter table storage.objects enable row level security;

@@ -148,7 +148,7 @@ const commentsBg=$("commentsBg"),comments=$("comments"),commentsClose=$("comment
 const displayName=$("displayName"),handle=$("handle"),avatar=$("avatar");
 const downloadLabel=$("downloadLabel");
 
-const params=new URLSearchParams(location.search),feedUserId=params.get("uid")||"",focusId=params.get("focus")||"",creatorOnly=params.get("only")==="1",SAVE_KEY="nova_saved_long_videos",VIEW_KEY="nova_long_views_",PAGE_SIZE=8;
+const params=new URLSearchParams(location.search),focusId=params.get("focus")||"",creatorOnly=params.get("only")==="1",SAVE_KEY="nova_saved_long_videos",VIEW_KEY="nova_long_views_",PAGE_SIZE=8;
 let me=null,page=0,loading=false,done=false,searchQuery="",mode="feed",active=null,activeReaction=null,reactionBusy=false,activeFollow=false,activeFollowers=0,focusApplied=false,searchTimer=null,startX=0,startY=0,downloadBusy=false;
 const rendered=new Set(),items=[],map=new Map(),cards=new Map(),creatorCache={},followersCache={},sessionViews=new Set();
 let saved=loadSaved();
@@ -168,10 +168,6 @@ async function fetchLongVideosViaApi(opts){
   searchParams.set("size",String(Math.max(1,Math.min(20,Number(opts?.size)||PAGE_SIZE))));
   if(opts?.focus) searchParams.set("focus",String(opts.focus||""));
   if(opts?.search) searchParams.set("q",String(opts.search||"").trim());
-  if(feedUserId&&creatorOnly){
-    searchParams.set("uid",feedUserId);
-    searchParams.set("only","1");
-  }
   const response=await fetch("/api/public/long-videos?"+searchParams.toString(),{cache:"no-store"});
   if(!response.ok) throw new Error("public_api_failed_"+response.status);
   const payload=await response.json();
@@ -189,7 +185,6 @@ async function fetchLongVideosViaSupa(opts){
     const from=Math.max(0,Number(opts?.page)||0)*Math.max(1,Math.min(20,Number(opts?.size)||PAGE_SIZE));
     const to=from+Math.max(1,Math.min(20,Number(opts?.size)||PAGE_SIZE))-1;
     q=q.range(from,to);
-    if(feedUserId&&creatorOnly) q=q.eq("user_id",feedUserId);
     if(opts?.search) q=q.ilike("title",`%${String(opts.search||"").trim()}%`);
   }
   const {data,error}=await q;

@@ -152,8 +152,6 @@ async function fetchPublicLongVideos(params){
   const page = Math.max(0, Math.floor(Number(params?.page) || 0));
   const size = Math.max(1, Math.min(20, Math.floor(Number(params?.size) || 8)));
   const focus = sanitizeToken(params?.focus, 80);
-  const only = String(params?.only || "") === "1";
-  const userId = sanitizeUserId(params?.uid);
   const searchRaw = String(params?.q || "").trim().replace(/[\r\n]/g, " ");
   const search = searchRaw.replace(/[*%]/g, "").slice(0, 120);
 
@@ -163,9 +161,6 @@ async function fetchPublicLongVideos(params){
   if(focus){
     endpoint.searchParams.set("id", "eq." + focus);
   }else{
-    if(only && userId){
-      endpoint.searchParams.set("user_id", "eq." + userId);
-    }
     if(search){
       endpoint.searchParams.set("title", "ilike.*" + search + "*");
     }
