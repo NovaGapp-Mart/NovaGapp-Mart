@@ -730,7 +730,53 @@ function getMissingColumnName(error){
   return "";
 }
 
+async function fetchPublicLongVideosForUser(targetId, options){
+  const uid = String(targetId || "").trim();
+  if(!uid) return [];
+
+  const page = Math.max(0, Number(options?.page) || 0);
+  const size = Math.max(1, Math.min(20, Number(options?.size) || 20));
+  const searchParams = new URLSearchParams();
+  searchParams.set("uid", uid);
+  searchParams.set("only", "1");
+  searchParams.set("page", String(page));
+  searchParams.set("size", String(size));
+
+  const response = await fetch("/api/public/long-videos?" + searchParams.toString(), {
+    cache: "no-store"
+  });
+  if(!response.ok){
+    throw new Error("public_long_videos_api_failed_" + response.status);
+  }
+
+  const payload = await response.json();
+  if(!payload || payload.ok !== true || !Array.isArray(payload.data)){
+    throw new Error("public_long_videos_api_payload_invalid");
+  }
+
+  return payload.data;
+}
+
 async function fetchMediaRows(table, fields, targetId){
+  if(table === "long_videos"){
+    try{
+      const firstPage = await fetchPublicLongVideosForUser(targetId, { page:0, size:20 });
+      let rows = firstPage;
+      if(firstPage.length === 20){
+        const secondPage = await fetchPublicLongVideosForUser(targetId, { page:1, size:20 });
+        rows = firstPage.concat(secondPage);
+      }
+      return rows.slice(0, 30).map(row => ({
+        ...row,
+        title: row.title ?? null,
+        description: row.description ?? null,
+        keywords: row.keywords ?? null
+      }));
+    }catch(err){
+      console.warn("Public long videos fetch failed; falling back to direct query.", err);
+    }
+  }
+
   const selectFields = [...fields];
   let useOrder = selectFields.includes("created_at");
   let attempts = 0;
