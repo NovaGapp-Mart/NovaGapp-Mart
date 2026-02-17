@@ -440,6 +440,31 @@ function formatCount(value){
   return new Intl.NumberFormat("en-US").format(n);
 }
 
+function insertReelBannerAfter(node){
+  if(!node) return;
+  const adWrap = document.createElement("div");
+  adWrap.style.display = "flex";
+  adWrap.style.justifyContent = "center";
+  adWrap.style.padding = "8px 0";
+  node.insertAdjacentElement("afterend", adWrap);
+
+  const adConfig = document.createElement("script");
+  adConfig.text = `
+  atOptions = {
+    'key' : '46e89ac16d0401b27133419219f055c6',
+    'format' : 'iframe',
+    'height' : 50,
+    'width' : 320,
+    'params' : {}
+  };
+`;
+  adWrap.appendChild(adConfig);
+
+  const adInvoke = document.createElement("script");
+  adInvoke.src = "https://www.highperformanceformat.com/46e89ac16d0401b27133419219f055c6/invoke.js";
+  adWrap.appendChild(adInvoke);
+}
+
 function getReelShareCount(reelId){
   const key = String(reelId || "");
   if(!key) return 0;
@@ -927,6 +952,10 @@ async function renderReel(item, options){
     reelWrapper.insertBefore(reel, sentinel);
   }else{
     reelWrapper.appendChild(reel);
+  }
+  const reelCount = reelWrapper.querySelectorAll(".reel").length;
+  if(reelCount % 3 === 0){
+    insertReelBannerAfter(reel);
   }
   observer.observe(reel);
   if(focusReelId && String(item.id) === String(focusReelId)){
