@@ -58,6 +58,13 @@ body{
   border:1px solid #ccc;
   border-radius:5px;
 }
+.input-row{
+  display:flex;
+  gap:8px;
+}
+.input-row .input{
+  flex:1;
+}
 .cart-item{
   display:flex;
   gap:10px;
@@ -115,10 +122,24 @@ body{
   <div class="step"><span>1</span><b>Delivery Address</b></div>
 
   <input class="input" id="name" placeholder="Full Name">
-  <input class="input" id="phone" placeholder="Mobile Number">
+  <input class="input" id="phone" type="tel" inputmode="tel" placeholder="Mobile Number">
+  <select class="input" id="country">
+    <option value="">Select Country</option>
+    <option value="India" selected>India</option>
+    <option value="United States">United States</option>
+    <option value="United Kingdom">United Kingdom</option>
+    <option value="Canada">Canada</option>
+    <option value="Australia">Australia</option>
+    <option value="Germany">Germany</option>
+    <option value="France">France</option>
+    <option value="UAE">UAE</option>
+    <option value="Singapore">Singapore</option>
+  </select>
   <input class="input" id="address" placeholder="House / Area">
-  <input class="input" id="city" placeholder="City">
-  <input class="input" id="pincode" placeholder="Pincode">
+  <div class="input-row">
+    <input class="input" id="city" placeholder="City">
+    <input class="input" id="pincode" placeholder="Pincode">
+  </div>
 </div>
 
 <!-- STEP 2 ORDER SUMMARY -->
@@ -130,7 +151,7 @@ body{
 <!-- PRICE SUMMARY -->
 <div class="section summary">
   <div><span>Price</span><span id="price">$0</span></div>
-  <div><span>Discount</span><span>- $0</span></div>
+  <div><span>Discount</span><span id="discount">- $0</span></div>
   <div class="total"><span>Total</span><span id="total">$0</span></div>
 </div>
 
@@ -165,6 +186,227 @@ let cart = [];
 let itemsBox = document.getElementById("items");
 let total = 0;
 let isPlacingOrder = false;
+const countryInput = document.getElementById("country");
+
+const CITY_COORDS = {
+  bangalore:[12.9716,77.5946],
+  bengaluru:[12.9716,77.5946],
+  mumbai:[19.076,72.8777],
+  pune:[18.5204,73.8567],
+  nagpur:[21.1458,79.0882],
+  nashik:[19.9975,73.7898],
+  aurangabad:[19.8762,75.3433],
+  kolhapur:[16.705,74.2433],
+  delhi:[28.6139,77.209],
+  newdelhi:[28.6139,77.209],
+  noida:[28.5355,77.391],
+  gurgaon:[28.4595,77.0266],
+  gurugram:[28.4595,77.0266],
+  hyderabad:[17.385,78.4867],
+  chennai:[13.0827,80.2707],
+  kolkata:[22.5726,88.3639],
+  ahmedabad:[23.0225,72.5714],
+  surat:[21.1702,72.8311],
+  jaipur:[26.9124,75.7873],
+  indore:[22.7196,75.8577],
+  bhopal:[23.2599,77.4126],
+  lucknow:[26.8467,80.9462],
+  kanpur:[26.4499,80.3319],
+  kochi:[9.9312,76.2673],
+  cochin:[9.9312,76.2673],
+  trivandrum:[8.5241,76.9366],
+  thiruvananthapuram:[8.5241,76.9366],
+  visakhapatnam:[17.6868,83.2185],
+  vijayawada:[16.5062,80.648],
+  patna:[25.5941,85.1376],
+  ranchi:[23.3441,85.3096],
+  bhubaneswar:[20.2961,85.8245],
+  guwahati:[26.1445,91.7362],
+  chandigarh:[30.7333,76.7794],
+  ludhiana:[30.901,75.8573]
+};
+
+function normalizeText(value){
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sanitizePhone(value){
+  let raw = String(value || "").trim();
+  raw = raw.replace(/[^\d+]/g, "");
+  if(raw.startsWith("00")) raw = "+" + raw.slice(2);
+  if(raw.startsWith("+")){
+    return "+" + raw.slice(1).replace(/[^\d]/g, "");
+  }
+  return raw.replace(/[^\d]/g, "");
+}
+
+function isValidPhone(value){
+  const cleaned = sanitizePhone(value);
+  const digits = cleaned.replace(/\D/g, "");
+  return digits.length >= 8 && digits.length <= 15;
+}
+
+function resolveCityCoords(cityName){
+  const normalized = normalizeText(cityName).replace(/\s/g, "");
+  if(!normalized) return null;
+  if(CITY_COORDS[normalized]) return CITY_COORDS[normalized];
+  const keys = Object.keys(CITY_COORDS);
+  for(const key of keys){
+    if(normalized.includes(key) || key.includes(normalized)){
+      return CITY_COORDS[key];
+    }
+  }
+  return null;
+}
+
+function haversineKm(lat1, lon1, lat2, lon2){
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function estimateWindowByKm(distanceKm){
+  const km = Number(distanceKm);
+  if(!Number.isFinite(km) || km <= 0){
+    return { min_days:4, max_days:5 };
+  }
+  if(km <= 80) return { min_days:1, max_days:2 };
+  if(km <= 250) return { min_days:2, max_days:3 };
+  if(km <= 600) return { min_days:3, max_days:4 };
+  if(km <= 1100) return { min_days:4, max_days:5 };
+  if(km <= 1600) return { min_days:5, max_days:6 };
+  return { min_days:6, max_days:8 };
+}
+
+function makeIsoFromNow(days){
+  const n = Math.max(0, Number(days) || 0);
+  return new Date(Date.now() + n * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function formatDistanceLabel(distanceKm){
+  const km = Number(distanceKm);
+  if(!Number.isFinite(km) || km <= 0) return "";
+  return `${Math.round(km)} km`;
+}
+
+function makeDeliveryEstimate(buyerCity, sellerCity){
+  const buyerCoords = resolveCityCoords(buyerCity);
+  const sellerCoords = resolveCityCoords(sellerCity);
+  const distanceKm = (buyerCoords && sellerCoords)
+    ? haversineKm(buyerCoords[0], buyerCoords[1], sellerCoords[0], sellerCoords[1])
+    : null;
+  const windowDays = estimateWindowByKm(distanceKm);
+  const minDays = Number(windowDays.min_days || 4);
+  const maxDays = Number(windowDays.max_days || 5);
+  return {
+    buyer_city: String(buyerCity || ""),
+    seller_city: String(sellerCity || ""),
+    distance_km: Number.isFinite(distanceKm) ? Math.round(distanceKm) : null,
+    distance_label: formatDistanceLabel(distanceKm),
+    min_days: minDays,
+    max_days: maxDays,
+    label: `${minDays}-${maxDays} days`,
+    eta_from: makeIsoFromNow(minDays),
+    eta_to: makeIsoFromNow(maxDays)
+  };
+}
+
+function isMissingColumnError(error){
+  const message = String(error?.message || "").toLowerCase();
+  const details = String(error?.details || "").toLowerCase();
+  const text = `${message} ${details}`;
+  return text.includes("column") && text.includes("does not exist");
+}
+
+function firstText(...values){
+  for(const value of values){
+    const v = String(value || "").trim();
+    if(v) return v;
+  }
+  return "";
+}
+
+async function fetchSellerLocation(sellerId){
+  const cleanSellerId = String(sellerId || "").trim();
+  if(!cleanSellerId){
+    return { city:"", state:"", country:"", pincode:"", address:"" };
+  }
+
+  const userSelects = [
+    "user_id,city,state,country,pincode,address",
+    "user_id,city,location,pincode,address",
+    "user_id,location,pincode,address"
+  ];
+  for(const selectCols of userSelects){
+    const { data, error } = await supa
+      .from("users")
+      .select(selectCols)
+      .eq("user_id", cleanSellerId)
+      .maybeSingle();
+    if(error){
+      if(isMissingColumnError(error)) continue;
+      break;
+    }
+    if(data){
+      const city = firstText(data.city, data.location);
+      const state = firstText(data.state);
+      const country = firstText(data.country);
+      const pincode = firstText(data.pincode);
+      const address = firstText(data.address, data.location);
+      return { city, state, country, pincode, address };
+    }
+  }
+
+  const sellerSelects = [
+    "user_id,city,state,country,pincode,address",
+    "user_id,location,pincode,address"
+  ];
+  for(const selectCols of sellerSelects){
+    const { data, error } = await supa
+      .from("sellers")
+      .select(selectCols)
+      .eq("user_id", cleanSellerId)
+      .maybeSingle();
+    if(error){
+      if(isMissingColumnError(error)) continue;
+      break;
+    }
+    if(data){
+      const city = firstText(data.city, data.location);
+      const state = firstText(data.state);
+      const country = firstText(data.country);
+      const pincode = firstText(data.pincode);
+      const address = firstText(data.address, data.location);
+      return { city, state, country, pincode, address };
+    }
+  }
+
+  return { city:"", state:"", country:"", pincode:"", address:"" };
+}
+
+if(countryInput){
+  const storedCountry = String(window.USER_COUNTRY || "").trim();
+  if(storedCountry){
+    const match = Array.from(countryInput.options || []).find(opt => String(opt.value || "").toLowerCase() === storedCountry.toLowerCase());
+    if(match){
+      countryInput.value = match.value;
+    }else{
+      const opt = document.createElement("option");
+      opt.value = storedCountry;
+      opt.textContent = storedCountry;
+      countryInput.appendChild(opt);
+      countryInput.value = storedCountry;
+    }
+  }
+}
 
 function toUserCurrency(amount, fromCur){
   if(typeof window.convertCurrency === "function"){
@@ -229,13 +471,18 @@ async function placeOrder(){
     return;
   }
   let name = document.getElementById("name").value.trim();
-  let phone = document.getElementById("phone").value.trim();
+  let phone = sanitizePhone(document.getElementById("phone").value.trim());
+  let country = document.getElementById("country").value.trim();
   let address = document.getElementById("address").value.trim();
   let city = document.getElementById("city").value.trim();
   let pincode = document.getElementById("pincode").value.trim();
 
-  if(!name || !phone || !address || !city || !pincode){
+  if(!name || !phone || !country || !address || !city || !pincode){
     alert("Please fill all address details");
+    return;
+  }
+  if(!isValidPhone(phone)){
+    alert("Please enter a valid phone number.");
     return;
   }
 
@@ -258,14 +505,28 @@ async function placeOrder(){
     return;
   }
   const sellerId = sellerIds[0];
+  const sellerLocation = await fetchSellerLocation(sellerId);
+  const deliveryEstimate = makeDeliveryEstimate(city, sellerLocation.city);
+  const buyerAddressPayload = {
+    name,
+    phone,
+    email: user.email || "",
+    country,
+    address,
+    city,
+    pincode,
+    seller_city: sellerLocation.city || "",
+    seller_state: sellerLocation.state || "",
+    delivery_estimate: deliveryEstimate
+  };
 
   const order = {
     user_id: user.id,
     seller_id: sellerId,
     email: user.email || "",
     buyer_name: name,
-    buyer_address: { name, phone, address, city, pincode },
-    address: { name, phone, address, city, pincode },
+    buyer_address: buyerAddressPayload,
+    address: buyerAddressPayload,
     items: orderItems,
     amount: Number(total || 0),
     total: Number(total || 0),
@@ -301,11 +562,21 @@ async function placeOrder(){
 
   await createSellerNotifications({
     orderId: data.id,
-    buyer: { name, phone, address, city, pincode, email: user.email || "" },
+    buyer: {
+      name,
+      phone,
+      email: user.email || "",
+      country,
+      address,
+      city,
+      pincode
+    },
     items: orderItems,
     total,
     currency: order.currency,
-    payment_method: order.payment_method
+    payment_method: order.payment_method,
+    sellerLocation,
+    deliveryEstimate
   });
 
   /* OPTIONAL: clear cart after order */
@@ -426,9 +697,12 @@ function normalizePaymentMethodLabel(method){
 }
 
 async function createSellerNotifications(payload){
-  const { orderId, buyer, items, total, currency, payment_method } = payload;
+  const { orderId, buyer, items, total, currency, payment_method, sellerLocation, deliveryEstimate } = payload;
   const paymentText = normalizePaymentMethodLabel(payment_method);
-  const buyerAddress = `${buyer?.address || ""}, ${buyer?.city || ""} ${buyer?.pincode || ""}`.trim();
+  const buyerAddress = `${buyer?.address || ""}, ${buyer?.city || ""} ${buyer?.pincode || ""}, ${buyer?.country || ""}`.trim();
+  const sellerAddress = `${sellerLocation?.city || ""} ${sellerLocation?.state || ""}, ${sellerLocation?.country || ""}`.trim();
+  const deliveryText = deliveryEstimate?.label ? `${deliveryEstimate.label}` : "4-5 days";
+  const distanceText = deliveryEstimate?.distance_label ? ` (${deliveryEstimate.distance_label})` : "";
   const groups = {};
   (items || []).forEach((i)=>{
     const sellerId = i.owner_id || null;
@@ -449,7 +723,7 @@ async function createSellerNotifications(payload){
       .map(item=>`${item.name || "Product"} x${Number(item.qty || 0)}`)
       .join(", ");
     const message =
-      `Buyer: ${buyer?.name || ""} | Phone: ${buyer?.phone || ""} | Address: ${buyerAddress} | Product: ${productSummary} | Qty: ${qty} | Payment: ${paymentText}`;
+      `Buyer: ${buyer?.name || ""} | Phone: ${buyer?.phone || ""} | Email: ${buyer?.email || ""} | Country: ${buyer?.country || ""} | Address: ${buyerAddress} | Seller Location: ${sellerAddress || "-"} | Product: ${productSummary} | Qty: ${qty} | Payment: ${paymentText} | ETA: ${deliveryText}${distanceText}`;
 
     const row = {
       receiver_user_id: sellerId,

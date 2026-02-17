@@ -151,12 +151,23 @@ function renderDetails(){
   const buyerAddr = ORDER.buyer_address || ORDER.address || {};
   const buyerAddrText = typeof buyerAddr === "string"
     ? buyerAddr
-    : [buyerAddr.address, buyerAddr.city, buyerAddr.pincode].filter(Boolean).join(", ");
+    : [buyerAddr.address, buyerAddr.city, buyerAddr.pincode, buyerAddr.country].filter(Boolean).join(", ");
+  const buyerPhone = typeof buyerAddr === "object" ? (buyerAddr.phone || "") : "";
+  const buyerEmail = typeof buyerAddr === "object" ? (buyerAddr.email || ORDER.email || "") : (ORDER.email || "");
+  const deliveryLabel = (typeof buyerAddr === "object" && buyerAddr.delivery_estimate?.label)
+    ? String(buyerAddr.delivery_estimate.label)
+    : "";
+  const distanceLabel = (typeof buyerAddr === "object" && buyerAddr.delivery_estimate?.distance_label)
+    ? String(buyerAddr.delivery_estimate.distance_label)
+    : "";
 
   box.innerHTML = `
     <div class="row"><div class="label">Order ID</div><div class="value">${ORDER.id || ""}</div></div>
     <div class="row"><div class="label">Buyer</div><div class="value">${ORDER.buyer_name || ORDER.email || ""}</div></div>
+    <div class="row"><div class="label">Phone</div><div class="value">${buyerPhone || "-"}</div></div>
+    <div class="row"><div class="label">Email</div><div class="value">${buyerEmail || "-"}</div></div>
     <div class="row"><div class="label">Address</div><div class="value">${buyerAddrText || ""}</div></div>
+    <div class="row"><div class="label">Delivery ETA</div><div class="value">${deliveryLabel ? `${deliveryLabel}${distanceLabel ? ` (${distanceLabel})` : ""}` : "-"}</div></div>
     <div class="row"><div class="label">Payment</div><div class="value">${ORDER.payment_status || "pending"} (${ORDER.payment_method || "Pending Payment"})</div></div>
     <div class="row"><div class="label">Status</div><div class="value">${ORDER.status || "placed"}</div></div>
   `;

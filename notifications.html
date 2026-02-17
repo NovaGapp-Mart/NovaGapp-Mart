@@ -203,6 +203,7 @@ function renderNotif(r, isHistory, mode){
       <div>Product: ${translateProductName(r.product_name || "-")}</div>
       <div>Qty: ${Number(r.qty || 0)}</div>
       <div>Payment: ${r.payment_method || "Pending Payment"}</div>
+      ${r.message ? `<div>Details: ${r.message}</div>` : ""}
       <div style="color:#777;margin-top:4px">${date}</div>
     `
     : (r.type === "wallet_credit" || r.type === "wallet_debit" || r.type === "cod_pending")

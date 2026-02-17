@@ -81,7 +81,7 @@ button{
 <!-- FREE -->
 <div class="plan" id="plan-free">
   <h3>FREE</h3>
-  <div class="price"><span class="money" data-money="0" data-currency="INR">&#8377;0</span></div>
+  <div class="price"><span class="money" data-money="0" data-currency="USD">$0</span></div>
   <ul>
     <li>2 previews / day</li>
     <li>Normal speed</li>
@@ -92,7 +92,7 @@ button{
 <!-- PRO -->
 <div class="plan" id="plan-pro">
   <h3>PRO</h3>
-  <div class="price"><span class="money" data-money="40" data-currency="INR">&#8377;40</span> / month</div>
+  <div class="price"><span class="money" data-money="40" data-currency="USD">$40</span> / month</div>
   <ul>
     <li>20 previews / day</li>
     <li>Fast processing</li>
@@ -105,7 +105,7 @@ button{
 <div class="plan enterprise" id="plan-enterprise">
   <div class="badge">MOST RECOMMENDED</div>
   <h3>ENTERPRISE</h3>
-  <div class="price"><span class="money" data-money="4000" data-currency="INR">&#8377;4000</span> / month</div>
+  <div class="price"><span class="money" data-money="4000" data-currency="USD">$4000</span> / month</div>
   <ul>
     <li>Unlimited previews</li>
     <li>Branding off</li>
@@ -117,8 +117,8 @@ button{
 </div>
 
 <script>
-const supabase = window.supa;
-if(!supabase){
+const supaClient = window.supa;
+if(!supaClient){
   alert("Supabase connection unavailable. Please refresh.");
   location.href = "login.html";
   throw new Error("supabase_client_unavailable");
@@ -132,7 +132,7 @@ let paymentBusy = false;
    AUTH + CURRENT PLAN
 ====================== */
 (async ()=>{
-  const { data } = await supabase.auth.getUser();
+  const { data } = await supaClient.auth.getUser();
   if(!data?.user){
     alert("Login required");
     location.href="login.html";
@@ -144,7 +144,7 @@ let paymentBusy = false;
 })();
 
 async function loadPlan(){
-  const { data } = await supabase
+  const { data } = await supaClient
     .from("subscription")
     .select("plan")
     .eq("user_id", currentUser.id)
@@ -257,11 +257,11 @@ async function saveSubscription(plan, amountInr, verifyPayload){
     razorpay_order_id: String(verifyPayload?.razorpay_order_id || "")
   };
 
-  let { error } = await supabase.from("subscription").insert(payload);
+  let { error } = await supaClient.from("subscription").insert(payload);
   if(error && missingColumnError(error)){
     const fallbackPayload = { ...payload };
     delete fallbackPayload.razorpay_order_id;
-    ({ error } = await supabase.from("subscription").insert(fallbackPayload));
+    ({ error } = await supaClient.from("subscription").insert(fallbackPayload));
   }
   if(error){
     throw error;

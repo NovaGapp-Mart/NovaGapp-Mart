@@ -34,6 +34,14 @@ body{margin:0;font-family:Arial,sans-serif;background:#f4f6f8;color:var(--ink)}
   box-shadow:0 4px 14px rgba(0,0,0,.06);
   margin-bottom:12px
 }
+.eta-card{display:none}
+.eta-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.eta-pill{
+  background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px
+}
+.eta-label{font-size:12px;color:#9a3412}
+.eta-value{font-size:14px;font-weight:700;color:#7c2d12;margin-top:4px}
+.eta-note{font-size:12px;color:#6b7280;margin-top:10px}
 .section-title{font-size:15px;font-weight:700;margin-bottom:10px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .pill{
@@ -139,6 +147,7 @@ body{margin:0;font-family:Arial,sans-serif;background:#f4f6f8;color:var(--ink)}
 .status-badge.rejected{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
 @media (max-width:640px){
   .grid{grid-template-columns:1fr}
+  .eta-grid{grid-template-columns:1fr}
 }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -157,6 +166,7 @@ body{margin:0;font-family:Arial,sans-serif;background:#f4f6f8;color:var(--ink)}
 
 <div class="wrap">
   <div class="card" id="metaCard">Loading order...</div>
+  <div class="card eta-card" id="deliveryCard"></div>
 
   <div class="card">
     <div class="section-title">Order Journey</div>
@@ -203,14 +213,219 @@ const NOTIF_ID =
 
 let CURRENT_USER = null;
 let ORDER = null;
+let deliveryCountdownTimer = null;
 
 const metaCard = document.getElementById("metaCard");
+const deliveryCard = document.getElementById("deliveryCard");
 const timelineBox = document.getElementById("timelineBox");
 const timelineNote = document.getElementById("timelineNote");
 const buyerActions = document.getElementById("buyerActions");
 const sellerActions = document.getElementById("sellerActions");
 const itemsBox = document.getElementById("itemsBox");
 const orderIdText = document.getElementById("orderIdText");
+
+const CITY_COORDS = {
+  bangalore:[12.9716,77.5946],
+  bengaluru:[12.9716,77.5946],
+  mumbai:[19.076,72.8777],
+  pune:[18.5204,73.8567],
+  nagpur:[21.1458,79.0882],
+  nashik:[19.9975,73.7898],
+  aurangabad:[19.8762,75.3433],
+  kolhapur:[16.705,74.2433],
+  delhi:[28.6139,77.209],
+  newdelhi:[28.6139,77.209],
+  noida:[28.5355,77.391],
+  gurgaon:[28.4595,77.0266],
+  gurugram:[28.4595,77.0266],
+  hyderabad:[17.385,78.4867],
+  chennai:[13.0827,80.2707],
+  kolkata:[22.5726,88.3639],
+  ahmedabad:[23.0225,72.5714],
+  surat:[21.1702,72.8311],
+  jaipur:[26.9124,75.7873],
+  indore:[22.7196,75.8577],
+  bhopal:[23.2599,77.4126],
+  lucknow:[26.8467,80.9462],
+  kanpur:[26.4499,80.3319],
+  kochi:[9.9312,76.2673],
+  cochin:[9.9312,76.2673],
+  trivandrum:[8.5241,76.9366],
+  thiruvananthapuram:[8.5241,76.9366],
+  visakhapatnam:[17.6868,83.2185],
+  vijayawada:[16.5062,80.648],
+  patna:[25.5941,85.1376],
+  ranchi:[23.3441,85.3096],
+  bhubaneswar:[20.2961,85.8245],
+  guwahati:[26.1445,91.7362],
+  chandigarh:[30.7333,76.7794],
+  ludhiana:[30.901,75.8573]
+};
+
+function normalizeText(value){
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function resolveCityCoords(cityName){
+  const normalized = normalizeText(cityName).replace(/\s/g, "");
+  if(!normalized) return null;
+  if(CITY_COORDS[normalized]) return CITY_COORDS[normalized];
+  for(const key of Object.keys(CITY_COORDS)){
+    if(normalized.includes(key) || key.includes(normalized)){
+      return CITY_COORDS[key];
+    }
+  }
+  return null;
+}
+
+function haversineKm(lat1, lon1, lat2, lon2){
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function estimateWindowByKm(distanceKm){
+  const km = Number(distanceKm);
+  if(!Number.isFinite(km) || km <= 0) return { min_days:4, max_days:5 };
+  if(km <= 80) return { min_days:1, max_days:2 };
+  if(km <= 250) return { min_days:2, max_days:3 };
+  if(km <= 600) return { min_days:3, max_days:4 };
+  if(km <= 1100) return { min_days:4, max_days:5 };
+  if(km <= 1600) return { min_days:5, max_days:6 };
+  return { min_days:6, max_days:8 };
+}
+
+function buildIsoFrom(baseIso, days){
+  const baseTs = Date.parse(String(baseIso || "")) || Date.now();
+  const n = Math.max(0, Number(days) || 0);
+  return new Date(baseTs + n * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function buildDeliveryEstimateFromOrder(orderLike){
+  const buyerAddr = orderLike?.buyer_address || orderLike?.address || {};
+  if(!buyerAddr || typeof buyerAddr !== "object"){
+    return null;
+  }
+
+  const embedded = buyerAddr.delivery_estimate;
+  if(embedded && typeof embedded === "object" && embedded.label && embedded.eta_to){
+    return embedded;
+  }
+
+  const buyerCity = String(buyerAddr.city || "").trim();
+  const sellerCity = String(buyerAddr.seller_city || "").trim();
+  const buyerCoords = resolveCityCoords(buyerCity);
+  const sellerCoords = resolveCityCoords(sellerCity);
+  const distanceKm = (buyerCoords && sellerCoords)
+    ? haversineKm(buyerCoords[0], buyerCoords[1], sellerCoords[0], sellerCoords[1])
+    : null;
+  const win = estimateWindowByKm(distanceKm);
+  const minDays = Number(win.min_days || 4);
+  const maxDays = Number(win.max_days || 5);
+  const distanceLabel = Number.isFinite(distanceKm) && distanceKm > 0
+    ? `${Math.round(distanceKm)} km`
+    : "";
+
+  return {
+    buyer_city: buyerCity,
+    seller_city: sellerCity,
+    distance_km: Number.isFinite(distanceKm) ? Math.round(distanceKm) : null,
+    distance_label: distanceLabel,
+    min_days: minDays,
+    max_days: maxDays,
+    label: `${minDays}-${maxDays} days`,
+    eta_from: buildIsoFrom(orderLike?.created_at, minDays),
+    eta_to: buildIsoFrom(orderLike?.created_at, maxDays)
+  };
+}
+
+function formatCountdown(targetIso){
+  const targetTs = Date.parse(String(targetIso || ""));
+  if(!Number.isFinite(targetTs)) return "ETA not available";
+  const diff = targetTs - Date.now();
+  if(diff <= 0) return "Delivery window reached";
+  const totalMinutes = Math.floor(diff / (1000 * 60));
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const mins = totalMinutes % 60;
+  return `${days}d ${hours}h ${mins}m left`;
+}
+
+function stopDeliveryCountdown(){
+  if(deliveryCountdownTimer){
+    clearInterval(deliveryCountdownTimer);
+    deliveryCountdownTimer = null;
+  }
+}
+
+function renderDeliveryCard(){
+  if(!deliveryCard || !ORDER){
+    stopDeliveryCountdown();
+    return;
+  }
+  const status = String(ORDER.status || "").toLowerCase();
+  if(["cancelled", "rejected", "declined"].includes(status)){
+    deliveryCard.style.display = "none";
+    deliveryCard.innerHTML = "";
+    stopDeliveryCountdown();
+    return;
+  }
+
+  const estimate = buildDeliveryEstimateFromOrder(ORDER);
+  if(!estimate){
+    deliveryCard.style.display = "none";
+    deliveryCard.innerHTML = "";
+    stopDeliveryCountdown();
+    return;
+  }
+
+  const buyerAddr = ORDER.buyer_address || ORDER.address || {};
+  const distanceText = estimate.distance_label || "Auto route distance unavailable";
+  const routeText = `${estimate.seller_city || "Seller"} to ${estimate.buyer_city || "Buyer"}`;
+  const countdown = formatCountdown(estimate.eta_to);
+
+  deliveryCard.style.display = "block";
+  deliveryCard.innerHTML = `
+    <div class="section-title">Estimated Delivery</div>
+    <div class="eta-grid">
+      <div class="eta-pill">
+        <div class="eta-label">Delivery Window</div>
+        <div class="eta-value">${estimate.label || "4-5 days"}</div>
+      </div>
+      <div class="eta-pill">
+        <div class="eta-label">Live Countdown</div>
+        <div class="eta-value" id="deliveryCountdownText">${countdown}</div>
+      </div>
+      <div class="eta-pill">
+        <div class="eta-label">Route</div>
+        <div class="eta-value">${routeText}</div>
+      </div>
+      <div class="eta-pill">
+        <div class="eta-label">Approx Distance</div>
+        <div class="eta-value">${distanceText}</div>
+      </div>
+    </div>
+    <div class="eta-note">
+      Buyer Country: ${typeof buyerAddr === "object" ? (buyerAddr.country || "-") : "-"} | Buyer Phone: ${typeof buyerAddr === "object" ? (buyerAddr.phone || "-") : "-"}
+    </div>
+  `;
+
+  const countdownEl = document.getElementById("deliveryCountdownText");
+  stopDeliveryCountdown();
+  if(countdownEl){
+    deliveryCountdownTimer = setInterval(() => {
+      countdownEl.textContent = formatCountdown(estimate.eta_to);
+    }, 60 * 1000);
+  }
+}
 
 (async function init(){
   const { data } = await supa.auth.getSession();
@@ -263,24 +478,36 @@ function isSeller(){
 }
 
 function renderPage(){
-  if(!ORDER) return;
+  if(!ORDER){
+    if(deliveryCard){
+      deliveryCard.style.display = "none";
+      deliveryCard.innerHTML = "";
+    }
+    stopDeliveryCountdown();
+    return;
+  }
 
   orderIdText.innerText = `Order ID: ${ORDER.id}`;
 
   const buyerAddr = ORDER.buyer_address || ORDER.address || {};
   const buyerAddrText = typeof buyerAddr === "string"
     ? buyerAddr
-    : [buyerAddr.address, buyerAddr.city, buyerAddr.pincode].filter(Boolean).join(", ");
+    : [buyerAddr.address, buyerAddr.city, buyerAddr.pincode, buyerAddr.country].filter(Boolean).join(", ");
+  const buyerPhone = typeof buyerAddr === "object" ? (buyerAddr.phone || "") : "";
+  const buyerEmail = typeof buyerAddr === "object" ? (buyerAddr.email || ORDER.email || "") : (ORDER.email || "");
 
   metaCard.innerHTML = `
     <div><b>Status:</b> ${ORDER.status || "placed"}</div>
     <div><b>Total:</b> ${window.moneyTag ? moneyTag(ORDER.total || ORDER.amount || 0, ORDER.currency || "USD") : (ORDER.total || ORDER.amount || 0)}</div>
     <div><b>Payment:</b> ${ORDER.payment_status || "pending"} (${ORDER.payment_method || "Pending Payment"})</div>
     <div><b>Buyer:</b> ${ORDER.buyer_name || ORDER.email || ""}</div>
+    <div><b>Phone:</b> ${buyerPhone || "-"}</div>
+    <div><b>Email:</b> ${buyerEmail || "-"}</div>
     <div><b>Address:</b> ${buyerAddrText || ""}</div>
     <div><b>Created:</b> ${ORDER.created_at ? new Date(ORDER.created_at).toLocaleString() : ""}</div>
   `;
 
+  renderDeliveryCard();
   renderTimeline();
   renderItems();
   renderActions();
@@ -399,8 +626,11 @@ function subscribeOrderRealtime(){
 }
 
 function goBack(){
+  stopDeliveryCountdown();
   history.back();
 }
+
+window.addEventListener("beforeunload", stopDeliveryCountdown);
 </script>
 
 </body>
