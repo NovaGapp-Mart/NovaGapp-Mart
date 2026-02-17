@@ -4451,6 +4451,28 @@ function renderPostMusicHtml(item){
   `;
 }
 
+function insertFeedBannerAfter(node){
+  if(!node) return;
+  const adWrap = document.createElement("div");
+  node.insertAdjacentElement("afterend", adWrap);
+
+  const adConfig = document.createElement("script");
+  adConfig.text = `
+  atOptions = {
+    'key' : '46e89ac16d0401b27133419219f055c6',
+    'format' : 'iframe',
+    'height' : 50,
+    'width' : 320,
+    'params' : {}
+  };
+`;
+  adWrap.appendChild(adConfig);
+
+  const adInvoke = document.createElement("script");
+  adInvoke.src = "https://www.highperformanceformat.com/46e89ac16d0401b27133419219f055c6/invoke.js";
+  adWrap.appendChild(adInvoke);
+}
+
 function initMusicStrip(postEl){
   const strip = postEl.querySelector("[data-music]");
   if(!strip) return;
@@ -4984,6 +5006,10 @@ async function renderPost(item, options){
     feed.insertBefore(post, feed.firstChild);
   }else{
     feed.appendChild(post);
+    const postCount = feed.querySelectorAll(".post").length;
+    if(postCount === 2 || postCount % 6 === 0){
+      insertFeedBannerAfter(post);
+    }
   }
   initPostCarousel(post);
   initMusicStrip(post);
