@@ -98,21 +98,25 @@ body{background:#000;color:#fff;height:100dvh;overflow:hidden}
 
 /* COMMENTS PANEL */
 .comments-backdrop,
-.share-backdrop{
+.share-backdrop,
+.shop-backdrop{
   position:fixed;inset:0;background:rgba(0,0,0,0.45);
   display:none;z-index:70;
 }
 .comments-backdrop.show,
-.share-backdrop.show{display:block}
+.share-backdrop.show,
+.shop-backdrop.show{display:block}
 .comments-panel,
-.share-sheet{
+.share-sheet,
+.shop-sheet{
   position:fixed;left:0;right:0;bottom:-80vh;
   background:#fff;color:#111;border-radius:16px 16px 0 0;
   max-height:70vh;display:flex;flex-direction:column;
   z-index:80;transition:0.25s;
 }
 .comments-panel.show,
-.share-sheet.show{bottom:0}
+.share-sheet.show,
+.shop-sheet.show{bottom:0}
 .comments-header{
   display:flex;align-items:center;justify-content:space-between;
   padding:12px 14px;border-bottom:1px solid #eee;font-weight:700
@@ -232,6 +236,40 @@ body{background:#000;color:#fff;height:100dvh;overflow:hidden}
 }
 .share-chat-send:disabled{opacity:.6;cursor:default}
 
+.shop-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 14px;border-bottom:1px solid #eee;font-weight:700
+}
+.shop-close{
+  border:none;background:#111;color:#fff;border-radius:16px;
+  padding:4px 10px;font-size:12px;cursor:pointer
+}
+.shop-list{
+  padding:12px 14px;overflow:auto;display:flex;flex-direction:column;gap:10px
+}
+.shop-empty{
+  border:1px dashed #ddd;border-radius:10px;padding:10px;font-size:12px;color:#666;text-align:center
+}
+.shop-item{
+  display:flex;align-items:center;gap:10px;border:1px solid #eee;border-radius:10px;padding:8px
+}
+.shop-thumb{
+  width:44px;height:44px;border-radius:8px;object-fit:cover;background:#f5f5f5;flex-shrink:0
+}
+.shop-thumb-fallback{
+  width:44px;height:44px;border-radius:8px;background:#f2f2f2;display:flex;align-items:center;justify-content:center;
+  font-size:10px;color:#777;flex-shrink:0
+}
+.shop-meta{flex:1;min-width:0}
+.shop-name{
+  font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+}
+.shop-price{font-size:11px;color:#666}
+.shop-open{
+  border:none;background:#111;color:#fff;border-radius:999px;padding:7px 12px;font-size:11px;cursor:pointer;
+  text-decoration:none;display:inline-flex;align-items:center
+}
+
 /* NAV */
 .nav{position:absolute;bottom:0;left:0;width:100%;height:68px;background:#111;display:flex}
 .nav div{
@@ -306,6 +344,15 @@ body{background:#000;color:#fff;height:100dvh;overflow:hidden}
   <div class="share-chat-list" id="shareChatList"></div>
 </div>
 
+<div class="shop-backdrop" id="shopBackdrop"></div>
+<div class="shop-sheet" id="shopSheet">
+  <div class="shop-head">
+    <span id="shopTitle">Shop</span>
+    <button class="shop-close" id="shopClose">Close</button>
+  </div>
+  <div class="shop-list" id="shopList"></div>
+</div>
+
 <script>
 const reelWrapper = document.getElementById("reelWrapper");
 const reelInput = document.getElementById("reelInput");
@@ -324,6 +371,11 @@ const shareSheet = document.getElementById("shareSheet");
 const shareClose = document.getElementById("shareClose");
 const shareChatList = document.getElementById("shareChatList");
 const shareButtons = Array.from(document.querySelectorAll("[data-share]"));
+const shopBackdrop = document.getElementById("shopBackdrop");
+const shopSheet = document.getElementById("shopSheet");
+const shopTitle = document.getElementById("shopTitle");
+const shopClose = document.getElementById("shopClose");
+const shopList = document.getElementById("shopList");
 
 let page = 0;
 let loading = false;
@@ -368,6 +420,7 @@ let activeEditRowId = "";
 let activeCommentThread = null;
 let activeShareItem = null;
 let activeShareCountEl = null;
+let activeShopOwnerId = "";
 const params = new URLSearchParams(location.search);
 const feedUserId = params.get("uid") || "";
 const focusReelId = params.get("focus") || "";
@@ -402,7 +455,8 @@ function incrementReelShareCount(reelId){
 function syncOverlayScrollLock(){
   const commentsOpen = commentsPanel.classList.contains("show");
   const shareOpen = shareSheet.classList.contains("show");
-  reelWrapper.style.overflowY = (commentsOpen || shareOpen) ? "hidden" : "auto";
+  const shopOpen = shopSheet.classList.contains("show");
+  reelWrapper.style.overflowY = (commentsOpen || shareOpen || shopOpen) ? "hidden" : "auto";
 }
 
 function escapeHtml(value){
@@ -419,6 +473,156 @@ function getReelShareUrl(item){
   if(item?.user_id) url.searchParams.set("uid", item.user_id);
   url.searchParams.set("focus", item?.id || "");
   return url.href;
+}
+
+function getProductDeepLink(productId){
+  const url = new URL("product-details.html", location.href);
+  if(productId) url.searchParams.set("id", String(productId || ""));
+  return url.href;
+}
+
+function parseSafeUrl(urlText){
+  const raw = String(urlText || "").trim();
+  if(!raw) return "";
+  try{
+    const parsed = new URL(raw, location.origin);
+    if(!/^https?:$/i.test(parsed.protocol)) return "";
+    return parsed.href;
+  }catch(_){
+    return "";
+  }
+}
+
+function resolveShopLink(product){
+  const ownLink = parseSafeUrl(
+    product?.product_link ||
+    product?.product_url ||
+    product?.buy_link ||
+    product?.link ||
+    ""
+  );
+  if(ownLink) return ownLink;
+  return getProductDeepLink(product?.id || "");
+}
+
+function formatShopPrice(amount, currency){
+  const value = Number(amount || 0);
+  const code = String(currency || "INR").toUpperCase();
+  if(typeof window.moneyTag === "function"){
+    return window.moneyTag(value, code);
+  }
+  return `${code} ${value}`;
+}
+
+function closeShopSheet(){
+  activeShopOwnerId = "";
+  if(shopList) shopList.innerHTML = "";
+  if(shopSheet) shopSheet.classList.remove("show");
+  if(shopBackdrop) shopBackdrop.classList.remove("show");
+  syncOverlayScrollLock();
+}
+
+function renderShopProducts(products){
+  if(!shopList) return;
+  shopList.innerHTML = "";
+  const list = Array.isArray(products) ? products : [];
+  if(!list.length){
+    shopList.innerHTML = "<div class='shop-empty'>No products available for this reel creator.</div>";
+    return;
+  }
+
+  list.forEach(product => {
+    const row = document.createElement("div");
+    row.className = "shop-item";
+
+    const imageUrl = Array.isArray(product?.images) && product.images.length
+      ? product.images[0]
+      : "";
+    if(imageUrl){
+      const img = document.createElement("img");
+      img.className = "shop-thumb";
+      img.src = String(imageUrl);
+      img.alt = "Product";
+      row.appendChild(img);
+    }else{
+      const fallback = document.createElement("div");
+      fallback.className = "shop-thumb-fallback";
+      fallback.textContent = "No image";
+      row.appendChild(fallback);
+    }
+
+    const meta = document.createElement("div");
+    meta.className = "shop-meta";
+    const title = document.createElement("div");
+    title.className = "shop-name";
+    title.textContent = String(product?.name || "Product");
+    const price = document.createElement("div");
+    price.className = "shop-price";
+    price.textContent = formatShopPrice(product?.price, product?.currency);
+    meta.appendChild(title);
+    meta.appendChild(price);
+    row.appendChild(meta);
+
+    const link = resolveShopLink(product);
+    const openBtn = document.createElement("a");
+    openBtn.className = "shop-open";
+    openBtn.href = link;
+    openBtn.textContent = "Open";
+    openBtn.addEventListener("click", () => {
+      closeShopSheet();
+    });
+    row.appendChild(openBtn);
+
+    shopList.appendChild(row);
+  });
+}
+
+async function openShopSheet(ownerId, ownerName){
+  const cleanOwner = String(ownerId || "").trim();
+  if(!cleanOwner){
+    alert("Shop is unavailable.");
+    return;
+  }
+  if(!window.NOVA || !window.NOVA.supa){
+    alert("Shop is unavailable right now.");
+    return;
+  }
+  activeShopOwnerId = cleanOwner;
+  if(shareSheet && shareSheet.classList.contains("show")){
+    closeShareSheet();
+  }
+  if(commentsPanel && commentsPanel.classList.contains("show")){
+    closeComments();
+  }
+  if(shopTitle){
+    const label = String(ownerName || "Creator").trim() || "Creator";
+    shopTitle.textContent = `${label} Shop`;
+  }
+  if(shopList){
+    shopList.innerHTML = "<div class='shop-empty'>Loading products...</div>";
+  }
+  if(shopBackdrop) shopBackdrop.classList.add("show");
+  if(shopSheet) shopSheet.classList.add("show");
+  syncOverlayScrollLock();
+
+  try{
+    const { data, error } = await window.NOVA.supa
+      .from("products")
+      .select("*")
+      .eq("owner_id", cleanOwner)
+      .order("created_at", { ascending:false })
+      .limit(50);
+    if(error){
+      throw error;
+    }
+    if(activeShopOwnerId !== cleanOwner) return;
+    renderShopProducts(data || []);
+  }catch(_){
+    if(activeShopOwnerId !== cleanOwner) return;
+    if(shopList){
+      shopList.innerHTML = "<div class='shop-empty'>Unable to load products right now.</div>";
+    }
+  }
 }
 
 function formatCommentTime(value){
@@ -680,10 +884,10 @@ async function renderReel(item, options){
           <span class="count" data-download-label>Download</span>
         </div>
         <div class="action-item">
-          <div class="icon-btn" data-action="follow">
-            <svg viewBox="0 0 24 24"><path d="M15 14c2.7 0 8 1.3 8 4v2h-22v-2c0-2.7 5.3-4 8-4m3-6a4 4 0 1 0-8 0 4 4 0 0 0 8 0"/></svg>
+          <div class="icon-btn" data-action="shop">
+            <svg viewBox="0 0 24 24"><path d="M7 6V4a5 5 0 0 1 10 0v2h3a1 1 0 0 1 1 1l-1 12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2L3 7a1 1 0 0 1 1-1h3zm2 0h6V4a3 3 0 0 0-6 0v2z"/></svg>
           </div>
-          <span>Follow</span>
+          <span>Shop</span>
         </div>
       </div>
       <div class="caption">
@@ -742,7 +946,7 @@ async function renderReel(item, options){
   const downloadBtn = reel.querySelector("[data-action='download']");
   const followBtn = reel.querySelector("[data-follow]");
   const creatorRow = reel.querySelector(".creator-row");
-  const followIcon = reel.querySelector("[data-action='follow']");
+  const shopIcon = reel.querySelector("[data-action='shop']");
   const moreBtn = reel.querySelector("[data-more]");
   const menu = reel.querySelector("[data-menu]");
   const descEl = reel.querySelector("[data-desc]");
@@ -1027,7 +1231,12 @@ async function renderReel(item, options){
       }
     };
   }
-  followIcon.onclick = handleFollowToggle;
+  if(shopIcon){
+    shopIcon.onclick = (e) => {
+      e.stopPropagation();
+      openShopSheet(item.user_id, creatorName);
+    };
+  }
 
   if(creatorRow){
     creatorRow.onclick = () => {
@@ -1208,6 +1417,12 @@ shareChatList.addEventListener("click", e => {
   const targetId = btn.getAttribute("data-send-chat") || "";
   sendShareToChat(targetId, btn);
 });
+if(shopBackdrop){
+  shopBackdrop.addEventListener("click", closeShopSheet);
+}
+if(shopClose){
+  shopClose.addEventListener("click", closeShopSheet);
+}
 
 function closeCommentMenus(){
   commentsList.querySelectorAll(".comment-menu.show").forEach(menu => menu.classList.remove("show"));

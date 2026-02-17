@@ -11,7 +11,20 @@
 <script src="social.js"></script>
 
 <style>
-body{margin:0;font-family:Arial;background:#f2f2f2;height:100vh;display:flex;flex-direction:column}
+:root{
+  --app-height:100dvh;
+  --keyboard-inset:0px;
+}
+html,body{
+  width:100%;
+  margin:0;
+  overflow:hidden
+}
+body{
+  font-family:Arial;background:#f2f2f2;
+  height:var(--app-height);min-height:100dvh;
+  display:flex;flex-direction:column
+}
 .chat-header{background:#ff6a00;color:#fff;padding:10px 12px;font-weight:bold;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:20}
 .chat-title{display:flex;align-items:center;gap:10px;min-width:0}
 .chat-avatar{width:38px;height:38px;border-radius:50%;object-fit:cover;background:#fff}
@@ -73,13 +86,24 @@ body{margin:0;font-family:Arial;background:#f2f2f2;height:100vh;display:flex;fle
 }
 .contact-name{font-size:13px;font-weight:600}
 .contact-username{font-size:11px;color:#666}
-.chat-box{flex:1;overflow-y:auto;padding:10px;scroll-behavior:smooth}
+.chat-box{
+  flex:1;overflow-y:auto;padding:10px;
+  padding-bottom:calc(10px + env(safe-area-inset-bottom) + var(--keyboard-inset));
+  scroll-behavior:smooth
+}
 .msg{max-width:70%;padding:8px 12px;margin:6px 0;border-radius:12px;font-size:14px}
 .msg.pending{opacity:.7}
 .msg.failed{opacity:.6;border:1px solid #e53935}
 .me{background:#ff6a00;color:#fff;margin-left:auto}
 .other{background:#e9e9eb;color:#111;margin-right:auto}
 .msg-text{white-space:pre-wrap;word-wrap:break-word}
+.msg-text .msg-link{
+  color:inherit;
+  text-decoration:underline;
+  text-decoration-thickness:1px;
+  text-underline-offset:2px;
+  word-break:break-all;
+}
 .msg-media{display:block;max-width:100%;border-radius:10px;margin-bottom:6px}
 .msg-media.video{max-height:320px}
 .doc-card{
@@ -112,7 +136,10 @@ small{
 }
 .msg.me.seen .msg-tick{color:#ff9f1a}
 .msg.pending .msg-tick{opacity:.45}
-.chat-input{display:flex;gap:8px;align-items:center;padding:10px;background:#fff;border-top:1px solid #ddd}
+.chat-input{
+  display:flex;gap:8px;align-items:center;padding:10px;background:#fff;border-top:1px solid #ddd;
+  padding-bottom:calc(10px + env(safe-area-inset-bottom) + var(--keyboard-inset))
+}
 .chat-input input{flex:1;padding:10px;border-radius:20px;border:1px solid #ccc}
 .chat-input button{background:#ff6a00;color:#fff;border:none;padding:10px 14px;border-radius:50%}
 .attach-btn{background:#111}
@@ -265,6 +292,7 @@ body.chat-disabled #replyPreview{display:none !important}
 }
 .call-actions .accept{background:#1aa34a;color:#fff}
 .call-actions .decline,.call-actions .end{background:#e53935;color:#fff}
+.call-actions .switch{background:#1d5cff;color:#fff}
 </style>
 </head>
 
@@ -366,6 +394,7 @@ body.chat-disabled #replyPreview{display:none !important}
     </div>
     <div class="call-actions">
       <button class="accept" id="callAcceptBtn" type="button">Answer</button>
+      <button class="switch" id="callSwitchCameraBtn" type="button">Back Cam</button>
       <button class="decline" id="callDeclineBtn" type="button">Decline</button>
       <button class="end" id="callEndBtn" type="button">End</button>
     </div>
@@ -425,6 +454,7 @@ const remoteVideo = document.getElementById("remoteVideo");
 const localVideo = document.getElementById("localVideo");
 const remoteAudio = document.getElementById("remoteAudio");
 const callAcceptBtn = document.getElementById("callAcceptBtn");
+const callSwitchCameraBtn = document.getElementById("callSwitchCameraBtn");
 const callDeclineBtn = document.getElementById("callDeclineBtn");
 const callEndBtn = document.getElementById("callEndBtn");
 
@@ -470,10 +500,33 @@ let ringGain = null;
 let ringOsc = null;
 let ringInterval = null;
 let callStatusTimeout = null;
+let callFacingMode = "user";
+let switchingCamera = false;
+let callVideoInputs = [];
+let callVideoInputIndex = -1;
 const selectCols = "id,sender_id,receiver_id,message,media_url,media_type,created_at";
 const CHAT_READ_EVENT_PREFIX = "__NOVA_READ__:";
 let otherSeenAt = "";
 let lastSentReadAt = "";
+
+function syncViewportHeight(){
+  const vv = window.visualViewport;
+  const height = Math.round((vv && vv.height) ? vv.height : window.innerHeight || 0);
+  if(!height || height < 120) return;
+  const layoutHeight = Math.round(window.innerHeight || height);
+  const keyboardInset = vv
+    ? Math.max(0, Math.round(layoutHeight - vv.height - vv.offsetTop))
+    : 0;
+  document.documentElement.style.setProperty("--app-height", `${height}px`);
+  document.documentElement.style.setProperty("--keyboard-inset", `${keyboardInset}px`);
+}
+syncViewportHeight();
+window.addEventListener("resize", syncViewportHeight);
+window.addEventListener("orientationchange", syncViewportHeight);
+if(window.visualViewport){
+  window.visualViewport.addEventListener("resize", syncViewportHeight);
+  window.visualViewport.addEventListener("scroll", syncViewportHeight);
+}
 
 function setContactsVisible(show){
   if(!contactsPanel) return;
@@ -763,6 +816,71 @@ function getMediaKindForFile(file){
 function normalizeMediaType(value){
   if(!value) return "text";
   return value === "file" ? "document" : value;
+}
+
+function appendTextWithLineBreaks(target, chunk){
+  const parts = String(chunk || "").split("\n");
+  parts.forEach((part, index) => {
+    if(part){
+      target.appendChild(document.createTextNode(part));
+    }
+    if(index < parts.length - 1){
+      target.appendChild(document.createElement("br"));
+    }
+  });
+}
+
+function normalizeMessageUrl(urlText){
+  const raw = String(urlText || "").trim();
+  if(!raw) return "";
+  const withProtocol = /^www\./i.test(raw) ? `https://${raw}` : raw;
+  try{
+    const parsed = new URL(withProtocol, location.href);
+    if(!/^https?:$/i.test(parsed.protocol)) return "";
+    return parsed.href;
+  }catch(_){
+    return "";
+  }
+}
+
+function setMessageTextContent(target, value){
+  if(!target) return;
+  target.textContent = "";
+  const raw = String(value || "");
+  if(!raw) return;
+
+  const urlRegex = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
+  let lastIndex = 0;
+  let match;
+  while((match = urlRegex.exec(raw))){
+    const start = match.index;
+    const end = urlRegex.lastIndex;
+    if(start > lastIndex){
+      appendTextWithLineBreaks(target, raw.slice(lastIndex, start));
+    }
+
+    const href = normalizeMessageUrl(match[0]);
+    if(href){
+      const link = document.createElement("a");
+      link.className = "msg-link";
+      link.href = href;
+      link.textContent = match[0];
+      link.rel = "noopener";
+      if(href.startsWith(location.origin)){
+        link.target = "_self";
+      }else{
+        link.target = "_blank";
+      }
+      target.appendChild(link);
+    }else{
+      appendTextWithLineBreaks(target, match[0]);
+    }
+    lastIndex = end;
+  }
+
+  if(lastIndex < raw.length){
+    appendTextWithLineBreaks(target, raw.slice(lastIndex));
+  }
 }
 
 function renderDocCard(url, name, size){
@@ -1215,7 +1333,7 @@ function finalizeOptimisticMessage(el, m){
       text.className = "msg-text";
       el.insertBefore(text, el.querySelector("small"));
     }
-    text.textContent = m.message;
+    setMessageTextContent(text, m.message);
   }
 
   const timeText = el.querySelector(".msg-time");
@@ -1546,7 +1664,7 @@ function renderMsg(m, opts = {}){
   if(m.message){
     const text = document.createElement("div");
     text.className = "msg-text";
-    text.textContent = m.message;
+    setMessageTextContent(text, m.message);
     div.appendChild(text);
   }
 
@@ -1887,6 +2005,44 @@ function applyCallMediaMode(){
   if(remoteVideo) remoteVideo.style.display = isVideo ? "block" : "none";
   if(localVideo) localVideo.style.display = isVideo ? "block" : "none";
   if(remoteAudio) remoteAudio.style.display = isVideo ? "none" : "block";
+  updateCallSwitchUi();
+}
+
+function updateCallSwitchUi(){
+  if(!callSwitchCameraBtn) return;
+  const hasVideoTrack = !!(localStream && localStream.getVideoTracks && localStream.getVideoTracks().length);
+  const show = !!(activeCall && activeCall.type === "video" && hasVideoTrack);
+  callSwitchCameraBtn.style.display = show ? "inline-flex" : "none";
+  callSwitchCameraBtn.disabled = !show || switchingCamera;
+  callSwitchCameraBtn.textContent = callFacingMode === "user" ? "Back Cam" : "Front Cam";
+}
+
+function readFacingModeFromTrack(track){
+  if(!track || typeof track.getSettings !== "function") return "";
+  const settings = track.getSettings() || {};
+  const facing = String(settings.facingMode || "").toLowerCase();
+  return (facing === "user" || facing === "environment") ? facing : "";
+}
+
+async function refreshCallVideoInputs(track){
+  if(!navigator.mediaDevices || typeof navigator.mediaDevices.enumerateDevices !== "function"){
+    callVideoInputs = [];
+    callVideoInputIndex = -1;
+    return;
+  }
+  try{
+    const allDevices = await navigator.mediaDevices.enumerateDevices();
+    callVideoInputs = (allDevices || []).filter(device => device && device.kind === "videoinput");
+    const settings = track && typeof track.getSettings === "function" ? track.getSettings() : {};
+    const deviceId = String(settings?.deviceId || "");
+    callVideoInputIndex = callVideoInputs.findIndex(device => String(device.deviceId || "") === deviceId);
+    if(callVideoInputIndex < 0 && callVideoInputs.length){
+      callVideoInputIndex = 0;
+    }
+  }catch(_){
+    callVideoInputs = [];
+    callVideoInputIndex = -1;
+  }
 }
 
 function setCallMediaLabel(text){
@@ -1976,6 +2132,11 @@ function resetCallState(){
     callMedia.style.backgroundSize = "";
     callMedia.style.backgroundPosition = "";
   }
+  callFacingMode = "user";
+  switchingCamera = false;
+  callVideoInputs = [];
+  callVideoInputIndex = -1;
+  updateCallSwitchUi();
   setCallMediaLabel("");
 }
 
@@ -2075,10 +2236,119 @@ async function sendMissedCallMessage(callInfo){
 
 async function setupLocalStream(kind){
   if(localStream) return localStream;
-  const constraints = { audio:true, video: kind === "video" };
+  const constraints = {
+    audio:true,
+    video: kind === "video"
+      ? { facingMode:{ ideal: callFacingMode } }
+      : false
+  };
   localStream = await navigator.mediaDevices.getUserMedia(constraints);
+  if(kind === "video"){
+    const track = localStream.getVideoTracks && localStream.getVideoTracks()[0];
+    const facing = readFacingModeFromTrack(track);
+    if(facing){
+      callFacingMode = facing;
+    }
+    await refreshCallVideoInputs(track);
+  }
   if(localVideo) localVideo.srcObject = localStream;
+  updateCallSwitchUi();
   return localStream;
+}
+
+async function replaceLocalVideoTrack(nextTrack){
+  if(!nextTrack) return;
+  const oldTrack = localStream ? localStream.getVideoTracks()[0] : null;
+  if(localStream){
+    if(oldTrack){
+      try{ localStream.removeTrack(oldTrack); }catch(_){}
+    }
+    localStream.addTrack(nextTrack);
+  }
+  if(rtcPeer){
+    const sender = rtcPeer.getSenders().find(s => s.track && s.track.kind === "video");
+    if(sender){
+      await sender.replaceTrack(nextTrack);
+    }else if(localStream){
+      rtcPeer.addTrack(nextTrack, localStream);
+    }
+  }
+  if(oldTrack){
+    try{ oldTrack.stop(); }catch(_){}
+  }
+  if(localVideo){
+    localVideo.srcObject = localStream;
+    try{ await localVideo.play(); }catch(_){}
+  }
+  const facing = readFacingModeFromTrack(nextTrack);
+  if(facing){
+    callFacingMode = facing;
+  }
+  await refreshCallVideoInputs(nextTrack);
+  updateCallSwitchUi();
+}
+
+async function switchCallCamera(){
+  if(!activeCall || activeCall.type !== "video" || !localStream) return;
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+  if(switchingCamera) return;
+  const hasTrack = localStream.getVideoTracks && localStream.getVideoTracks().length;
+  if(!hasTrack) return;
+
+  const nextFacing = callFacingMode === "user" ? "environment" : "user";
+  switchingCamera = true;
+  if(callSwitchCameraBtn){
+    callSwitchCameraBtn.disabled = true;
+    callSwitchCameraBtn.textContent = "Switching...";
+  }
+
+  try{
+    const currentTrack = localStream.getVideoTracks()[0];
+    await refreshCallVideoInputs(currentTrack);
+    let videoConstraints = { facingMode:{ ideal: nextFacing } };
+    if(callVideoInputs.length > 1){
+      const total = callVideoInputs.length;
+      const currentIndex = callVideoInputIndex >= 0 ? callVideoInputIndex : 0;
+      const nextIndex = (currentIndex + 1) % total;
+      const nextDevice = callVideoInputs[nextIndex];
+      if(nextDevice && nextDevice.deviceId){
+        videoConstraints = {
+          deviceId:{ exact: nextDevice.deviceId },
+          facingMode:{ ideal: nextFacing }
+        };
+      }
+    }
+    const camStream = await navigator.mediaDevices.getUserMedia({
+      video: videoConstraints,
+      audio:false
+    });
+    const nextTrack = camStream.getVideoTracks()[0];
+    if(!nextTrack){
+      throw new Error("Camera not available.");
+    }
+    await replaceLocalVideoTrack(nextTrack);
+    const facing = readFacingModeFromTrack(nextTrack);
+    callFacingMode = facing || nextFacing;
+  }catch(err){
+    try{
+      const fallbackStream = await navigator.mediaDevices.getUserMedia({
+        video:{ facingMode:{ ideal: nextFacing } },
+        audio:false
+      });
+      const fallbackTrack = fallbackStream.getVideoTracks()[0];
+      if(!fallbackTrack){
+        throw new Error("Camera not available.");
+      }
+      await replaceLocalVideoTrack(fallbackTrack);
+      const facing = readFacingModeFromTrack(fallbackTrack);
+      callFacingMode = facing || nextFacing;
+    }catch(fallbackErr){
+      alert(fallbackErr?.message || err?.message || "Unable to switch camera.");
+    }
+  }finally{
+    switchingCamera = false;
+    updateCallSwitchUi();
+  }
 }
 
 function setupPeerConnection(){
@@ -2131,6 +2401,7 @@ async function startCall(kind){
   }
   await ensureCallChannel();
   const callId = "call-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+  callFacingMode = "user";
   activeCall = { id: callId, type: kind, with: otherUid, isCaller:true, state:"calling", connected:false };
   updateCallProfile(otherUid);
   updateCallUiState("calling");
@@ -2158,6 +2429,7 @@ async function startCall(kind){
 
 async function acceptCall(){
   if(!activeCall || !activeCall.offer) return;
+  callFacingMode = "user";
   updateCallUiState("connecting");
   try{
     await setupLocalStream(activeCall.type);
@@ -2386,6 +2658,10 @@ async function sendMsg(){
 msgInput.addEventListener("keypress",e=>{
   if(e.key==="Enter") sendMsg();
 });
+msgInput.addEventListener("focus", ()=>{
+  syncViewportHeight();
+  setTimeout(()=>scrollToBottom(true), 120);
+});
 
 function pickMedia(){
   if(mediaInput) mediaInput.click();
@@ -2525,6 +2801,11 @@ if(chatMoreBtn){
 
 if(callAcceptBtn){
   callAcceptBtn.addEventListener("click", acceptCall);
+}
+
+if(callSwitchCameraBtn){
+  callSwitchCameraBtn.addEventListener("click", switchCallCamera);
+  callSwitchCameraBtn.style.display = "none";
 }
 
 if(callDeclineBtn){

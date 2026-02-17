@@ -12,6 +12,15 @@ body{margin:0;font-family:Arial;background:#f5f5f5}
 input,textarea,select{width:100%;padding:12px;margin-bottom:12px;border-radius:8px;border:1px solid #ccc;font-size:16px;box-sizing:border-box}
 textarea{height:90px;resize:none}
 .price-row{display:flex;gap:10px}
+.link-section{margin:10px 0}
+.link-title{display:block;font-size:14px;font-weight:700;margin-bottom:8px}
+.link-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.link-row input{margin-bottom:0;flex:1}
+.link-copy-btn{
+  width:auto;background:#111;color:#fff;border:none;padding:12px 14px;
+  font-size:12px;border-radius:8px;cursor:pointer;font-weight:700;white-space:nowrap
+}
+.link-copy-btn:disabled{opacity:.55;cursor:not-allowed}
 .preview{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
 .preview img,.preview video{width:70px;height:70px;object-fit:cover;border-radius:8px;border:1px solid #ddd}
 button{width:100%;background:#ff7a00;color:#fff;border:none;padding:15px;font-size:18px;border-radius:10px;cursor:pointer;font-weight:bold}
@@ -70,6 +79,15 @@ button{width:100%;background:#ff7a00;color:#fff;border:none;padding:15px;font-si
   <input id="p_quantity" type="number" placeholder="Total Quantity">
   <b id="p_discount" style="color:green">0% OFF</b>
 
+  <div class="link-section">
+    <label class="link-title" for="p_link">Add Your Product Link</label>
+    <div class="link-row">
+      <input type="text" id="p_link" placeholder="Link auto-generated after publish (NOVAGAPP only)" readonly>
+      <button type="button" id="copyProductLinkBtn" class="link-copy-btn" disabled>Copy Link</button>
+    </div>
+    <div class="note">Only your NOVAGAPP product link will be used in reels and shop redirects.</div>
+  </div>
+
   <hr>
 
   <input type="text" id="p_keywords" placeholder="Keywords (comma separated, unlimited)">
@@ -88,6 +106,9 @@ let currentUser = null;
 let SELLER_PROFILE = null;
 let SELECTED_IMAGES = [];
 const FILE_KEYS = new Set();
+const pLinkInput = document.getElementById("p_link");
+const copyProductLinkBtn = document.getElementById("copyProductLinkBtn");
+let currentProductLink = "";
 function resolveTryonApiBase(){
   const allowLoopback = location.protocol === "file:";
   const stored = String(localStorage.getItem("tryonApiBase") || "").trim().replace(/\/+$/g, "");
@@ -101,6 +122,69 @@ function resolveTryonApiBase(){
   return allowLoopback ? "https://novagapp-mart.onrender.com" : "https://novagapp-mart.onrender.com";
 }
 const API_BASE = resolveTryonApiBase();
+
+function buildProductLink(productId){
+  const cleanId = String(productId || "").trim();
+  if(!cleanId) return "";
+  const url = new URL("product-details.html", location.href);
+  url.searchParams.set("id", cleanId);
+  return url.href;
+}
+
+function setProductLinkUi(link){
+  currentProductLink = String(link || "");
+  if(pLinkInput){
+    pLinkInput.value = currentProductLink;
+  }
+  if(copyProductLinkBtn){
+    copyProductLinkBtn.disabled = !currentProductLink;
+  }
+}
+
+async function copyProductLink(){
+  if(!currentProductLink) return;
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      await navigator.clipboard.writeText(currentProductLink);
+      alert("Product link copied");
+      return;
+    }
+  }catch(_){}
+  try{
+    window.prompt("Copy this product link", currentProductLink);
+  }catch(_){}
+}
+
+function isMissingColumnError(error){
+  const message = String(error?.message || "").toLowerCase();
+  const details = String(error?.details || "").toLowerCase();
+  const text = `${message} ${details}`;
+  return text.includes("column") && text.includes("does not exist");
+}
+
+async function persistProductLink(productId, link){
+  const cleanId = String(productId || "").trim();
+  const cleanLink = String(link || "").trim();
+  if(!cleanId || !cleanLink) return;
+
+  const updates = [
+    { product_link: cleanLink },
+    { product_url: cleanLink }
+  ];
+
+  for(const updatePayload of updates){
+    const { error } = await supa
+      .from("products")
+      .update(updatePayload)
+      .eq("id", cleanId);
+    if(!error){
+      return;
+    }
+    if(!isMissingColumnError(error)){
+      return;
+    }
+  }
+}
 
 async function cacheProductImage(productId, productUrl){
   if(!productId || !productUrl) return;
@@ -178,6 +262,11 @@ p_mrp.oninput=p_price.oninput=()=>{
   if(m>p && p>0) p_discount.innerText=Math.round(((m-p)/m)*100)+"% OFF";
 };
 
+if(copyProductLinkBtn){
+  copyProductLinkBtn.addEventListener("click", copyProductLink);
+}
+setProductLinkUi("");
+
 /* PUBLISH */
 publishBtn.onclick=async()=>{
   const files = SELECTED_IMAGES;
@@ -235,7 +324,18 @@ publishBtn.onclick=async()=>{
     (data?.images && data.images[0]) || (product.images && product.images[0])
   );
 
-  alert("Product published");
+  const generatedLink = buildProductLink(data?.id);
+  setProductLinkUi(generatedLink);
+  await persistProductLink(data?.id, generatedLink);
+  if(generatedLink){
+    try{
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        await navigator.clipboard.writeText(generatedLink);
+      }
+    }catch(_){}
+  }
+
+  alert(generatedLink ? "Product published. Product link copied." : "Product published");
   location.href="index.html";
 };
 </script>
