@@ -838,5 +838,47 @@ document.addEventListener("DOMContentLoaded", ()=>{
 </script>
 
 <script src="https://pl28733255.effectivegatecpm.com/b6/ba/37/b6ba37e7b0160c13daaa984ac0ac6115.js"></script>
+<script>
+(function () {
+  const FIRST_OPEN_KEY = "popup_first_open_armed";
+  const TARGET_POPUP_SCRIPT = "77efde21a0bfc181f4f8e7f3c8a36aa2.js";
+  const nativeOpen = window.open;
+  let allowNextPopup = false;
+  let wasHidden = document.visibilityState === "hidden";
+
+  function armPopupOnce() {
+    allowNextPopup = true;
+  }
+
+  if (!sessionStorage.getItem(FIRST_OPEN_KEY)) {
+    sessionStorage.setItem(FIRST_OPEN_KEY, "1");
+    armPopupOnce();
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden") {
+      wasHidden = true;
+      return;
+    }
+    if (document.visibilityState === "visible" && wasHidden) {
+      wasHidden = false;
+      armPopupOnce();
+    }
+  });
+
+  window.open = function () {
+    const stack = (new Error().stack || "").toLowerCase();
+    const isTargetPopupCall = stack.indexOf(TARGET_POPUP_SCRIPT) !== -1;
+
+    if (isTargetPopupCall) {
+      if (!allowNextPopup) return null;
+      allowNextPopup = false;
+    }
+
+    return nativeOpen.apply(this, arguments);
+  };
+})();
+</script>
+<script src="https://pl28739864.effectivegatecpm.com/77/ef/de/77efde21a0bfc181f4f8e7f3c8a36aa2.js"></script>
 </body>
 </html>
