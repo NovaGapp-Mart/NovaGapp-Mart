@@ -15,6 +15,86 @@
 *{margin:0;padding:0;box-sizing:border-box;font-family:Arial}
 body{background:#000;color:#fff;height:100dvh;overflow:hidden}
 
+.reel-search-shell{
+  position:fixed;
+  top:10px;
+  left:10px;
+  right:10px;
+  z-index:95;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  pointer-events:none;
+}
+.reel-search-top{
+  display:flex;
+  justify-content:flex-end;
+  pointer-events:auto;
+}
+.reel-search-toggle{
+  border:none;
+  background:rgba(17,17,17,0.82);
+  color:#fff;
+  border-radius:999px;
+  padding:8px 12px;
+  font-size:12px;
+  font-weight:700;
+  cursor:pointer;
+  backdrop-filter:blur(6px);
+}
+.reel-search-panel{
+  display:none;
+  pointer-events:auto;
+  gap:8px;
+  align-items:center;
+  background:rgba(17,17,17,0.9);
+  border:1px solid rgba(255,255,255,0.18);
+  border-radius:14px;
+  padding:8px;
+  backdrop-filter:blur(6px);
+}
+.reel-search-panel.show{display:flex}
+.reel-search-input{
+  flex:1;
+  min-width:0;
+  border:none;
+  outline:none;
+  border-radius:10px;
+  padding:10px 12px;
+  background:#fff;
+  color:#111;
+  font-size:13px;
+}
+.reel-search-submit,
+.reel-search-clear{
+  border:none;
+  border-radius:10px;
+  padding:9px 12px;
+  font-size:12px;
+  font-weight:700;
+  cursor:pointer;
+}
+.reel-search-submit{
+  background:#ff6a00;
+  color:#fff;
+}
+.reel-search-clear{
+  background:#2a2a2a;
+  color:#fff;
+}
+.reel-search-status{
+  pointer-events:none;
+  min-height:14px;
+  font-size:11px;
+  color:#ddd;
+  text-shadow:0 1px 2px rgba(0,0,0,0.45);
+}
+@media (max-width:560px){
+  .reel-search-shell{top:8px;left:8px;right:8px}
+  .reel-search-panel{flex-wrap:wrap}
+  .reel-search-input{width:100%;flex:1 1 100%}
+}
+
 #reelWrapper{
   height:calc(100dvh - 68px);
   width:100%;
@@ -292,6 +372,18 @@ body{background:#000;color:#fff;height:100dvh;overflow:hidden}
 
 <body>
 
+<div class="reel-search-shell">
+  <div class="reel-search-top">
+    <button type="button" class="reel-search-toggle" id="reelSearchToggle">Search</button>
+  </div>
+  <form class="reel-search-panel" id="reelSearchPanel">
+    <input type="search" id="reelSearchInput" class="reel-search-input" placeholder="Search reel title or keywords">
+    <button type="submit" class="reel-search-submit" id="reelSearchSubmit">Go</button>
+    <button type="button" class="reel-search-clear" id="reelSearchClear">Clear</button>
+  </form>
+  <div class="reel-search-status" id="reelSearchStatus"></div>
+</div>
+
 <div id="reelWrapper">
   <div class="empty" id="emptyState">No reels yet</div>
 </div>
@@ -378,11 +470,23 @@ const shopSheet = document.getElementById("shopSheet");
 const shopTitle = document.getElementById("shopTitle");
 const shopClose = document.getElementById("shopClose");
 const shopList = document.getElementById("shopList");
+const reelSearchToggle = document.getElementById("reelSearchToggle");
+const reelSearchPanel = document.getElementById("reelSearchPanel");
+const reelSearchInput = document.getElementById("reelSearchInput");
+const reelSearchSubmit = document.getElementById("reelSearchSubmit");
+const reelSearchClear = document.getElementById("reelSearchClear");
+const reelSearchStatus = document.getElementById("reelSearchStatus");
 
 let page = 0;
 let loading = false;
 let done = false;
 const PAGE_SIZE = 4;
+const SEARCH_DELAY_MS = 2300;
+const SEARCH_FETCH_LIMIT = 180;
+let searchMode = false;
+let searchBusy = false;
+let activeSearchTerm = "";
+let searchToken = 0;
 function hasNovaClient(){
   return Boolean(window.NOVA && window.NOVA.supa && typeof window.NOVA.getUser === "function");
 }
@@ -440,9 +544,226 @@ function formatCount(value){
   return new Intl.NumberFormat("en-US").format(n);
 }
 
+function sleep(ms){
+  return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function sanitizeSearchText(value){
+  return String(value || "").trim().replace(/\s+/g, " ").slice(0, 80);
+}
+
+function setReelSearchStatus(text){
+  if(reelSearchStatus){
+    reelSearchStatus.textContent = String(text || "");
+  }
+}
+
+function toggleReelSearchBusy(state){
+  const busy = !!state;
+  searchBusy = busy;
+  if(reelSearchInput){
+    reelSearchInput.disabled = busy;
+  }
+  if(reelSearchSubmit){
+    reelSearchSubmit.disabled = busy;
+    reelSearchSubmit.textContent = busy ? "Loading..." : "Go";
+  }
+  if(reelSearchClear){
+    reelSearchClear.disabled = busy;
+  }
+}
+
+function showReelSearchPanel(){
+  if(!reelSearchPanel) return;
+  reelSearchPanel.classList.add("show");
+  if(reelSearchToggle){
+    reelSearchToggle.textContent = "Close";
+  }
+  if(reelSearchInput){
+    setTimeout(() => {
+      reelSearchInput.focus();
+      reelSearchInput.select();
+    }, 0);
+  }
+}
+
+function hideReelSearchPanel(){
+  if(reelSearchPanel){
+    reelSearchPanel.classList.remove("show");
+  }
+  if(reelSearchToggle){
+    reelSearchToggle.textContent = "Search";
+  }
+}
+
+function clearRenderedReels(){
+  reelWrapper.querySelectorAll(".reel").forEach(node => {
+    node.remove();
+  });
+  reelWrapper.querySelectorAll(".reel-ad-wrap").forEach(node => {
+    node.remove();
+  });
+  renderedIds.clear();
+}
+
+function resetFeedCursor(){
+  page = 0;
+  loading = false;
+  done = false;
+  focusApplied = false;
+}
+
+function matchReelSearch(item, needle){
+  const q = String(needle || "").toLowerCase();
+  if(!q) return false;
+  const title = String(item?.title || "").toLowerCase();
+  const description = String(item?.description || "").toLowerCase();
+  const keywords = Array.isArray(item?.keywords)
+    ? item.keywords.map(v => String(v || "").trim()).join(" ")
+    : String(item?.keywords || "");
+  const searchText = `${title} ${description} ${keywords}`.toLowerCase();
+  return searchText.includes(q);
+}
+
+async function fetchSearchCandidates(){
+  const ready = await ensureNovaClientReady();
+  if(!ready){
+    throw new Error("Unable to load reels.");
+  }
+  let query = window.NOVA.supa
+    .from("reels")
+    .select("id,user_id,video_url,thumb_url,title,description,keywords,created_at")
+    .order("created_at", { ascending:false })
+    .limit(SEARCH_FETCH_LIMIT);
+  if(feedUserId){
+    query = query.eq("user_id", feedUserId);
+  }
+  const { data, error } = await query;
+  if(error){
+    throw error;
+  }
+  return Array.isArray(data) ? data : [];
+}
+
+async function runReelSearch(rawText){
+  const queryText = sanitizeSearchText(rawText);
+  if(!queryText){
+    await clearReelSearch();
+    return;
+  }
+
+  searchToken += 1;
+  const token = searchToken;
+  searchMode = true;
+  activeSearchTerm = queryText;
+  toggleReelSearchBusy(true);
+  setReelSearchStatus("Searching reels...");
+  if(emptyState){
+    emptyState.textContent = "Searching reels...";
+    emptyState.style.display = "flex";
+  }
+
+  try{
+    const [rows] = await Promise.all([
+      fetchSearchCandidates(),
+      sleep(SEARCH_DELAY_MS)
+    ]);
+    if(token !== searchToken) return;
+
+    const matches = rows.filter(item => matchReelSearch(item, queryText));
+    clearRenderedReels();
+    loading = false;
+    done = true;
+
+    if(!matches.length){
+      if(emptyState){
+        emptyState.textContent = `No reels found for "${queryText}".`;
+        emptyState.style.display = "flex";
+      }
+      setReelSearchStatus("No reels found.");
+      return;
+    }
+
+    if(emptyState){
+      emptyState.style.display = "none";
+    }
+    for(const item of matches){
+      await renderReel(item);
+    }
+    setReelSearchStatus(`Showing ${formatCount(matches.length)} result(s) for "${queryText}".`);
+  }catch(err){
+    if(token !== searchToken) return;
+    console.error("reel_search_error", err);
+    if(emptyState){
+      emptyState.textContent = "Unable to search reels right now.";
+      emptyState.style.display = "flex";
+    }
+    setReelSearchStatus("Search failed. Please try again.");
+  }finally{
+    if(token === searchToken){
+      toggleReelSearchBusy(false);
+    }
+  }
+}
+
+async function clearReelSearch(){
+  searchToken += 1;
+  searchMode = false;
+  activeSearchTerm = "";
+  toggleReelSearchBusy(false);
+  setReelSearchStatus("");
+  if(reelSearchInput){
+    reelSearchInput.value = "";
+  }
+
+  clearRenderedReels();
+  resetFeedCursor();
+  if(emptyState){
+    emptyState.textContent = "No reels yet";
+    emptyState.style.display = "none";
+  }
+
+  await ensureFocusReelLoaded();
+  loadMore();
+}
+
+if(reelSearchToggle){
+  reelSearchToggle.addEventListener("click", () => {
+    if(reelSearchPanel && reelSearchPanel.classList.contains("show")){
+      hideReelSearchPanel();
+    }else{
+      showReelSearchPanel();
+    }
+  });
+}
+
+if(reelSearchPanel){
+  reelSearchPanel.addEventListener("submit", event => {
+    event.preventDefault();
+    runReelSearch(reelSearchInput?.value || "");
+  });
+}
+
+if(reelSearchClear){
+  reelSearchClear.addEventListener("click", () => {
+    clearReelSearch();
+    showReelSearchPanel();
+  });
+}
+
+if(reelSearchInput){
+  reelSearchInput.addEventListener("keydown", event => {
+    if(event.key === "Escape"){
+      event.preventDefault();
+      hideReelSearchPanel();
+    }
+  });
+}
+
 function insertReelBannerAfter(node){
   if(!node) return;
   const adWrap = document.createElement("div");
+  adWrap.className = "reel-ad-wrap";
   adWrap.style.display = "flex";
   adWrap.style.justifyContent = "center";
   adWrap.style.padding = "8px 0";
@@ -1300,7 +1621,7 @@ sentinel.style.height = "1px";
 reelWrapper.appendChild(sentinel);
 
 const scrollObserver = new IntersectionObserver(entries => {
-  if(entries[0].isIntersecting){
+  if(entries[0].isIntersecting && !searchMode){
     loadMore();
   }
 },{ root: reelWrapper, rootMargin:"200px" });

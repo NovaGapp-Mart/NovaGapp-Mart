@@ -336,8 +336,22 @@ function inferExtFromMime(mime){
 
 function normalizePlanCode(planInput){
   const raw = String(planInput || "free").trim().toLowerCase();
-  if(raw === "4000" || raw === "enterprise_4000") return "4000";
-  if(raw === "40" || raw === "pro_40" || raw === "pro") return "40";
+  if(
+    raw === "4000" ||
+    raw === "enterprise_4000" ||
+    raw === "enterprise" ||
+    raw === "business" ||
+    raw === "business_999"
+  ) return "4000";
+  if(
+    raw === "40" ||
+    raw === "pro_40" ||
+    raw === "pro" ||
+    raw === "plus" ||
+    raw === "creator" ||
+    raw === "plus_99" ||
+    raw === "creator_299"
+  ) return "40";
   return "free";
 }
 
@@ -1758,6 +1772,41 @@ function sanitizePaymentNotes(raw){
   return out;
 }
 
+function sanitizeCurrencyCode(value){
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z]/g, "")
+    .slice(0, 3);
+}
+
+async function convertBaseAmountToInrPaise(baseAmount, baseCurrency){
+  const amount = safeNumber(baseAmount);
+  if(!amount || amount <= 0){
+    return 0;
+  }
+
+  const sourceCurrency = sanitizeCurrencyCode(baseCurrency) || "INR";
+  if(sourceCurrency === "INR"){
+    return Math.round(amount * 100);
+  }
+
+  if(sourceCurrency === "USD"){
+    const usdInr = safeNumber(await getUsdInrRateSafe());
+    if(usdInr <= 0){
+      throw new Error("usd_inr_rate_unavailable");
+    }
+    return Math.round(amount * usdInr * 100);
+  }
+
+  const rates = await fetchPublicRates(sourceCurrency);
+  const inrRate = safeNumber(rates?.INR);
+  if(inrRate <= 0){
+    throw new Error("currency_rate_unavailable");
+  }
+  return Math.round(amount * inrRate * 100);
+}
+
 function isRazorpayPaymentStatusAcceptable(status){
   const clean = String(status || "").trim().toLowerCase();
   return clean === "captured";
@@ -1822,15 +1871,6 @@ app.post("/api/payment/razorpay/order", async (req, res) => {
     });
   }
 
-  const amountPaise = Math.round(safeNumber(req.body?.amount_paise));
-  if(!amountPaise || amountPaise < 100){
-    return res.status(400).json({
-      ok: false,
-      error: "amount_paise_invalid",
-      message: "amount_paise must be at least 100."
-    });
-  }
-
   const currency = String(req.body?.currency || "INR").trim().toUpperCase();
   if(currency !== "INR"){
     return res.status(400).json({
@@ -1845,8 +1885,45 @@ app.post("/api/payment/razorpay/order", async (req, res) => {
   const userName = sanitizeDisplayName(req.body?.user_name);
   const rawReceipt = sanitizeToken(req.body?.receipt, 40);
   const receipt = rawReceipt || `shop_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+  const rawNotes = sanitizePaymentNotes(req.body?.notes);
+  const clientAmountPaise = Math.round(safeNumber(req.body?.amount_paise));
+  const baseAmount = safeNumber(rawNotes.base_amount || req.body?.base_amount);
+  const baseCurrency = sanitizeCurrencyCode(
+    rawNotes.base_currency ||
+    req.body?.base_currency ||
+    currency
+  ) || "INR";
+
+  let amountPaise = clientAmountPaise;
+  if(baseAmount > 0){
+    try{
+      amountPaise = await convertBaseAmountToInrPaise(baseAmount, baseCurrency);
+    }catch(err){
+      return res.status(400).json({
+        ok: false,
+        error: "amount_conversion_failed",
+        message: "Unable to convert base amount to INR for Razorpay.",
+        details: String(err?.message || "")
+      });
+    }
+  }
+
+  if(!amountPaise || amountPaise < 100){
+    return res.status(400).json({
+      ok: false,
+      error: "amount_paise_invalid",
+      message: "amount_paise must be at least 100."
+    });
+  }
+
   const notes = {
-    ...sanitizePaymentNotes(req.body?.notes),
+    ...rawNotes,
+    base_currency: baseCurrency,
+    base_amount: baseAmount > 0
+      ? String(Math.round(baseAmount * 1000000) / 1000000)
+      : String(rawNotes.base_amount || ""),
+    client_amount_paise: String(Math.max(0, clientAmountPaise)),
+    app_amount_paise: String(amountPaise),
     app_order_id: orderId || "",
     app_user_id: userId || "",
     app_user_name: userName || ""

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -100,7 +100,7 @@ button{
     <li>Fast processing</li>
     <li>Analytics</li>
   </ul>
-  <button class="buy" onclick="pay(40,'PRO')">Upgrade</button>
+  <button class="buy" onclick="pay(40,'PRO','USD')">Upgrade</button>
 </div>
 
 <!-- ENTERPRISE -->
@@ -113,7 +113,7 @@ button{
     <li>Branding off</li>
     <li>Priority queue</li>
   </ul>
-  <button class="buy" onclick="pay(4000,'ENTERPRISE')">Upgrade</button>
+  <button class="buy" onclick="pay(4000,'ENTERPRISE','USD')">Upgrade</button>
 </div>
 
 </div>
@@ -129,6 +129,52 @@ let currentUser = null;
 let activePlan = "FREE";
 let razorpayKeyId = String(window.NOVA_PUBLIC_CONFIG?.razorpayKeyId || "").trim();
 let paymentBusy = false;
+
+function normalizeDesktopPlan(planInput){
+  const raw = String(planInput || "").trim().toUpperCase();
+  const digits = raw.replace(/[^0-9]/g, "");
+  if(
+    raw === "ENTERPRISE" ||
+    raw === "BUSINESS" ||
+    raw === "BUSINESS_999" ||
+    raw === "ENTERPRISE_4000" ||
+    digits === "4000"
+  ){
+    return "ENTERPRISE";
+  }
+  if(
+    raw === "PRO" ||
+    raw === "PLUS" ||
+    raw === "CREATOR" ||
+    raw === "PLUS_99" ||
+    raw === "CREATOR_299" ||
+    raw === "PRO_40" ||
+    digits === "40"
+  ){
+    return "PRO";
+  }
+  return "FREE";
+}
+
+function getBackendPlanCode(planInput){
+  const normalized = normalizeDesktopPlan(planInput);
+  if(normalized === "ENTERPRISE") return "4000";
+  if(normalized === "PRO") return "40";
+  return "free";
+}
+
+function extractMissingColumnName(error){
+  const text = `${error?.message || ""} ${error?.details || ""}`;
+  const pgMatch = text.match(/column\s+\"?([a-zA-Z0-9_.]+)\"?\s+does not exist/i);
+  if(pgMatch && pgMatch[1]){
+    return String(pgMatch[1]).split(".").pop().toLowerCase();
+  }
+  const quotedMatch = text.match(/'([a-zA-Z0-9_]+)'/);
+  if(quotedMatch && quotedMatch[1]){
+    return String(quotedMatch[1]).toLowerCase();
+  }
+  return "";
+}
 
 /* ======================
    AUTH + CURRENT PLAN
@@ -146,7 +192,7 @@ let paymentBusy = false;
 })();
 
 async function loadPlan(){
-  const { data } = await supaClient
+  let query = supaClient
     .from("subscription")
     .select("plan")
     .eq("user_id", currentUser.id)
@@ -154,8 +200,23 @@ async function loadPlan(){
     .limit(1)
     .maybeSingle();
 
+  let { data, error } = await query;
+  if(error && missingColumnError(error)){
+    query = supaClient
+      .from("subscription")
+      .select("plan")
+      .eq("user_id", currentUser.id)
+      .limit(1)
+      .maybeSingle();
+    ({ data, error } = await query);
+  }
+
+  if(error){
+    console.error("subscription_load_plan_failed", error);
+    return;
+  }
   if(data?.plan){
-    activePlan = String(data.plan || "FREE").toUpperCase();
+    activePlan = normalizeDesktopPlan(data.plan);
   }
 }
 
@@ -198,7 +259,26 @@ function missingColumnError(error){
   return all.includes("column") && all.includes("does not exist");
 }
 
-async function createPaymentOrder(amountInr, plan){
+function convertPlanAmountToInr(amount, currency){
+  const baseAmount = Number(amount || 0);
+  if(!Number.isFinite(baseAmount) || baseAmount <= 0){
+    throw new Error("Invalid plan amount.");
+  }
+  const baseCurrency = String(currency || "INR").trim().toUpperCase() || "INR";
+  if(baseCurrency === "INR"){
+    return Math.round(baseAmount * 100) / 100;
+  }
+  if(typeof window.convertCurrency !== "function"){
+    throw new Error("Currency conversion is unavailable.");
+  }
+  const converted = Number(window.convertCurrency(baseAmount, baseCurrency, "INR"));
+  if(!Number.isFinite(converted) || converted <= 0){
+    throw new Error("Unable to convert plan amount to INR.");
+  }
+  return Math.round(converted * 100) / 100;
+}
+
+async function createPaymentOrder(amountInr, plan, baseAmount, baseCurrency){
   const amountPaise = Math.round(Number(amountInr || 0) * 100);
   const cleanPlan = String(plan || "FREE").toUpperCase();
   const receipt = `sub_${cleanPlan.toLowerCase()}_${Date.now()}`;
@@ -219,7 +299,12 @@ async function createPaymentOrder(amountInr, plan){
       receipt,
       user_id: currentUser?.id || "",
       user_name: name,
-      notes: { plan: cleanPlan, source: "subscription_page" }
+      notes: {
+        plan: cleanPlan,
+        source: "subscription_page",
+        base_amount: String(Number(baseAmount || 0)),
+        base_currency: String(baseCurrency || "INR").toUpperCase()
+      }
     })
   });
   const payload = await res.json().catch(()=>null);
@@ -251,7 +336,7 @@ async function verifyPayment(razorpayResponse){
 async function saveSubscription(plan, amountInr, verifyPayload){
   const payload = {
     user_id: currentUser.id,
-    plan: String(plan || "FREE").toUpperCase(),
+    plan: normalizeDesktopPlan(plan),
     amount: Number(amountInr || 0),
     currency: "INR",
     payment_id: String(verifyPayload?.razorpay_payment_id || ""),
@@ -259,15 +344,27 @@ async function saveSubscription(plan, amountInr, verifyPayload){
     razorpay_order_id: String(verifyPayload?.razorpay_order_id || "")
   };
 
-  let { error } = await supaClient.from("subscription").insert(payload);
-  if(error && missingColumnError(error)){
-    const fallbackPayload = { ...payload };
-    delete fallbackPayload.razorpay_order_id;
-    ({ error } = await supaClient.from("subscription").insert(fallbackPayload));
+  let row = { ...payload };
+  let attempts = 0;
+  while(attempts < 8){
+    const { error } = await supaClient.from("subscription").insert(row);
+    if(!error){
+      try{
+        localStorage.setItem("userPlan", getBackendPlanCode(payload.plan));
+      }catch(_){}
+      return;
+    }
+    if(!missingColumnError(error)){
+      throw error;
+    }
+    const missingCol = extractMissingColumnName(error);
+    if(!missingCol || !Object.prototype.hasOwnProperty.call(row, missingCol)){
+      throw error;
+    }
+    delete row[missingCol];
+    attempts += 1;
   }
-  if(error){
-    throw error;
-  }
+  throw new Error("subscription_insert_failed");
 }
 
 async function openCheckout(order, amountInr, plan){
@@ -282,7 +379,7 @@ async function openCheckout(order, amountInr, plan){
       fn(value);
     };
     const rzp = new window.Razorpay({
-      key: razorpayKeyId || String(order?.key_id || ""),
+      key: String(order?.key_id || razorpayKeyId || ""),
       amount: Number(order?.amount_paise || Math.round(amountInr * 100)),
       currency: "INR",
       order_id: String(order?.razorpay_order_id || ""),
@@ -316,13 +413,13 @@ async function openCheckout(order, amountInr, plan){
 /* ======================
    PAYMENT (RAZORPAY)
 ====================== */
-async function pay(amount,plan){
+async function pay(amount, plan, currency){
   if(!currentUser){
     alert("Login required");
     location.href = "login.html";
     return;
   }
-  const nextPlan = String(plan || "FREE").toUpperCase();
+  const nextPlan = normalizeDesktopPlan(plan);
   if(activePlan === nextPlan){
     alert("This plan is already active.");
     return;
@@ -334,17 +431,16 @@ async function pay(amount,plan){
   setPaymentButtonsBusy(true);
 
   try{
-    const ready = razorpayKeyId ? true : await loadRazorpayConfig();
+    const ready = await loadRazorpayConfig();
     if(!ready || !String(razorpayKeyId || "").trim()){
       throw new Error("Razorpay is not configured on server.");
     }
 
-    const amountInr = Number(amount || 0);
-    if(!Number.isFinite(amountInr) || amountInr <= 0){
-      throw new Error("Invalid plan amount.");
-    }
+    const baseAmount = Number(amount || 0);
+    const baseCurrency = String(currency || "INR").trim().toUpperCase() || "INR";
+    const amountInr = convertPlanAmountToInr(baseAmount, baseCurrency);
 
-    const order = await createPaymentOrder(amountInr, nextPlan);
+    const order = await createPaymentOrder(amountInr, nextPlan, baseAmount, baseCurrency);
     const response = await openCheckout(order, amountInr, nextPlan);
     const verified = await verifyPayment(response);
     await saveSubscription(nextPlan, amountInr, verified);
