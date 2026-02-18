@@ -199,26 +199,250 @@
     window.NOVA = window.NOVA || {};
     window.NOVA.supa = supa;
 
-  window.NOVA.getUser = async function(){
-    try{
-      const { data } = await supa.auth.getUser();
-      return data?.user || null;
-    }catch(err){
-      if(err && err.name === "AbortError"){
-        return null;
-      }
-      throw err;
-    }
-  };
+    const profileSyncInFlight = new Map();
+    const profileSyncDone = new Set();
+    const PROFILE_HANDLE_MAX = 30;
 
-  window.NOVA.requireUser = async function(){
-    const user = await window.NOVA.getUser();
-    if(!user){
-      location.href = "login.html";
-      throw new Error("Not authenticated");
+    function cleanText(value){
+      return String(value || "").replace(/\s+/g, " ").trim();
     }
-    return user;
-  };
+
+    function isPlaceholderName(value){
+      const text = cleanText(value).toLowerCase();
+      return !text || text === "user" || text === "u" || text === "guest" || text === "unknown";
+    }
+
+    function normalizeHandle(value){
+      return cleanText(value)
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/g, "")
+        .slice(0, PROFILE_HANDLE_MAX);
+    }
+
+    function handleWithSuffix(base, userId, salt){
+      const normalizedBase = normalizeHandle(base) || "user";
+      const idPart = String(userId || "")
+        .replace(/[^a-z0-9]/gi, "")
+        .toLowerCase()
+        .slice(0, 6) || "id";
+      const extra = String(salt || "");
+      const suffix = extra ? `${idPart}${extra}` : idPart;
+      const room = Math.max(3, PROFILE_HANDLE_MAX - suffix.length - 1);
+      return `${normalizedBase.slice(0, room)}_${suffix}`;
+    }
+
+    function deriveProfileDefaults(user){
+      const email = cleanText(user?.email || "");
+      const emailLocal = cleanText((email.split("@")[0] || "").replace(/[._-]+/g, " "));
+      const noDigitsLocal = cleanText(emailLocal.replace(/\d+/g, " "));
+      const metaName = cleanText(
+        user?.user_metadata?.full_name ||
+        user?.user_metadata?.name ||
+        user?.user_metadata?.preferred_username ||
+        ""
+      );
+      const displayName = !isPlaceholderName(metaName)
+        ? metaName
+        : (noDigitsLocal || emailLocal || cleanText(email.split("@")[0] || "") || "user");
+
+      const handleSeed = !isPlaceholderName(metaName)
+        ? metaName
+        : (noDigitsLocal || cleanText(email.split("@")[0] || "") || "user");
+      const username = normalizeHandle(handleSeed) || "user";
+      const photo = cleanText(user?.user_metadata?.avatar_url || user?.user_metadata?.picture || "");
+      return { email, username, displayName, photo };
+    }
+
+    async function readOwnProfileRow(userId){
+      const plans = [
+        "user_id,username,full_name,photo,email",
+        "user_id,username,full_name,photo",
+        "user_id,username,full_name",
+        "user_id,username,photo",
+        "user_id,username",
+        "user_id,full_name",
+        "user_id,photo",
+        "user_id"
+      ];
+      let lastError = null;
+
+      for(const fields of plans){
+        const { data, error } = await supa
+          .from("users")
+          .select(fields)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if(!error){
+          return { data: data || null, error:null };
+        }
+        if(isMissingRelation(error, "users")){
+          return { data:null, error };
+        }
+        const missingColumn = getMissingColumnName(error);
+        if(missingColumn){
+          lastError = error;
+          continue;
+        }
+        return { data:null, error };
+      }
+
+      return { data:null, error:lastError };
+    }
+
+    async function upsertOwnProfileRow(payload, userId){
+      let row = { ...payload };
+      for(let attempt = 0; attempt < 5; attempt += 1){
+        const { data, error } = await supa
+          .from("users")
+          .upsert(row, { onConflict:"user_id" })
+          .select("user_id,username,full_name,photo")
+          .maybeSingle();
+
+        if(!error){
+          return { data:data || row, error:null };
+        }
+        if(isMissingRelation(error, "users")){
+          return { data:null, error };
+        }
+        if(String(error?.code || "") === "23505" && row.username){
+          row.username = handleWithSuffix(row.username, userId, attempt + 1);
+          continue;
+        }
+        const missingColumn = getMissingColumnName(error);
+        if(missingColumn && Object.prototype.hasOwnProperty.call(row, missingColumn)){
+          delete row[missingColumn];
+          continue;
+        }
+        return { data:null, error };
+      }
+      return { data:null, error:new Error("users_profile_upsert_failed") };
+    }
+
+    window.NOVA.syncMyProfile = async function(inputUser, options){
+      const force = !!options?.force;
+      let user = inputUser || null;
+
+      if(!user){
+        try{
+          const { data } = await supa.auth.getUser();
+          user = data?.user || null;
+        }catch(err){
+          if(err && err.name === "AbortError") return null;
+          throw err;
+        }
+      }
+
+      const userId = String(user?.id || "");
+      if(!userId) return null;
+      if(!force && profileSyncDone.has(userId)) return null;
+      if(profileSyncInFlight.has(userId)) return profileSyncInFlight.get(userId);
+
+      const syncPromise = (async () => {
+        const defaults = deriveProfileDefaults(user);
+        const profileRead = await readOwnProfileRow(userId);
+        if(profileRead.error && isMissingRelation(profileRead.error, "users")){
+          profileSyncDone.add(userId);
+          return null;
+        }
+        if(profileRead.error){
+          throw profileRead.error;
+        }
+
+        const current = profileRead.data || null;
+        const currentUsername = cleanText(current?.username || "");
+        const currentFullName = cleanText(current?.full_name || "");
+        const currentPhoto = cleanText(current?.photo || "");
+        const currentEmail = cleanText(current?.email || "");
+
+        let nextUsername = !isPlaceholderName(currentUsername)
+          ? currentUsername
+          : defaults.username;
+        nextUsername = normalizeHandle(nextUsername);
+        if(isPlaceholderName(nextUsername)){
+          nextUsername = handleWithSuffix(defaults.username || "user", userId, 0);
+        }
+
+        const nextFullName = !isPlaceholderName(currentFullName)
+          ? currentFullName
+          : defaults.displayName;
+        const nextPhoto = currentPhoto || defaults.photo;
+        const nextEmail = currentEmail || defaults.email;
+
+        const shouldWrite = !current ||
+          nextUsername !== currentUsername ||
+          nextFullName !== currentFullName ||
+          (nextPhoto && nextPhoto !== currentPhoto) ||
+          (nextEmail && nextEmail !== currentEmail);
+
+        if(!shouldWrite){
+          profileSyncDone.add(userId);
+          return current;
+        }
+
+        const payload = { user_id:userId };
+        if(nextUsername) payload.username = nextUsername;
+        if(nextFullName) payload.full_name = nextFullName;
+        if(nextPhoto) payload.photo = nextPhoto;
+        if(nextEmail) payload.email = nextEmail;
+
+        const upserted = await upsertOwnProfileRow(payload, userId);
+        if(upserted.error){
+          if(isMissingRelation(upserted.error, "users")){
+            profileSyncDone.add(userId);
+            return null;
+          }
+          throw upserted.error;
+        }
+
+        profileSyncDone.add(userId);
+        return upserted.data || payload;
+      })();
+
+      profileSyncInFlight.set(userId, syncPromise);
+      try{
+        return await syncPromise;
+      }finally{
+        profileSyncInFlight.delete(userId);
+      }
+    };
+
+    window.NOVA.getUser = async function(options){
+      const skipProfileSync = !!options?.skipProfileSync;
+      try{
+        const { data } = await supa.auth.getUser();
+        const user = data?.user || null;
+        if(user && !skipProfileSync){
+          try{
+            await window.NOVA.syncMyProfile(user);
+          }catch(_){ }
+        }
+        return user;
+      }catch(err){
+        if(err && err.name === "AbortError"){
+          return null;
+        }
+        throw err;
+      }
+    };
+
+    window.NOVA.requireUser = async function(){
+      const user = await window.NOVA.getUser();
+      if(!user){
+        location.href = "login.html";
+        throw new Error("Not authenticated");
+      }
+      return user;
+    };
+
+    supa.auth.onAuthStateChange((event, session) => {
+      if(event === "SIGNED_OUT"){
+        profileSyncDone.clear();
+        return;
+      }
+      if(session?.user){
+        window.NOVA.syncMyProfile(session.user).catch(()=>{});
+      }
+    });
 
   let presenceChannel = null;
   let presenceInitPromise = null;
@@ -307,11 +531,14 @@
     return presenceInitPromise;
   };
 
-  document.addEventListener("DOMContentLoaded", () => {
-    if(typeof window.NOVA.ensurePresence === "function"){
-      window.NOVA.ensurePresence();
-    }
-  });
+    document.addEventListener("DOMContentLoaded", () => {
+      if(typeof window.NOVA.syncMyProfile === "function"){
+        window.NOVA.syncMyProfile().catch(()=>{});
+      }
+      if(typeof window.NOVA.ensurePresence === "function"){
+        window.NOVA.ensurePresence();
+      }
+    });
 
   window.NOVA.pickFile = function(accept){
     return new Promise(resolve => {

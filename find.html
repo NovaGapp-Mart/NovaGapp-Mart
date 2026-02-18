@@ -262,8 +262,9 @@ async function searchUsers(){
   const usersReq = supa
     .from("users")
     .select("user_id, username, full_name, photo")
-    .ilike("username", q + "%")
-    .limit(20);
+    .or(`username.ilike.%${q}%,full_name.ilike.%${q}%`)
+    .order("username", { ascending:true })
+    .limit(50);
 
   const [{ data: reels, error: reelsErr }, { data: users, error: usersErr }] =
     await Promise.all([reelsReq, usersReq]);
@@ -334,6 +335,8 @@ async function searchUsers(){
     users.forEach(u=>{
       const d = document.createElement("div");
       d.className = "user";
+      const accountName = u.username || u.full_name || "User";
+      const accountSub = u.full_name && u.full_name !== accountName ? u.full_name : "";
       const sellerBadge = sellerBadgeSet.has(u.user_id)
         ? `<span class="seller-star">&#11088; Seller</span>`
         : "";
@@ -341,10 +344,10 @@ async function searchUsers(){
         <img src="${u.photo || 'Images/user.png'}">
         <div class="info">
           <div class="name-row">
-            <b>${u.username || "User"}</b>
+            <b>${accountName}</b>
             ${sellerBadge}
           </div>
-          <span>${u.full_name || ""}</span>
+          <span>${accountSub}</span>
         </div>
       `;
       d.onclick = () => location.href = `account.html?uid=${u.user_id}`;

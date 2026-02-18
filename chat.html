@@ -1445,11 +1445,11 @@ async function upsertChatListEntry(m){
   // load my profile (public users table)
   const { data: me } = await supa
     .from("users")
-    .select("username,photo")
+    .select("username,full_name,photo")
     .eq("user_id", myUid)
     .maybeSingle();
 
-  myName = me?.username || "User";
+  myName = me?.full_name || me?.username || "User";
   myPhoto = me?.photo || "";
   applyAvatar(chatAvatar, myPhoto, myName);
 
