@@ -397,7 +397,16 @@ async function login(){
   });
 
   if(error){
-    alert(error.message);
+    const msg = String(error.message || "").toLowerCase();
+    if(msg.includes("invalid login credentials")){
+      alert("Invalid email or password. Check password, or use Forgot password.");
+      return;
+    }
+    if(msg.includes("email not confirmed")){
+      alert("Please verify your email first, then login.");
+      return;
+    }
+    alert(error.message || "Login failed. Please try again.");
     return;
   }
 
