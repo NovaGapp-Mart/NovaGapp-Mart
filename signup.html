@@ -346,76 +346,6 @@ async function syncAccountIdentity(user, identity){
   return false;
 }
 
-async function signupDirectWithoutEmailVerify(email, password, suggestedName){
-  const payload = {
-    email: String(email || "").trim(),
-    password: String(password || ""),
-    full_name: String(suggestedName || "").trim(),
-    name: String(suggestedName || "").trim(),
-    display_name: String(suggestedName || "").trim()
-  };
-  const seen = new Set();
-  let lastErrorMessage = "";
-  const bases = [""].concat(buildContestApiCandidates());
-  for(const rawBase of bases){
-    const base = String(rawBase || "").trim().replace(/\/+$/g, "");
-    const key = base || "__same_origin__";
-    if(seen.has(key)) continue;
-    seen.add(key);
-    const endpoint = `${base}/api/auth/signup-direct`;
-    try{
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type":"application/json" },
-        body: JSON.stringify(payload)
-      });
-      let responseBody = null;
-      try{
-        responseBody = await res.json();
-      }catch(_){
-        responseBody = null;
-      }
-      if(res.ok){
-        return { ok:true, data: responseBody || {} };
-      }
-      const code = String(responseBody?.error || "").trim().toLowerCase();
-      const message = String(responseBody?.message || "").trim();
-      if(message){
-        lastErrorMessage = message;
-      }
-      if(res.status === 409 || code === "email_exists"){
-        return {
-          ok:false,
-          reason:"email_exists",
-          message: message || "Email already registered. Please login."
-        };
-      }
-      if(res.status === 400){
-        return {
-          ok:false,
-          reason:"invalid_input",
-          message: message || "Invalid email or password."
-        };
-      }
-      if(res.status === 404){
-        continue;
-      }
-      if(res.status >= 500){
-        return {
-          ok:false,
-          reason:"server_error",
-          message: message || "Signup service unavailable."
-        };
-      }
-    }catch(_){ }
-  }
-  return {
-    ok:false,
-    reason:"unavailable",
-    message:lastErrorMessage || "Signup service unavailable."
-  };
-}
-
 /* TOGGLE PASSWORD */
 function togglePassword(){
   const p = document.getElementById("password");
@@ -439,6 +369,11 @@ async function signup(){
     alert("Email & password required");
     return;
   }
+  const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  if(!validEmail){
+    alert("Enter a valid email address");
+    return;
+  }
   if(password.length < 6){
     alert("Password must be at least 6 characters");
     return;
@@ -447,18 +382,25 @@ async function signup(){
   const local = String((email.split("@")[0] || "")).trim();
   const suggestedName = toTitleCaseWords(parseEmailLocalWords(local) || local) || "Member";
 
-  const directSignup = await signupDirectWithoutEmailVerify(email, password, suggestedName);
-  if(!directSignup.ok){
-    if(directSignup.reason === "email_exists"){
-      alert(directSignup.message || "Email already registered. Please login.");
+  const { data: signupData, error: signupError } = await supa.auth.signUp({
+    email,
+    password,
+    options:{
+      data:{
+        full_name: suggestedName,
+        name: suggestedName
+      }
+    }
+  });
+
+  if(signupError){
+    const msg = String(signupError.message || "").toLowerCase();
+    if(msg.includes("already") || msg.includes("exists") || msg.includes("registered")){
+      alert("Email already registered. Please login.");
       location.href = "login.html";
       return;
     }
-    if(directSignup.reason === "invalid_input"){
-      alert(directSignup.message || "Invalid email or password.");
-      return;
-    }
-    alert(directSignup.message || "Signup failed. Please try again.");
+    alert(signupError.message || "Signup failed. Please try again.");
     return;
   }
 
@@ -473,7 +415,7 @@ async function signup(){
     return;
   }
 
-  let user = loginData?.user || null;
+  let user = loginData?.user || signupData?.user || null;
   if(!user?.id){
     try{
       const { data:userData } = await supa.auth.getUser();
@@ -508,7 +450,7 @@ async function signup(){
   }catch(_){ }
 
   alert("Account created successfully.");
-  location.href = "onboarding.html";
+  location.href = "index.html";
 }
 
 /* GOOGLE SIGNUP */
@@ -524,7 +466,7 @@ async function googleSignup(){
   await supa.auth.signInWithOAuth({
     provider:"google",
     options:{
-      redirectTo: APP_PUBLIC_ORIGIN + "/onboarding.html"
+      redirectTo: APP_PUBLIC_ORIGIN + "/index.html"
     }
   });
 }
