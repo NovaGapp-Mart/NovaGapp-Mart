@@ -288,8 +288,33 @@ function extractMissingColumnName(error){
   return "";
 }
 
+function isAuthOrRlsWriteError(error){
+  const code = String(error?.code || "").trim();
+  const status = Number(error?.status || 0);
+  const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+  return (
+    code === "42501" ||
+    status === 401 ||
+    status === 403 ||
+    text.includes("row-level security")
+  );
+}
+
 async function upsertProfileRow(supa, user, identity){
   if(!user?.id) return false;
+  let hasSessionForUser = false;
+  try{
+    const { data } = await supa.auth.getSession();
+    hasSessionForUser = Boolean(
+      data?.session?.access_token &&
+      data?.session?.user?.id &&
+      data.session.user.id === user.id
+    );
+  }catch(_){ }
+  if(!hasSessionForUser){
+    return false;
+  }
+
   let row = {
     user_id: user.id,
     email: identity.email || user.email || "",
@@ -306,6 +331,9 @@ async function upsertProfileRow(supa, user, identity){
       .upsert(row, { onConflict: "user_id" });
     if(!error){
       return true;
+    }
+    if(isAuthOrRlsWriteError(error)){
+      return false;
     }
     const missing = extractMissingColumnName(error);
     if(missing && Object.prototype.hasOwnProperty.call(row, missing) && !required.has(missing)){
@@ -378,14 +406,19 @@ async function login(){
     const user = userData?.user || null;
     if(user){
       const identity = deriveIdentity(user);
+      let profileSynced = false;
       try{
-        await upsertProfileRow(supa, user, identity);
-      }catch(profileErr){
-        console.warn("profile sync warning", profileErr);
+        profileSynced = await syncAccountIdentity(user, identity);
+      }catch(_){ }
+      if(!profileSynced){
+        try{
+          await upsertProfileRow(supa, user, identity);
+        }catch(profileErr){
+          console.warn("profile sync warning", profileErr);
+        }
       }
-      await syncAccountIdentity(user, identity);
+      await registerContestAccount(user);
     }
-    await registerContestAccount(user || null);
   }catch(_){ }
 
   goAfterLogin(getPostLoginRedirectPath());
@@ -458,10 +491,17 @@ async function forgotPassword(){
   if(!sessionUser){
     return;
   }
+  const identity = deriveIdentity(sessionUser);
+  let profileSynced = false;
   try{
-    const identity = deriveIdentity(sessionUser);
-    await upsertProfileRow(supa, sessionUser, identity);
-    await syncAccountIdentity(sessionUser, identity);
+    profileSynced = await syncAccountIdentity(sessionUser, identity);
+  }catch(_){ }
+  if(!profileSynced){
+    try{
+      await upsertProfileRow(supa, sessionUser, identity);
+    }catch(_){ }
+  }
+  try{
     await registerContestAccount(sessionUser);
   }catch(_){ }
   goAfterLogin(getPostLoginRedirectPath());
