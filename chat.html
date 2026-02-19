@@ -999,6 +999,24 @@ function isPlaceholderIdentityName(value){
   return false;
 }
 
+function isLikelyGeneratedHandleName(value){
+  const raw = String(value || "").trim();
+  if(!raw) return false;
+  const text = raw.toLowerCase();
+  if(/^@/.test(text)) return true;
+  if(/^memer[\s._-]*[a-z0-9]{1,}$/i.test(text)) return true;
+  if(/^member[\s._-]*[a-z0-9]{1,}$/i.test(text)) return true;
+  if(/^user[\s._-]*[a-z0-9]{1,}$/i.test(text)) return true;
+  if(/^unique[\s._-]*[a-z0-9]{0,}$/i.test(text)) return true;
+  const hasSpace = /\s/.test(text);
+  const hasDigits = /\d/.test(text);
+  const hasSeparators = /[._-]/.test(text);
+  if(!hasSpace && (hasDigits || hasSeparators)){
+    return true;
+  }
+  return false;
+}
+
 function toTitleWords(text){
   return String(text || "")
     .split(/\s+/)
@@ -1073,12 +1091,21 @@ function parseEmailLocalWords(emailLike){
 
 function safeIdentityName(nameLike, userId, emailLike){
   const raw = String(nameLike || "").trim();
-  if(raw && !looksLikeRawUserId(raw) && !isPlaceholderIdentityName(raw)){
+  if(
+    raw &&
+    !looksLikeRawUserId(raw) &&
+    !isPlaceholderIdentityName(raw) &&
+    !isLikelyGeneratedHandleName(raw)
+  ){
     return toTitleWords(raw) || raw;
   }
   const fromEmail = parseEmailLocalWords(emailLike);
   if(fromEmail){
     return toTitleWords(fromEmail) || fromEmail;
+  }
+  const fromHandle = parseEmailLocalWords(raw);
+  if(fromHandle && !isPlaceholderIdentityName(fromHandle)){
+    return toTitleWords(fromHandle) || fromHandle;
   }
   return fallbackNameFromUserId(userId);
 }

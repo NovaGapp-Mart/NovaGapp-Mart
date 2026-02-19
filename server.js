@@ -895,6 +895,23 @@ function isIdentityPlaceholderName(value){
   return false;
 }
 
+function isLikelyGeneratedIdentityHandle(value){
+  const raw = sanitizeDisplayName(value).toLowerCase();
+  if(!raw) return false;
+  if(raw.startsWith("@")) return true;
+  if(/^memer[\s._-]*[a-z0-9]{1,}$/i.test(raw)) return true;
+  if(/^member[\s._-]*[a-z0-9]{1,}$/i.test(raw)) return true;
+  if(/^user[\s._-]*[a-z0-9]{1,}$/i.test(raw)) return true;
+  if(/^unique[\s._-]*[a-z0-9]{0,}$/i.test(raw)) return true;
+  const hasSpace = /\s/.test(raw);
+  const hasDigits = /\d/.test(raw);
+  const hasSeparators = /[._-]/.test(raw);
+  if(!hasSpace && (hasDigits || hasSeparators)){
+    return true;
+  }
+  return false;
+}
+
 function splitCompactIdentityToken(token){
   const clean = String(token || "").toLowerCase().replace(/[^a-z]+/g, "");
   if(clean.length < 9){
@@ -1013,14 +1030,17 @@ function deriveIdentityDefaults(input){
 }
 
 function safePublicNameFromIdentity(identity, userId){
-  const preferred = sanitizeDisplayName(
+  const primaryName = sanitizeDisplayName(
     identity?.display_name ||
     identity?.full_name ||
-    identity?.username ||
     ""
   );
-  if(preferred && !isIdentityPlaceholderName(preferred)){
-    return titleCaseWords(preferred) || preferred;
+  if(
+    primaryName &&
+    !isIdentityPlaceholderName(primaryName) &&
+    !isLikelyGeneratedIdentityHandle(primaryName)
+  ){
+    return titleCaseWords(primaryName) || primaryName;
   }
   const fromEmailLocal = parseEmailLocalToWords(
     identity?.email_local ||
@@ -1029,6 +1049,18 @@ function safePublicNameFromIdentity(identity, userId){
   );
   if(fromEmailLocal){
     return titleCaseWords(fromEmailLocal) || "Member";
+  }
+  const fromHandle = parseEmailLocalToWords(identity?.username || primaryName || "");
+  if(fromHandle && !isIdentityPlaceholderName(fromHandle)){
+    return titleCaseWords(fromHandle) || "Member";
+  }
+  const usernamePreferred = sanitizeDisplayName(identity?.username || "");
+  if(
+    usernamePreferred &&
+    !isIdentityPlaceholderName(usernamePreferred) &&
+    !isLikelyGeneratedIdentityHandle(usernamePreferred)
+  ){
+    return titleCaseWords(usernamePreferred) || usernamePreferred;
   }
   const shortId = String(userId || "")
     .replace(/[^a-z0-9]/gi, "")
@@ -3795,6 +3827,8 @@ app.get("/api/users/summary", async (req, res) => {
         user_id: userId,
         display_name: safePublicNameFromIdentity(identity, userId),
         username: String(identity.username || "").trim(),
+        email: String(identity.email || "").trim(),
+        email_local: String(identity.email_local || "").trim(),
         photo: String(identity.photo || "").trim(),
         verified: !!verification.verified,
         trust_score: Math.max(0, Math.floor(safeNumber(verification.trust_score)))

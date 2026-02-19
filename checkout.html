@@ -385,11 +385,26 @@ const ALL_COUNTRY_NAMES = [
 
 function ensureCountryOptions(defaultCountry){
   if(!countryInput) return;
-  const uniqueCountries = Array.from(new Set(
-    (ALL_COUNTRY_NAMES || [])
-      .map(name => String(name || "").trim())
-      .filter(Boolean)
-  )).sort((a, b) => a.localeCompare(b));
+  const buildCountrySet = () => {
+    const set = new Set(
+      (ALL_COUNTRY_NAMES || [])
+        .map(name => String(name || "").trim())
+        .filter(Boolean)
+    );
+    try{
+      if(typeof Intl.DisplayNames === "function" && typeof Intl.supportedValuesOf === "function"){
+        const display = new Intl.DisplayNames(["en"], { type: "region" });
+        Intl.supportedValuesOf("region").forEach(code => {
+          const label = String(display.of(code) || "").trim();
+          if(label && label.toLowerCase() !== code.toLowerCase()){
+            set.add(label);
+          }
+        });
+      }
+    }catch(_){ }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  };
+  const uniqueCountries = buildCountrySet();
 
   countryInput.innerHTML = "";
   const placeholder = document.createElement("option");
