@@ -81,6 +81,9 @@ body{
 .contact-item{
   display:flex;align-items:center;gap:10px;padding:10px;border-bottom:1px solid #f1f1f1;cursor:pointer
 }
+.contact-item.off-app{
+  background:#fafafa;
+}
 .contact-item img{
   width:36px;height:36px;border-radius:50%;object-fit:cover
 }
@@ -468,6 +471,7 @@ let otherUid = new URLSearchParams(location.search).get("uid");
 let otherUsername = "";
 let allContacts = [];
 let allowedChatIds = new Set();
+let contactsAutoloadAttempted = false;
 let allChats = [];
 let pendingMedia = null;
 let pendingMediaKind = null;
@@ -3081,6 +3085,13 @@ toggleContacts.addEventListener("click", ()=>{
   const isActive = contactsPanel.classList.contains("active");
   const nextState = !isActive;
   setContactsVisible(nextState);
+  if(nextState && !contactsAutoloadAttempted){
+    contactsAutoloadAttempted = true;
+    const savedContacts = getSimulatedContacts();
+    if(!savedContacts.length){
+      syncContacts().catch(()=>{});
+    }
+  }
   if(!otherUid){
     setChatListVisible(!nextState);
   }
@@ -3127,10 +3138,10 @@ async function loadContacts(){
   normalizedContacts.forEach(c => {
     const phone = normalizePhoneNumber(c.phone_number);
     if(!phone) return;
+    if(!phoneMap.has(phone)) numbers.push(phone);
     if(!phoneMap.has(phone)){
-      numbers.push(phone);
+      phoneMap.set(phone, c.name || phone);
     }
-    phoneMap.set(phone, c.name || phone);
   });
 
   if(!numbers.length){
@@ -3141,53 +3152,97 @@ async function loadContacts(){
     return;
   }
 
-  const { data, error } = await supa
-    .from("users")
-    .select("user_id,username,full_name,photo,phone_number")
-    .in("phone_number", numbers)
-    .neq("user_id", myUid)
-    .order("username", { ascending:true })
-    .limit(300);
+  const selectPlans = [
+    "user_id,username,full_name,photo,phone_number,email",
+    "user_id,username,full_name,photo,phone_number"
+  ];
+  let data = [];
+  let error = null;
+  for(const fields of selectPlans){
+    const result = await supa
+      .from("users")
+      .select(fields)
+      .in("phone_number", numbers)
+      .neq("user_id", myUid)
+      .order("username", { ascending:true })
+      .limit(300);
+    data = Array.isArray(result?.data) ? result.data : [];
+    error = result?.error || null;
+    if(!error) break;
+    if(!isMissingColumnError(error)) break;
+  }
 
   if(error){
     console.error("loadContacts error", error);
-    allContacts = [];
-    allowedChatIds = new Set();
-    renderContacts(allContacts);
-    setContactsHint("Unable to load contacts right now.");
-    return;
   }
 
-  const backendMap = await fetchBackendSummaries((data || []).map(item => item.user_id));
-  allContacts = (data || [])
-    .filter(u => u.user_id !== myUid)
-    .map(u => {
-      const normalizedPhone = normalizePhoneNumber(u.phone_number);
+  const matchedUsers = Array.isArray(data) ? data.filter(u => u.user_id !== myUid) : [];
+  const backendMap = await fetchBackendSummaries(matchedUsers.map(item => item.user_id));
+  const matchedByPhone = new Map();
+  matchedUsers.forEach(u => {
+    const normalizedPhone = normalizePhoneNumber(u.phone_number);
+    if(!normalizedPhone || matchedByPhone.has(normalizedPhone)) return;
+    matchedByPhone.set(normalizedPhone, u);
+  });
+
+  const seenPhones = new Set();
+  allContacts = [];
+  normalizedContacts.forEach(c => {
+    const normalizedPhone = normalizePhoneNumber(c.phone_number);
+    if(!normalizedPhone || seenPhones.has(normalizedPhone)) return;
+    seenPhones.add(normalizedPhone);
+
+    const matched = matchedByPhone.get(normalizedPhone);
+    if(matched){
+      const backend = backendMap?.[matched.user_id] || {};
       const contactName = phoneMap.get(normalizedPhone);
-      const backend = backendMap?.[u.user_id] || {};
       const safeName = safeIdentityName(
-        contactName || u.full_name || backend.display_name || u.username || backend.username || "",
-        u.user_id,
-        u.email || ""
+        contactName || matched.full_name || backend.display_name || matched.username || backend.username || "",
+        matched.user_id,
+        matched.email || backend.email || ""
       );
-      const safeUsername = safeIdentityUsername(u.username || backend.username || "");
-      return {
-        id: u.user_id,
+      const safeUsername = safeIdentityUsername(matched.username || backend.username || "");
+      allContacts.push({
+        id: matched.user_id,
         username: safeUsername,
         name: safeName,
-        phone: u.phone_number || "",
-        photo: u.photo || backend.photo || "",
-        verified: !!backend.verified
-      };
-    })
-    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+        phone: matched.phone_number || c.phone_number || normalizedPhone,
+        photo: matched.photo || backend.photo || "",
+        verified: !!backend.verified,
+        on_app: true
+      });
+      return;
+    }
 
-  allowedChatIds = new Set(allContacts.map(c => c.id));
+    allContacts.push({
+      id: "",
+      username: "",
+      name: safeIdentityName(c.name || normalizedPhone, "", ""),
+      phone: c.phone_number || normalizedPhone,
+      photo: "",
+      verified: false,
+      on_app: false
+    });
+  });
+
+  allContacts.sort((a, b) => {
+    if(!!b.on_app !== !!a.on_app){
+      return b.on_app ? 1 : -1;
+    }
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
+
+  allowedChatIds = new Set(allContacts.filter(c => c.on_app && c.id).map(c => c.id));
   renderContacts(allContacts);
+  const appContacts = allContacts.filter(c => c.on_app).length;
   if(!allContacts.length){
-    setContactsHint("No contacts on NOVAGAPPS yet.");
+    setContactsHint("No contacts found.");
+  }else if(error){
+    setContactsHint(`Showing ${allContacts.length} phone contacts (${appContacts} on NOVAGAPPS).`);
+  }else if(!appContacts){
+    setContactsHint(`Showing ${allContacts.length} phone contacts. No contacts on NOVAGAPPS yet.`);
   }else{
-    setContactsHint(`Showing ${allContacts.length} contacts on NOVAGAPPS.`);
+    setContactsHint(`Showing ${allContacts.length} contacts (${appContacts} on NOVAGAPPS).`);
   }
 }
 
@@ -3302,14 +3357,28 @@ function renderContacts(list){
     name.textContent = c.name || "User";
     const username = document.createElement("div");
     username.className = "contact-username";
-    username.textContent = c.username || c.phone || "";
+    const metaParts = [];
+    if(c.on_app && c.username){
+      metaParts.push("@" + c.username);
+    }
+    if(c.phone){
+      metaParts.push(c.phone);
+    }
+    metaParts.push(c.on_app ? "On NOVAGAPP" : "Not on NOVAGAPP");
+    username.textContent = metaParts.join(" • ");
     info.appendChild(name);
     info.appendChild(username);
     row.appendChild(img);
     row.appendChild(info);
-    row.onclick = () => {
-      location.href = "chat.html?uid=" + encodeURIComponent(c.id);
-    };
+    if(c.on_app && c.id){
+      row.onclick = () => {
+        location.href = "chat.html?uid=" + encodeURIComponent(c.id);
+      };
+      row.style.cursor = "pointer";
+    }else{
+      row.classList.add("off-app");
+      row.style.cursor = "default";
+    }
     contactsList.appendChild(row);
   });
 }

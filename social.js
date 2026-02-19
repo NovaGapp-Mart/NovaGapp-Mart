@@ -582,7 +582,18 @@
     window.NOVA.requireUser = async function(){
       const user = await window.NOVA.getUser();
       if(!user){
-        location.href = "login.html";
+        const nextTarget = (() => {
+          try{
+            const full = location.pathname + location.search + location.hash;
+            return encodeURIComponent(full || "index.html");
+          }catch(_){
+            return encodeURIComponent("index.html");
+          }
+        })();
+        try{
+          sessionStorage.setItem("post_login_next", decodeURIComponent(nextTarget));
+        }catch(_){ }
+        location.href = "login.html?next=" + nextTarget;
         throw new Error("Not authenticated");
       }
       return user;

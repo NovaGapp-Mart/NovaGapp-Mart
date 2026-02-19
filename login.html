@@ -118,6 +118,71 @@
 <script>
 const APP_PUBLIC_ORIGIN = "https://novagapp-mart.onrender.com";
 
+function sanitizeNextPath(raw){
+  const value = String(raw || "").trim();
+  if(!value) return "";
+  if(value.startsWith("//")) return "";
+
+  const normalizePath = (pathValue) => {
+    const text = String(pathValue || "").trim();
+    if(!text) return "";
+    if(!text.startsWith("/")) return "";
+    if(/^\/(?:login|signup)\.html(?:[?#]|$)/i.test(text)) return "";
+    return text;
+  };
+
+  if(/^https?:\/\//i.test(value)){
+    try{
+      const parsed = new URL(value);
+      const allowedOrigins = new Set([
+        String(location.origin || "").replace(/\/+$/g, ""),
+        String(APP_PUBLIC_ORIGIN || "").replace(/\/+$/g, "")
+      ]);
+      if(!allowedOrigins.has(String(parsed.origin || "").replace(/\/+$/g, ""))){
+        return "";
+      }
+      return normalizePath(parsed.pathname + parsed.search + parsed.hash);
+    }catch(_){
+      return "";
+    }
+  }
+
+  return normalizePath(value);
+}
+
+function getDefaultPostLoginPath(){
+  return localStorage.getItem("onboarded") === "1" ? "/index.html" : "/onboarding.html";
+}
+
+function getRequestedPostLoginPath(){
+  const params = new URLSearchParams(location.search);
+  const fromQuery = sanitizeNextPath(params.get("next"));
+  if(fromQuery){
+    return fromQuery;
+  }
+  try{
+    const fromSession = sanitizeNextPath(sessionStorage.getItem("post_login_next"));
+    if(fromSession){
+      sessionStorage.removeItem("post_login_next");
+      return fromSession;
+    }
+  }catch(_){ }
+  return "";
+}
+
+function getPostLoginRedirectPath(){
+  return getRequestedPostLoginPath() || getDefaultPostLoginPath();
+}
+
+function goAfterLogin(path){
+  const target = String(path || "").trim() || getDefaultPostLoginPath();
+  if(location.protocol === "file:" && target.startsWith("/")){
+    location.href = target.slice(1);
+    return;
+  }
+  location.href = target;
+}
+
 function buildContestApiCandidates(){
   const out = [];
   const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
@@ -323,10 +388,7 @@ async function login(){
     await registerContestAccount(user || null);
   }catch(_){ }
 
-  const next = localStorage.getItem("onboarded") === "1"
-    ? "index.html"
-    : "onboarding.html";
-  location.href = next;
+  goAfterLogin(getPostLoginRedirectPath());
 }
 
 /* 🔐 GOOGLE LOGIN */
@@ -339,10 +401,15 @@ async function googleLogin(){
     return;
   }
 
+  const nextPath = getPostLoginRedirectPath();
+  try{
+    sessionStorage.setItem("post_login_next", nextPath);
+  }catch(_){ }
+
   await supa.auth.signInWithOAuth({
     provider:"google",
     options:{
-      redirectTo: APP_PUBLIC_ORIGIN + "/onboarding.html"
+      redirectTo: APP_PUBLIC_ORIGIN + "/login.html?next=" + encodeURIComponent(nextPath)
     }
   });
 }
@@ -373,6 +440,32 @@ async function forgotPassword(){
     alert("Password reset email sent");
   }
 }
+
+(async function autoContinueIfSignedIn(){
+  let supa;
+  try{
+    supa = await window.ensureSupaClient();
+  }catch(_){
+    return;
+  }
+  let sessionUser = null;
+  try{
+    const { data } = await supa.auth.getSession();
+    sessionUser = data?.session?.user || null;
+  }catch(_){
+    sessionUser = null;
+  }
+  if(!sessionUser){
+    return;
+  }
+  try{
+    const identity = deriveIdentity(sessionUser);
+    await upsertProfileRow(supa, sessionUser, identity);
+    await syncAccountIdentity(sessionUser, identity);
+    await registerContestAccount(sessionUser);
+  }catch(_){ }
+  goAfterLogin(getPostLoginRedirectPath());
+})();
 </script>
 
 </body>

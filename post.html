@@ -2266,8 +2266,19 @@ async function toggleStoryLikeForActive(){
   }
 }
 
+function getPublicShareBase(){
+  try{
+    const configured = String(localStorage.getItem("app_public_origin") || "").trim().replace(/\/+$/g, "");
+    if(/^https?:\/\//i.test(configured)) return configured;
+  }catch(_){ }
+  if(/^https?:$/i.test(String(location.protocol || ""))){
+    return String(location.origin || "").replace(/\/+$/g, "");
+  }
+  return "https://novagapp-mart.onrender.com";
+}
+
 function getShareUrlForItem(item){
-  const shareUrl = new URL("post.html", location.href);
+  const shareUrl = new URL("post.html", getPublicShareBase() + "/");
   if(item?.user_id) shareUrl.searchParams.set("uid", item.user_id);
   shareUrl.searchParams.set("focus", item?.id || "");
   return shareUrl.href;

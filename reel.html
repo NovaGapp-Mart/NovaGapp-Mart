@@ -816,15 +816,26 @@ function escapeHtml(value){
     .replace(/'/g, "&#39;");
 }
 
+function getPublicShareBase(){
+  try{
+    const configured = String(localStorage.getItem("app_public_origin") || "").trim().replace(/\/+$/g, "");
+    if(/^https?:\/\//i.test(configured)) return configured;
+  }catch(_){ }
+  if(/^https?:$/i.test(String(location.protocol || ""))){
+    return String(location.origin || "").replace(/\/+$/g, "");
+  }
+  return "https://novagapp-mart.onrender.com";
+}
+
 function getReelShareUrl(item){
-  const url = new URL("reel.html", location.href);
+  const url = new URL("reel.html", getPublicShareBase() + "/");
   if(item?.user_id) url.searchParams.set("uid", item.user_id);
   url.searchParams.set("focus", item?.id || "");
   return url.href;
 }
 
 function getProductDeepLink(productId){
-  const url = new URL("product-details.html", location.href);
+  const url = new URL("product-details.html", getPublicShareBase() + "/");
   if(productId) url.searchParams.set("id", String(productId || ""));
   return url.href;
 }

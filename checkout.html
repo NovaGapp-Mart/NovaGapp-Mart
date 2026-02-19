@@ -5,11 +5,11 @@
 <title>Checkout - NOVAGAPP</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
-<!-- Ã°Å¸â€Â¥ SUPABASE SDK -->
+<!-- SUPABASE SDK -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="public-config.js"></script>
 
-<!-- Ã°Å¸â€Â¥ GLOBAL -->
+<!-- GLOBAL -->
 <script src="global.js"></script>
 
 <style>
@@ -117,7 +117,7 @@ body{
 
 <body>
 
-<div class="header" id="backHeader">Ã¢â€ Â Order Details</div>
+<div class="header" id="backHeader">&larr; Order Details</div>
 
 <!-- STEP 1 ADDRESS -->
 <div class="section">
@@ -127,15 +127,6 @@ body{
   <input class="input" id="phone" type="tel" inputmode="tel" placeholder="Mobile Number">
   <select class="input" id="country">
     <option value="">Select Country</option>
-    <option value="India" selected>India</option>
-    <option value="United States">United States</option>
-    <option value="United Kingdom">United Kingdom</option>
-    <option value="Canada">Canada</option>
-    <option value="Australia">Australia</option>
-    <option value="Germany">Germany</option>
-    <option value="France">France</option>
-    <option value="UAE">UAE</option>
-    <option value="Singapore">Singapore</option>
   </select>
   <input class="input" id="address" placeholder="House / Area">
   <div class="input-row">
@@ -160,7 +151,7 @@ body{
 <!-- PAYMENT -->
 <div class="section">
   <div class="step"><span>3</span><b>Payment</b></div>
-  <p>Ã¢Å“â€ UPI / Card / Netbanking (Next Step)</p>
+  <p>Secure UPI / Card / Netbanking (Next Step)</p>
 </div>
 
 <div class="footer">
@@ -183,12 +174,245 @@ if(!supa){
   throw new Error("supabase_client_unavailable");
 }
 
-/* Ã°Å¸â€œÂ¦ LOAD CART */
+/* LOAD CART */
 let cart = [];
 let itemsBox = document.getElementById("items");
 let total = 0;
 let isPlacingOrder = false;
 const countryInput = document.getElementById("country");
+const ALL_COUNTRY_NAMES = [
+  "Afghanistan",
+  "Albania",
+  "Algeria",
+  "Andorra",
+  "Angola",
+  "Antigua and Barbuda",
+  "Argentina",
+  "Armenia",
+  "Australia",
+  "Austria",
+  "Azerbaijan",
+  "Bahamas",
+  "Bahrain",
+  "Bangladesh",
+  "Barbados",
+  "Belarus",
+  "Belgium",
+  "Belize",
+  "Benin",
+  "Bhutan",
+  "Bolivia",
+  "Bosnia and Herzegovina",
+  "Botswana",
+  "Brazil",
+  "Brunei",
+  "Bulgaria",
+  "Burkina Faso",
+  "Burundi",
+  "Cabo Verde",
+  "Cambodia",
+  "Cameroon",
+  "Canada",
+  "Central African Republic",
+  "Chad",
+  "Chile",
+  "China",
+  "Colombia",
+  "Comoros",
+  "Congo",
+  "Costa Rica",
+  "Cote d'Ivoire",
+  "Croatia",
+  "Cuba",
+  "Cyprus",
+  "Czechia",
+  "Democratic Republic of the Congo",
+  "Denmark",
+  "Djibouti",
+  "Dominica",
+  "Dominican Republic",
+  "Ecuador",
+  "Egypt",
+  "El Salvador",
+  "Equatorial Guinea",
+  "Eritrea",
+  "Estonia",
+  "Eswatini",
+  "Ethiopia",
+  "Fiji",
+  "Finland",
+  "France",
+  "Gabon",
+  "Gambia",
+  "Georgia",
+  "Germany",
+  "Ghana",
+  "Greece",
+  "Grenada",
+  "Guatemala",
+  "Guinea",
+  "Guinea-Bissau",
+  "Guyana",
+  "Haiti",
+  "Honduras",
+  "Hungary",
+  "Iceland",
+  "India",
+  "Indonesia",
+  "Iran",
+  "Iraq",
+  "Ireland",
+  "Israel",
+  "Italy",
+  "Jamaica",
+  "Japan",
+  "Jordan",
+  "Kazakhstan",
+  "Kenya",
+  "Kiribati",
+  "Kosovo",
+  "Kuwait",
+  "Kyrgyzstan",
+  "Laos",
+  "Latvia",
+  "Lebanon",
+  "Lesotho",
+  "Liberia",
+  "Libya",
+  "Liechtenstein",
+  "Lithuania",
+  "Luxembourg",
+  "Madagascar",
+  "Malawi",
+  "Malaysia",
+  "Maldives",
+  "Mali",
+  "Malta",
+  "Marshall Islands",
+  "Mauritania",
+  "Mauritius",
+  "Mexico",
+  "Micronesia",
+  "Moldova",
+  "Monaco",
+  "Mongolia",
+  "Montenegro",
+  "Morocco",
+  "Mozambique",
+  "Myanmar",
+  "Namibia",
+  "Nauru",
+  "Nepal",
+  "Netherlands",
+  "New Zealand",
+  "Nicaragua",
+  "Niger",
+  "Nigeria",
+  "North Korea",
+  "North Macedonia",
+  "Norway",
+  "Oman",
+  "Pakistan",
+  "Palau",
+  "Palestine",
+  "Panama",
+  "Papua New Guinea",
+  "Paraguay",
+  "Peru",
+  "Philippines",
+  "Poland",
+  "Portugal",
+  "Qatar",
+  "Romania",
+  "Russia",
+  "Rwanda",
+  "Saint Kitts and Nevis",
+  "Saint Lucia",
+  "Saint Vincent and the Grenadines",
+  "Samoa",
+  "San Marino",
+  "Sao Tome and Principe",
+  "Saudi Arabia",
+  "Senegal",
+  "Serbia",
+  "Seychelles",
+  "Sierra Leone",
+  "Singapore",
+  "Slovakia",
+  "Slovenia",
+  "Solomon Islands",
+  "Somalia",
+  "South Africa",
+  "South Korea",
+  "South Sudan",
+  "Spain",
+  "Sri Lanka",
+  "Sudan",
+  "Suriname",
+  "Sweden",
+  "Switzerland",
+  "Syria",
+  "Taiwan",
+  "Tajikistan",
+  "Tanzania",
+  "Thailand",
+  "Timor-Leste",
+  "Togo",
+  "Tonga",
+  "Trinidad and Tobago",
+  "Tunisia",
+  "Turkey",
+  "Turkmenistan",
+  "Tuvalu",
+  "Uganda",
+  "Ukraine",
+  "United Arab Emirates",
+  "United Kingdom",
+  "United States",
+  "Uruguay",
+  "Uzbekistan",
+  "Vanuatu",
+  "Vatican City",
+  "Venezuela",
+  "Vietnam",
+  "Yemen",
+  "Zambia",
+  "Zimbabwe"
+];
+
+function ensureCountryOptions(defaultCountry){
+  if(!countryInput) return;
+  const uniqueCountries = Array.from(new Set(
+    (ALL_COUNTRY_NAMES || [])
+      .map(name => String(name || "").trim())
+      .filter(Boolean)
+  )).sort((a, b) => a.localeCompare(b));
+
+  countryInput.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select Country";
+  countryInput.appendChild(placeholder);
+
+  uniqueCountries.forEach(country => {
+    const option = document.createElement("option");
+    option.value = country;
+    option.textContent = country;
+    countryInput.appendChild(option);
+  });
+
+  const preferred = String(defaultCountry || "").trim() || "India";
+  const match = Array.from(countryInput.options || []).find(opt => String(opt.value || "").toLowerCase() === preferred.toLowerCase());
+  if(match){
+    countryInput.value = match.value;
+    return;
+  }
+  const custom = document.createElement("option");
+  custom.value = preferred;
+  custom.textContent = preferred;
+  countryInput.appendChild(custom);
+  countryInput.value = preferred;
+}
 
 const CITY_COORDS = {
   bangalore:[12.9716,77.5946],
@@ -396,18 +620,7 @@ async function fetchSellerLocation(sellerId){
 
 if(countryInput){
   const storedCountry = String(window.USER_COUNTRY || "").trim();
-  if(storedCountry){
-    const match = Array.from(countryInput.options || []).find(opt => String(opt.value || "").toLowerCase() === storedCountry.toLowerCase());
-    if(match){
-      countryInput.value = match.value;
-    }else{
-      const opt = document.createElement("option");
-      opt.value = storedCountry;
-      opt.textContent = storedCountry;
-      countryInput.appendChild(opt);
-      countryInput.value = storedCountry;
-    }
-  }
+  ensureCountryOptions(storedCountry || "India");
 }
 
 function toUserCurrency(amount, fromCur){
@@ -501,7 +714,7 @@ async function trackAutomationStep(step, userId, meta){
   }
 }
 
-/* Ã°Å¸Â§Â¾ PLACE ORDER (SUPABASE DB) */
+/* PLACE ORDER (SUPABASE DB) */
 async function placeOrder(){
   if(isPlacingOrder) return;
   const user = await ensureUser();
@@ -586,7 +799,7 @@ async function placeOrder(){
 
   if(error || !data?.id){
     isPlacingOrder = false;
-    alert("Ã¢ÂÅ’ Order failed. Please try again.");
+    alert("Order failed. Please try again.");
     if(error) console.error(error);
     return;
   }

@@ -84,10 +84,10 @@ button{width:100%;background:#ff7a00;color:#fff;border:none;padding:15px;font-si
   <div class="link-section">
     <label class="link-title" for="p_link">Add Your Product Link</label>
     <div class="link-row">
-      <input type="text" id="p_link" placeholder="Link auto-generated after publish (NOVAGAPP only)" readonly>
+      <input type="text" id="p_link" placeholder="Link auto-generated after publish" readonly>
       <button type="button" id="copyProductLinkBtn" class="link-copy-btn" disabled>Copy Link</button>
     </div>
-    <div class="note">Only your NOVAGAPP product link will be used in reels and shop redirects.</div>
+    <div class="note">Share-ready product link opens directly when used in reels, posts, chats, and redirects.</div>
   </div>
 
   <hr>
@@ -163,7 +163,17 @@ async function reportMediaUploadEvent(payload){
 function buildProductLink(productId){
   const cleanId = String(productId || "").trim();
   if(!cleanId) return "";
-  const url = new URL("product-details.html", location.href);
+  const appOrigin = (() => {
+    try{
+      const configured = String(localStorage.getItem("app_public_origin") || "").trim().replace(/\/+$/g, "");
+      if(/^https?:\/\//i.test(configured)) return configured;
+    }catch(_){ }
+    if(/^https?:$/i.test(String(location.protocol || ""))){
+      return String(location.origin || "").replace(/\/+$/g, "");
+    }
+    return "https://novagapp-mart.onrender.com";
+  })();
+  const url = new URL("product-details.html", appOrigin + "/");
   url.searchParams.set("id", cleanId);
   return url.href;
 }
