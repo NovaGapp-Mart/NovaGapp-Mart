@@ -4891,6 +4891,27 @@ app.get("/api/tryon/jobs/:jobId", async (req, res) => {
   });
 });
 
+app.get("/api/tryon/metrics", async (req, res) => {
+  try{
+    const state = await readSystemState();
+    ensureSubscriptionExpirySweep(state);
+    return res.json({
+      ok:true,
+      queues: {
+        standard: tryonQueueByLane.standard.length,
+        priority: tryonQueueByLane.priority.length
+      },
+      workers: {
+        standard: tryonActiveWorkers.standard,
+        priority: tryonActiveWorkers.priority
+      },
+      metrics: state.tryon?.lane_metrics || {}
+    });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"tryon_metrics_failed" });
+  }
+});
+
 app.post("/tryon", upload.single("userImage"), async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
 

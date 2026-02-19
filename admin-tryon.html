@@ -1,4 +1,231 @@
 ﻿<!DOCTYPE html>
-<html><head><meta charset='UTF-8'><title>Deprecated</title><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9977276800228616"
-     crossorigin="anonymous"></script>
-</head><body>Deprecated.</body></html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Automation Dashboard | NOVAGAPP</title>
+<style>
+body{
+  margin:0;
+  font-family:Arial,sans-serif;
+  background:#0f1420;
+  color:#f7f8fb;
+}
+.header{
+  background:linear-gradient(135deg,#ff7a00,#ff4d00);
+  padding:16px;
+  font-size:20px;
+  font-weight:700;
+}
+.wrap{
+  max-width:1200px;
+  margin:0 auto;
+  padding:16px;
+}
+.panel{
+  background:#171e2f;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:12px;
+  padding:14px;
+  margin-bottom:14px;
+}
+.panel h3{
+  margin:0 0 10px;
+  font-size:15px;
+}
+.row{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+input,button{
+  border-radius:8px;
+  border:1px solid rgba(255,255,255,.16);
+  padding:10px 12px;
+  font-size:13px;
+}
+input{
+  background:#0f1420;
+  color:#fff;
+}
+button{
+  border:none;
+  background:#ff7a00;
+  color:#111;
+  font-weight:700;
+  cursor:pointer;
+}
+button.secondary{
+  background:#2a3248;
+  color:#fff;
+}
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  gap:12px;
+}
+.mono{
+  font-family:Consolas,monospace;
+  white-space:pre-wrap;
+  background:#0f1420;
+  border-radius:8px;
+  padding:10px;
+  max-height:280px;
+  overflow:auto;
+  font-size:12px;
+}
+.muted{
+  color:#a6b0c8;
+  font-size:12px;
+}
+</style>
+</head>
+<body>
+<div class="header">Automation Dashboard</div>
+<div class="wrap">
+  <div class="panel">
+    <h3>Controls</h3>
+    <div class="row">
+      <input id="userIdInput" placeholder="User ID for report/growth" style="min-width:320px">
+      <input id="monthInput" placeholder="Month (YYYY-MM)" style="width:140px">
+      <button onclick="refreshAll()">Refresh</button>
+      <button class="secondary" onclick="toggleAutoRefresh()" id="autoBtn">Auto: ON</button>
+    </div>
+    <div class="muted" id="statusText">Loading...</div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h3>Media Upload Events</h3>
+      <div id="mediaEvents" class="mono"></div>
+    </div>
+    <div class="panel">
+      <h3>Notifications</h3>
+      <div id="notifications" class="mono"></div>
+    </div>
+    <div class="panel">
+      <h3>Followups</h3>
+      <div id="followups" class="mono"></div>
+    </div>
+    <div class="panel">
+      <h3>Monthly Report</h3>
+      <div id="reportBox" class="mono"></div>
+    </div>
+    <div class="panel">
+      <h3>Growth Incentives</h3>
+      <div id="growthBox" class="mono"></div>
+    </div>
+    <div class="panel">
+      <h3>Try-On Metrics</h3>
+      <div id="tryonMetrics" class="mono"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let autoRefresh = true;
+let timer = null;
+
+function fmtJson(value){
+  return JSON.stringify(value || {}, null, 2);
+}
+
+function setStatus(text){
+  document.getElementById("statusText").textContent = text || "";
+}
+
+function parseMonth(value){
+  const raw = String(value || "").trim();
+  if(/^\d{4}-\d{2}$/.test(raw)) return raw;
+  const now = new Date();
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,"0")}`;
+}
+
+function getApiBases(){
+  const out = [""];
+  const push = (raw) => {
+    const val = String(raw || "").trim().replace(/\/+$/g,"");
+    if(!val || !/^https?:\/\//i.test(val)) return;
+    if(!out.includes(val)) out.push(val);
+  };
+  try{
+    push(window.CONTEST_API_BASE);
+    push(window.API_BASE);
+    push(localStorage.getItem("contest_api_base"));
+    push(localStorage.getItem("api_base"));
+  }catch(_){ }
+  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+  push("https://novagapp-mart.onrender.com");
+  return out;
+}
+
+async function apiGet(path){
+  const bases = getApiBases();
+  for(const base of bases){
+    try{
+      const res = await fetch(`${base}${path}`, { cache:"no-store" });
+      if(!res.ok) continue;
+      const payload = await res.json().catch(()=>null);
+      if(payload) return payload;
+    }catch(_){ }
+  }
+  return null;
+}
+
+async function refreshEvents(){
+  const payload = await apiGet("/api/admin/events?limit=40");
+  document.getElementById("mediaEvents").textContent = fmtJson(payload?.events?.media_uploads || []);
+  document.getElementById("notifications").textContent = fmtJson(payload?.events?.notifications || []);
+  document.getElementById("followups").textContent = fmtJson(payload?.events?.followups || []);
+  const metrics = await apiGet("/api/tryon/metrics");
+  document.getElementById("tryonMetrics").textContent = fmtJson(metrics || { ok:false });
+}
+
+async function refreshReportAndGrowth(){
+  const userId = String(document.getElementById("userIdInput").value || "").trim();
+  const month = parseMonth(document.getElementById("monthInput").value);
+  if(!userId){
+    document.getElementById("reportBox").textContent = "Enter user id to view report.";
+    document.getElementById("growthBox").textContent = "Enter user id to view growth incentives.";
+    return;
+  }
+  const report = await apiGet(`/api/reports/monthly?user_id=${encodeURIComponent(userId)}&month=${encodeURIComponent(month)}`);
+  const growth = await apiGet(`/api/growth/incentives?user_id=${encodeURIComponent(userId)}`);
+  document.getElementById("reportBox").textContent = fmtJson(report || { ok:false });
+  document.getElementById("growthBox").textContent = fmtJson(growth || { ok:false });
+}
+
+async function refreshAll(){
+  setStatus("Refreshing...");
+  await Promise.all([
+    refreshEvents(),
+    refreshReportAndGrowth()
+  ]);
+  setStatus(`Updated at ${new Date().toLocaleString()}`);
+}
+
+function toggleAutoRefresh(){
+  autoRefresh = !autoRefresh;
+  const btn = document.getElementById("autoBtn");
+  btn.textContent = autoRefresh ? "Auto: ON" : "Auto: OFF";
+  if(autoRefresh){
+    schedule();
+  }else if(timer){
+    clearTimeout(timer);
+    timer = null;
+  }
+}
+
+function schedule(){
+  if(timer) clearTimeout(timer);
+  if(!autoRefresh) return;
+  timer = setTimeout(async () => {
+    await refreshAll();
+    schedule();
+  }, 8000);
+}
+
+refreshAll().then(schedule);
+</script>
+</body>
+</html>

@@ -984,6 +984,19 @@ function looksLikeRawUserId(text){
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
 }
 
+function safeIdentityName(nameLike, userId){
+  const raw = String(nameLike || "").trim();
+  if(!raw) return fallbackNameFromUserId(userId);
+  if(looksLikeRawUserId(raw)) return fallbackNameFromUserId(userId);
+  return raw;
+}
+
+function safeIdentityUsername(usernameLike){
+  const raw = String(usernameLike || "").trim();
+  if(!raw || looksLikeRawUserId(raw)) return "";
+  return raw;
+}
+
 async function fetchBackendSummary(userId){
   const id = String(userId || "").trim();
   if(!id) return null;
@@ -1073,7 +1086,7 @@ async function getUserSummary(userId){
     backend = await fetchBackendSummary(userId);
   }
   const rawUsername = data?.username || backend?.username || "";
-  const safeUsername = looksLikeRawUserId(rawUsername) ? "" : String(rawUsername || "");
+  const safeUsername = safeIdentityUsername(rawUsername);
   const safeName = String(
     data?.full_name ||
     backend?.display_name ||
@@ -1081,7 +1094,7 @@ async function getUserSummary(userId){
     ""
   ).trim();
   const summary = {
-    name: safeName || fallbackNameFromUserId(userId),
+    name: safeIdentityName(safeName, userId),
     photo: data?.photo || backend?.photo || "",
     username: safeUsername
   };
@@ -3030,10 +3043,12 @@ async function loadContacts(){
     .map(u => {
       const normalizedPhone = normalizePhoneNumber(u.phone_number);
       const contactName = phoneMap.get(normalizedPhone);
+      const safeName = safeIdentityName(contactName || u.full_name || u.username || "", u.user_id);
+      const safeUsername = safeIdentityUsername(u.username || "");
       return {
         id: u.user_id,
-        username: u.username || "",
-        name: contactName || u.full_name || u.username || "User",
+        username: safeUsername,
+        name: safeName,
         phone: u.phone_number || "",
         photo: u.photo || ""
       };
@@ -3101,21 +3116,25 @@ async function loadChatList(){
 
   const userMap = new Map();
   (users || []).forEach(u => {
+    const safeName = safeIdentityName(u.full_name || u.username || "", u.user_id);
+    const safeUsername = safeIdentityUsername(u.username || "");
     userMap.set(u.user_id, u);
     userCache.set(u.user_id, {
-      name: u.full_name || u.username || "User",
+      name: safeName,
       photo: u.photo || "",
-      username: u.username || ""
+      username: safeUsername
     });
   });
 
   allChats = ids.map(id => {
     const m = convoMap.get(id);
     const u = userMap.get(id) || {};
+    const safeName = safeIdentityName(u.full_name || u.username || "", id);
+    const safeUsername = safeIdentityUsername(u.username || "");
     return {
       id,
-      name: u.full_name || u.username || "User",
-      username: u.username || "",
+      name: safeName,
+      username: safeUsername,
       photo: u.photo || "",
       lastMessage: getMessagePreview(m),
       created_at: m.created_at

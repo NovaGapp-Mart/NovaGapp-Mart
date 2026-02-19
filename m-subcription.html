@@ -101,6 +101,35 @@ button{
   color:#9fa5b0;
   cursor:not-allowed;
 }
+.seat-panel{
+  max-width:1100px;
+  margin:0 auto 20px;
+  background:#171e2f;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:14px;
+  padding:14px;
+}
+.seat-panel h3{margin:0 0 8px}
+.seat-panel .muted{color:#a5b0c8;font-size:12px}
+.seat-row{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:10px;
+}
+.seat-row input{
+  min-width:240px;
+  flex:1;
+}
+.seat-list{
+  margin-top:10px;
+  font-size:12px;
+  color:#d4d8e2;
+  white-space:pre-wrap;
+  background:#0f1420;
+  border-radius:8px;
+  padding:10px;
+}
 </style>
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9977276800228616"
      crossorigin="anonymous"></script>
@@ -167,6 +196,20 @@ button{
 
 </div>
 
+<div class="seat-panel" id="seatPanel" style="display:none">
+  <h3>Business Seats & Invites</h3>
+  <div class="muted" id="seatSummary">Seat access visible for Business plan owners.</div>
+  <div class="seat-row">
+    <input id="inviteEmailInput" type="email" placeholder="Invitee email (optional)">
+    <button id="createInviteBtn" type="button">Create Invite</button>
+  </div>
+  <div class="seat-row">
+    <input id="inviteTokenInput" placeholder="Invite token (for redeem)">
+    <button id="redeemInviteBtn" type="button">Redeem Invite</button>
+  </div>
+  <div class="seat-list" id="seatList">No seat data</div>
+</div>
+
 <div class="footer-note">
   Payments powered by Razorpay</div>
 
@@ -188,6 +231,14 @@ const CREATOR_MIN_FOLLOWERS = 5000;
 let creatorFollowerCount = 0;
 let creatorEligible = false;
 let creatorEligibilityStatus = "checking";
+let seatData = null;
+const seatPanel = document.getElementById("seatPanel");
+const seatSummary = document.getElementById("seatSummary");
+const seatList = document.getElementById("seatList");
+const inviteEmailInput = document.getElementById("inviteEmailInput");
+const createInviteBtn = document.getElementById("createInviteBtn");
+const inviteTokenInput = document.getElementById("inviteTokenInput");
+const redeemInviteBtn = document.getElementById("redeemInviteBtn");
 
 function normalizeMobilePlan(planInput){
   const raw = String(planInput || "").trim().toUpperCase();
@@ -405,11 +456,118 @@ function markCurrent(){
       btn.disabled = true;
     }
   });
+  renderSeatPanel();
 }
 
 function setPaymentButtonsBusy(state){
   paymentBusy = !!state;
   markCurrent();
+}
+
+function renderSeatPanel(){
+  if(!seatPanel || !seatSummary || !seatList) return;
+  const isBusiness = activePlan === "BUSINESS";
+  if(!isBusiness){
+    seatPanel.style.display = "none";
+    return;
+  }
+  seatPanel.style.display = "";
+  const seat = seatData?.seat || null;
+  const ownerId = String(seatData?.owner_user_id || "").trim();
+  const mine = String(currentUser?.id || "").trim();
+  const members = Array.isArray(seat?.members) ? seat.members : [];
+  const seatLimit = Number(seat?.seat_limit || 0);
+  if(!seat){
+    seatSummary.textContent = "Seat data unavailable.";
+    seatList.textContent = "No seat information found.";
+    if(createInviteBtn) createInviteBtn.disabled = true;
+    return;
+  }
+  const isOwner = ownerId && ownerId === mine;
+  seatSummary.textContent = isOwner
+    ? `Owner seat usage: ${members.length}/${seatLimit}`
+    : `Joined seat lane. Owner: ${ownerId}`;
+  seatList.textContent = JSON.stringify({
+    owner_user_id: ownerId,
+    seat_limit: seatLimit,
+    members
+  }, null, 2);
+  if(createInviteBtn){
+    createInviteBtn.disabled = !isOwner || members.length >= seatLimit;
+  }
+  if(redeemInviteBtn){
+    redeemInviteBtn.disabled = isOwner;
+  }
+}
+
+async function loadSeatState(){
+  if(!currentUser?.id) return;
+  const payload = await callAutomationApi(`/api/premium/seats?user_id=${encodeURIComponent(currentUser.id)}`, { method:"GET" });
+  seatData = payload && payload.ok ? payload : null;
+  renderSeatPanel();
+}
+
+async function createPremiumInvite(){
+  if(!currentUser?.id || !createInviteBtn) return;
+  const email = String(inviteEmailInput?.value || "").trim().toLowerCase();
+  createInviteBtn.disabled = true;
+  const originalText = createInviteBtn.textContent;
+  createInviteBtn.textContent = "Creating...";
+  try{
+    const payload = await callAutomationApi("/api/premium/invite/create", {
+      method: "POST",
+      body: {
+        owner_user_id: currentUser.id,
+        invitee_email: email
+      }
+    });
+    if(!payload?.ok){
+      const message = payload?.error || "invite_create_failed";
+      alert(`Invite failed: ${message}`);
+      return;
+    }
+    if(inviteEmailInput) inviteEmailInput.value = "";
+    alert(`Invite created: ${payload?.invite?.token || ""}`);
+    await loadSeatState();
+  }finally{
+    createInviteBtn.textContent = originalText;
+    createInviteBtn.disabled = false;
+    renderSeatPanel();
+  }
+}
+
+async function redeemPremiumInvite(){
+  if(!currentUser?.id || !redeemInviteBtn) return;
+  const token = String(inviteTokenInput?.value || "").trim();
+  if(!token){
+    alert("Enter invite token first.");
+    return;
+  }
+  redeemInviteBtn.disabled = true;
+  const oldText = redeemInviteBtn.textContent;
+  redeemInviteBtn.textContent = "Redeeming...";
+  try{
+    const payload = await callAutomationApi("/api/premium/invite/redeem", {
+      method: "POST",
+      body: {
+        token,
+        user_id: currentUser.id,
+        email: String(currentUser.email || "").trim().toLowerCase()
+      }
+    });
+    if(!payload?.ok){
+      const message = payload?.error || "invite_redeem_failed";
+      alert(`Redeem failed: ${message}`);
+      return;
+    }
+    if(inviteTokenInput) inviteTokenInput.value = "";
+    alert("Invite redeemed. Premium seat access activated.");
+    await loadSeatState();
+  }finally{
+    redeemInviteBtn.textContent = oldText;
+    redeemInviteBtn.disabled = false;
+    renderSeatPanel();
+  }
 }
 
 async function loadRazorpayConfig(){
@@ -629,6 +787,7 @@ async function pay(amount, plan, currency){
 
     activePlan = activatedPlan || nextPlan;
     markCurrent();
+    await loadSeatState();
     alert("Plan activated");
     location.href = "m-account.html";
   }catch(err){
@@ -644,6 +803,13 @@ async function pay(amount, plan, currency){
 
 window.pay = pay;
 
+if(createInviteBtn){
+  createInviteBtn.addEventListener("click", createPremiumInvite);
+}
+if(redeemInviteBtn){
+  redeemInviteBtn.addEventListener("click", redeemPremiumInvite);
+}
+
 (async function init(){
   const { data } = await supa.auth.getUser();
   if(!data?.user){
@@ -653,6 +819,7 @@ window.pay = pay;
   }
   currentUser = data.user;
   await Promise.all([loadPlan(), refreshCreatorEligibility(), loadRazorpayConfig()]);
+  await loadSeatState();
   markCurrent();
 })();
 </script>
