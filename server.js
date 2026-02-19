@@ -1700,6 +1700,88 @@ async function upsertIdentityToUsersTable(identity){
   return row;
 }
 
+function sanitizeAuthEmailInput(value){
+  return String(value || "").trim().toLowerCase().slice(0, 180);
+}
+
+function isLikelyValidEmailAddress(value){
+  const email = String(value || "").trim().toLowerCase();
+  if(!email) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(email);
+}
+
+function detectEmailAlreadyExistsResponse(rawBody, parsedBody){
+  const text = `${rawBody || ""} ${parsedBody?.msg || ""} ${parsedBody?.message || ""} ${parsedBody?.error || ""} ${parsedBody?.error_description || ""}`
+    .toLowerCase();
+  return (
+    text.includes("already registered") ||
+    text.includes("already exists") ||
+    text.includes("duplicate key") ||
+    text.includes("email exists") ||
+    text.includes("email already")
+  );
+}
+
+async function createSupabaseConfirmedAuthUser({ email, password, displayName }){
+  const base = getSocialSupabaseBase();
+  const serviceKey = getSocialSupabaseServiceRoleKey();
+  if(!base || !serviceKey){
+    throw new Error("supabase_service_unconfigured");
+  }
+
+  const safeEmail = sanitizeAuthEmailInput(email);
+  const safePassword = String(password || "");
+  const safeName = sanitizeDisplayName(displayName) || titleCaseWords(
+    parseEmailLocalToWords(String((safeEmail.split("@")[0] || "")).trim()) ||
+    String((safeEmail.split("@")[0] || "")).trim() ||
+    "Member"
+  );
+
+  const endpoint = new URL("/auth/v1/admin/users", base + "/");
+  const response = await fetch(endpoint.toString(), {
+    method: "POST",
+    headers: {
+      apikey: serviceKey,
+      Authorization: `Bearer ${serviceKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      email: safeEmail,
+      password: safePassword,
+      email_confirm: true,
+      user_metadata: {
+        full_name: safeName,
+        name: safeName
+      }
+    })
+  });
+
+  const raw = await response.text().catch(() => "");
+  let parsed = null;
+  try{
+    parsed = raw ? JSON.parse(raw) : {};
+  }catch(_){
+    parsed = {};
+  }
+
+  if(!response.ok){
+    const err = new Error(`supabase_admin_signup_failed_${response.status}:${String(raw || "").slice(0, 240)}`);
+    err.status = response.status;
+    err.code = detectEmailAlreadyExistsResponse(raw, parsed) ? "email_exists" : "";
+    throw err;
+  }
+
+  const userId = sanitizeUserId(parsed?.id || parsed?.user?.id);
+  if(!userId){
+    throw new Error("supabase_admin_signup_missing_user_id");
+  }
+  return {
+    user_id: userId,
+    email: safeEmail,
+    display_name: safeName
+  };
+}
+
 async function fetchUsersForDiscovery(tokens, limit){
   const base = getSocialSupabaseBase();
   const key = getSocialSupabaseReadKey();
@@ -3660,6 +3742,139 @@ app.post("/api/payment/razorpay/webhook", async (req, res) => {
   }catch(err){
     console.error("razorpay_webhook_error:", err?.stack || err);
     return res.status(500).json({ ok:false, error:"webhook_processing_failed" });
+  }
+});
+
+app.post("/api/auth/signup-direct", async (req, res) => {
+  const email = sanitizeAuthEmailInput(req.body?.email);
+  const password = String(req.body?.password || "");
+  const displayNameInput = sanitizeDisplayName(
+    req.body?.display_name ||
+    req.body?.full_name ||
+    req.body?.name ||
+    ""
+  );
+
+  if(!isLikelyValidEmailAddress(email)){
+    return res.status(400).json({ ok:false, error:"invalid_email", message:"Valid email required." });
+  }
+  if(password.length < 6){
+    return res.status(400).json({ ok:false, error:"weak_password", message:"Password must be at least 6 characters." });
+  }
+  if(password.length > 200){
+    return res.status(400).json({ ok:false, error:"password_too_long", message:"Password is too long." });
+  }
+
+  try{
+    const created = await createSupabaseConfirmedAuthUser({
+      email,
+      password,
+      displayName: displayNameInput
+    });
+    const userId = sanitizeUserId(created?.user_id);
+    if(!userId){
+      throw new Error("signup_direct_missing_user_id");
+    }
+
+    const derived = deriveIdentityDefaults({
+      user_id: userId,
+      email,
+      display_name: created?.display_name || displayNameInput || "",
+      full_name: created?.display_name || displayNameInput || "",
+      username: req.body?.username || "",
+      user_name: created?.display_name || displayNameInput || ""
+    });
+
+    const result = await mutateSystemState(state => {
+      ensureSubscriptionExpirySweep(state);
+      const current = state.identities[userId] && typeof state.identities[userId] === "object"
+        ? state.identities[userId]
+        : {};
+      const merged = {
+        ...current,
+        ...derived,
+        user_id: userId,
+        display_name: derived.display_name || safePublicNameFromIdentity(current, userId),
+        username: derived.username || current.username || `member_${userId.slice(0, 6)}`,
+        email: derived.email || current.email || "",
+        email_local: derived.email_local || current.email_local || "",
+        photo: derived.photo || current.photo || "",
+        search_tokens: Array.from(new Set([
+          ...(Array.isArray(current.search_tokens) ? current.search_tokens : []),
+          ...(Array.isArray(derived.search_tokens) ? derived.search_tokens : [])
+        ])).slice(0, 60),
+        created_at: current.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      state.identities[userId] = merged;
+      const verification = applyVerificationToIdentity(state, userId);
+      const identityWithTrust = state.identities[userId] || merged;
+      const subscription = getEffectiveSubscription(state, userId);
+      return {
+        identity: identityWithTrust,
+        subscription,
+        verification
+      };
+    });
+
+    let usersRow = null;
+    let syncWarning = "";
+    try{
+      usersRow = await upsertIdentityToUsersTable(result.identity);
+    }catch(err){
+      syncWarning = String(err?.message || "users_sync_failed");
+    }
+
+    try{
+      if(canContestUserPay(userId)){
+        await mutateContestState(state => {
+          registerContestAccount(
+            state,
+            userId,
+            result.identity.display_name || result.identity.username,
+            result.identity.email
+          );
+          return true;
+        });
+      }
+    }catch(_){ }
+
+    return res.json({
+      ok:true,
+      user_id: userId,
+      email,
+      identity: {
+        user_id: userId,
+        display_name: safePublicNameFromIdentity(result.identity, userId),
+        username: String(result.identity.username || "").trim(),
+        photo: String(result.identity.photo || "").trim(),
+        verified: !!result.identity.verified
+      },
+      synced_to_users_table: !!usersRow,
+      warning: syncWarning || undefined
+    });
+  }catch(err){
+    const message = String(err?.message || "");
+    if(String(err?.code || "").trim().toLowerCase() === "email_exists"){
+      return res.status(409).json({
+        ok:false,
+        error:"email_exists",
+        message:"Email already registered. Please login."
+      });
+    }
+    if(message.includes("supabase_service_unconfigured")){
+      return res.status(500).json({
+        ok:false,
+        error:"supabase_unconfigured",
+        message:"Server signup is not configured."
+      });
+    }
+    console.error("signup_direct_error:", err?.stack || err);
+    return res.status(500).json({
+      ok:false,
+      error:"signup_failed",
+      message:"Unable to create account right now."
+    });
   }
 });
 
