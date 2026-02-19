@@ -1253,7 +1253,7 @@ async function getUserSummary(userId){
     safeUsername ||
     ""
   ).trim();
-  const safeName = safeIdentityName(rawName, userId, data?.email || "");
+  const safeName = safeIdentityName(rawName, userId, data?.email || backend?.email || "");
   const summary = {
     name: safeName,
     photo: data?.photo || backend?.photo || "",

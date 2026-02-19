@@ -1773,6 +1773,58 @@ async function fetchUsersForDiscovery(tokens, limit){
   return [];
 }
 
+async function fetchUsersByIds(userIdsInput){
+  const base = getSocialSupabaseBase();
+  const key = getSocialSupabaseReadKey();
+  if(!base || !key){
+    return [];
+  }
+  const userIds = Array.from(new Set(
+    (Array.isArray(userIdsInput) ? userIdsInput : [])
+      .map(sanitizeUserId)
+      .filter(Boolean)
+  )).slice(0, 200);
+  if(!userIds.length){
+    return [];
+  }
+
+  const selectVariants = [
+    "user_id,username,full_name,display_name,email,email_local,photo",
+    "user_id,username,full_name,email,photo",
+    "user_id,username,full_name,display_name,photo",
+    "user_id,username,full_name,photo"
+  ];
+  const inFilter = `in.(${userIds.map(id => `"${String(id).replace(/"/g, "")}"`).join(",")})`;
+
+  for(const selectFields of selectVariants){
+    const endpoint = new URL("/rest/v1/users", base + "/");
+    endpoint.searchParams.set("select", selectFields);
+    endpoint.searchParams.set("user_id", inFilter);
+    endpoint.searchParams.set("limit", String(userIds.length));
+
+    const response = await fetch(endpoint.toString(), {
+      method: "GET",
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`
+      }
+    });
+
+    if(!response.ok){
+      const body = await response.text().catch(() => "");
+      const missing = detectMissingColumnName(body);
+      if(missing){
+        continue;
+      }
+      return [];
+    }
+
+    const rows = await response.json().catch(() => []);
+    return Array.isArray(rows) ? rows : [];
+  }
+  return [];
+}
+
 /* ======================
    LIVE FX (BEST-EFFORT)
 ====================== */
@@ -3818,18 +3870,42 @@ app.get("/api/users/summary", async (req, res) => {
     return res.json({ ok:true, users:{} });
   }
   try{
-    const state = await readSystemState();
+    const [state, remoteRows] = await Promise.all([
+      readSystemState(),
+      fetchUsersByIds(ids)
+    ]);
+    const remoteMap = new Map();
+    (remoteRows || []).forEach(row => {
+      const id = sanitizeUserId(row?.user_id);
+      if(!id || remoteMap.has(id)) return;
+      remoteMap.set(id, row);
+    });
+
     const map = {};
     ids.forEach(userId => {
       const identity = state.identities[userId] || {};
+      const remote = remoteMap.get(userId) || {};
       const verification = getVerificationForUser(state, userId);
+      const email = String(remote.email || identity.email || "").trim().toLowerCase().slice(0, 180);
+      const emailLocal = String(
+        remote.email_local ||
+        identity.email_local ||
+        (email.split("@")[0] || "")
+      ).trim().slice(0, 120);
+      const mergedIdentity = {
+        display_name: remote.display_name || remote.full_name || identity.display_name || identity.full_name || "",
+        username: remote.username || identity.username || "",
+        email,
+        email_local: emailLocal,
+        photo: remote.photo || identity.photo || ""
+      };
       map[userId] = {
         user_id: userId,
-        display_name: safePublicNameFromIdentity(identity, userId),
-        username: String(identity.username || "").trim(),
-        email: String(identity.email || "").trim(),
-        email_local: String(identity.email_local || "").trim(),
-        photo: String(identity.photo || "").trim(),
+        display_name: safePublicNameFromIdentity(mergedIdentity, userId),
+        username: String(mergedIdentity.username || "").trim(),
+        email,
+        email_local: emailLocal,
+        photo: String(mergedIdentity.photo || "").trim(),
         verified: !!verification.verified,
         trust_score: Math.max(0, Math.floor(safeNumber(verification.trust_score)))
       };
