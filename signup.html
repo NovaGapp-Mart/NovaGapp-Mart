@@ -346,61 +346,6 @@ async function syncAccountIdentity(user, identity){
   return false;
 }
 
-async function signupDirectWithoutEmailVerify(email, password, suggestedName){
-  const payload = {
-    email: String(email || "").trim(),
-    password: String(password || ""),
-    full_name: String(suggestedName || "").trim(),
-    name: String(suggestedName || "").trim(),
-    display_name: String(suggestedName || "").trim()
-  };
-  const seen = new Set();
-  const bases = [""].concat(buildContestApiCandidates());
-  for(const rawBase of bases){
-    const base = String(rawBase || "").trim().replace(/\/+$/g, "");
-    const key = base || "__same_origin__";
-    if(seen.has(key)) continue;
-    seen.add(key);
-    const endpoint = `${base}/api/auth/signup-direct`;
-    try{
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type":"application/json" },
-        body: JSON.stringify(payload)
-      });
-      let responseBody = null;
-      try{
-        responseBody = await res.json();
-      }catch(_){
-        responseBody = null;
-      }
-      if(res.ok){
-        return { ok:true, data: responseBody || {} };
-      }
-      const code = String(responseBody?.error || "").trim().toLowerCase();
-      const message = String(responseBody?.message || "").trim();
-      if(res.status === 409 || code === "email_exists"){
-        return {
-          ok:false,
-          reason:"email_exists",
-          message: message || "Email already registered. Please login."
-        };
-      }
-      if(res.status === 400){
-        return {
-          ok:false,
-          reason:"invalid_input",
-          message: message || "Invalid email or password."
-        };
-      }
-      if(res.status === 404){
-        continue;
-      }
-    }catch(_){ }
-  }
-  return { ok:false, reason:"unavailable", message:"" };
-}
-
 /* TOGGLE PASSWORD */
 function togglePassword(){
   const p = document.getElementById("password");
@@ -437,41 +382,32 @@ async function signup(){
   const local = String((email.split("@")[0] || "")).trim();
   const suggestedName = toTitleCaseWords(parseEmailLocalWords(local) || local) || "Member";
 
-  let signupData = null;
-  const directSignup = await signupDirectWithoutEmailVerify(email, password, suggestedName);
-  if(!directSignup.ok){
-    if(directSignup.reason === "email_exists"){
-      alert(directSignup.message || "Email already registered. Please login.");
+  const { data: signupData, error: signupError } = await supa.auth.signUp({
+    email,
+    password,
+    options:{
+      data:{
+        full_name: suggestedName,
+        name: suggestedName
+      }
+    }
+  });
+
+  if(signupError){
+    const msg = String(signupError.message || "").toLowerCase();
+    if(msg.includes("already") || msg.includes("exists") || msg.includes("registered")){
+      alert("Email already registered. Please login.");
       location.href = "login.html";
       return;
     }
-    if(directSignup.reason === "invalid_input"){
-      alert(directSignup.message || "Invalid email or password.");
-      return;
-    }
+    alert(signupError.message || "Signup failed. Please try again.");
+    return;
+  }
 
-    const { data, error: signupError } = await supa.auth.signUp({
-      email,
-      password,
-      options:{
-        data:{
-          full_name: suggestedName,
-          name: suggestedName
-        }
-      }
-    });
-    signupData = data || null;
-
-    if(signupError){
-      const msg = String(signupError.message || "").toLowerCase();
-      if(msg.includes("already") || msg.includes("exists") || msg.includes("registered")){
-        alert("Email already registered. Please login.");
-        location.href = "login.html";
-        return;
-      }
-      alert(signupError.message || "Signup failed. Please try again.");
-      return;
-    }
+  if(!signupData?.session){
+    alert("Account created. Email verification is required before login.");
+    location.href = "login.html";
+    return;
   }
 
   const { data: loginData, error: loginError } = await supa.auth.signInWithPassword({
