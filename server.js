@@ -92,7 +92,14 @@ app.use("/uploads", express.static(UPLOADS_DIR));
 app.use(express.static(__dirname, {
   dotfiles: "deny",
   etag: true,
-  maxAge: "1h"
+  maxAge: "1h",
+  setHeaders: (res, servedPath) => {
+    if(/\.html?$/i.test(String(servedPath || ""))){
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+    }
+  }
 }));
 
 const PUBLIC_SUPABASE_URL = String(

@@ -3286,11 +3286,25 @@ async function loadChatList(){
     return;
   }
 
-  const { data: users, error: userError } = await supa
-    .from("users")
-    .select("user_id,username,full_name,photo")
-    .in("user_id", ids)
-    .limit(400);
+  const userSelectPlans = [
+    "user_id,username,full_name,display_name,photo,email",
+    "user_id,username,full_name,photo,email",
+    "user_id,username,full_name,display_name,photo",
+    "user_id,username,full_name,photo"
+  ];
+  let users = [];
+  let userError = null;
+  for(const fields of userSelectPlans){
+    const result = await supa
+      .from("users")
+      .select(fields)
+      .in("user_id", ids)
+      .limit(400);
+    users = Array.isArray(result?.data) ? result.data : [];
+    userError = result?.error || null;
+    if(!userError) break;
+    if(!isMissingColumnError(userError)) break;
+  }
 
   if(userError){
     console.error("loadChatList users error", userError);
@@ -3301,9 +3315,9 @@ async function loadChatList(){
   (users || []).forEach(u => {
     const backend = backendMap?.[u.user_id] || {};
     const safeName = safeIdentityName(
-      u.full_name || backend.display_name || u.username || backend.username || "",
+      u.display_name || u.full_name || backend.display_name || u.username || backend.username || "",
       u.user_id,
-      u.email || ""
+      u.email || backend.email || ""
     );
     const safeUsername = safeIdentityUsername(u.username || backend.username || "");
     userMap.set(u.user_id, u);
@@ -3321,9 +3335,9 @@ async function loadChatList(){
     const u = userMap.get(id) || {};
     const backend = backendMap?.[id] || {};
     const safeName = safeIdentityName(
-      u.full_name || backend.display_name || u.username || backend.username || "",
+      u.display_name || u.full_name || backend.display_name || u.username || backend.username || "",
       id,
-      u.email || ""
+      u.email || backend.email || ""
     );
     const safeUsername = safeIdentityUsername(u.username || backend.username || "");
     return {
