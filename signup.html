@@ -155,6 +155,109 @@ async function registerContestAccount(user){
   return false;
 }
 
+function toTitleCaseWords(text){
+  return String(text || "")
+    .split(/\s+/)
+    .map(part => {
+      const token = String(part || "").trim();
+      if(!token) return "";
+      return token.slice(0, 1).toUpperCase() + token.slice(1).toLowerCase();
+    })
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 60);
+}
+
+function deriveIdentity(user){
+  const email = String(user?.email || "").trim().toLowerCase();
+  const local = String((email.split("@")[0] || "")).trim();
+  const words = local.replace(/[._-]+/g, " ").replace(/\d+/g, " ").replace(/\s+/g, " ").trim();
+  const displayName = toTitleCaseWords(
+    String(user?.user_metadata?.full_name || user?.user_metadata?.name || words || local || "Member")
+  ) || "Member";
+  const username = String(local || displayName || "member")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 24) || "member";
+  const emailLocal = local.slice(0, 120);
+  const searchTokens = Array.from(new Set(
+    `${displayName} ${username} ${emailLocal} ${email}`
+      .toLowerCase()
+      .replace(/[^a-z0-9@._ -]/g, " ")
+      .split(/[\s@._-]+/)
+      .map(s => s.trim())
+      .filter(Boolean)
+  )).slice(0, 40);
+  return { email, emailLocal, displayName, username, searchTokens };
+}
+
+function extractMissingColumnName(error){
+  const text = `${error?.message || ""} ${error?.details || ""}`;
+  const pgMatch = text.match(/column\s+\"?([a-zA-Z0-9_.]+)\"?\s+does not exist/i);
+  if(pgMatch && pgMatch[1]){
+    return String(pgMatch[1]).split(".").pop().toLowerCase();
+  }
+  const quoted = text.match(/'([a-zA-Z0-9_]+)'/);
+  if(quoted && quoted[1]){
+    return String(quoted[1]).toLowerCase();
+  }
+  return "";
+}
+
+async function upsertProfileRow(supa, user, identity){
+  let row = {
+    user_id: user.id,
+    email: identity.email || user.email || "",
+    email_local: identity.emailLocal || "",
+    username: identity.username || "member",
+    full_name: identity.displayName || "Member",
+    display_name: identity.displayName || "Member",
+    search_tokens: identity.searchTokens || [],
+    role: "user"
+  };
+  const required = new Set(["user_id"]);
+  for(let attempt = 0; attempt < 8; attempt += 1){
+    const { error } = await supa
+      .from("users")
+      .upsert(row, { onConflict: "user_id" });
+    if(!error){
+      return true;
+    }
+    const missing = extractMissingColumnName(error);
+    if(missing && Object.prototype.hasOwnProperty.call(row, missing) && !required.has(missing)){
+      delete row[missing];
+      continue;
+    }
+    throw error;
+  }
+  return false;
+}
+
+async function syncAccountIdentity(user, identity){
+  if(!user?.id) return false;
+  const payload = {
+    user_id: user.id,
+    email: identity?.email || user.email || "",
+    username: identity?.username || "",
+    full_name: identity?.displayName || "",
+    display_name: identity?.displayName || ""
+  };
+  const candidates = buildContestApiCandidates();
+  for(const base of candidates){
+    try{
+      const res = await fetch(base + "/api/account/sync", {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+      if(res.ok) return true;
+    }catch(_){ }
+  }
+  return false;
+}
+
 /* TOGGLE PASSWORD */
 function togglePassword(){
   const p = document.getElementById("password");
@@ -179,9 +282,18 @@ async function signup(){
     return;
   }
 
+  const local = String((email.split("@")[0] || "")).trim();
+  const suggestedName = toTitleCaseWords(local.replace(/[._-]+/g, " ").replace(/\d+/g, " ")) || "Member";
+
   const { data, error } = await supa.auth.signUp({
     email,
-    password
+    password,
+    options: {
+      data: {
+        full_name: suggestedName,
+        name: suggestedName
+      }
+    }
   });
 
   if(error){
@@ -190,21 +302,17 @@ async function signup(){
   }
 
   const user = data.user;
-
-  /* CREATE USER PROFILE IN public.users */
-  const { error: dbError } = await supa.from("users").insert({
-    user_id: user.id,
-    email: user.email,
-    role: "user"
-  });
-
-  if(dbError){
+  const identity = deriveIdentity(user || { email });
+  try{
+    await upsertProfileRow(supa, user, identity);
+  }catch(dbError){
     console.error(dbError);
-    alert("User created but profile insert failed");
+    alert("User created but profile setup failed");
     return;
   }
 
   try{
+    await syncAccountIdentity(user, identity);
     await registerContestAccount(user);
   }catch(_){ }
 

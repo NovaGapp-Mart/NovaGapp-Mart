@@ -24,6 +24,65 @@ function isLoopbackBase(base){
   return value.startsWith("http://");
 }
 
+function deriveDisplayFromEmail(email, fallback){
+  const raw = String(email || "").trim().toLowerCase();
+  const local = String((raw.split("@")[0] || "")).replace(/[._-]+/g, " ").replace(/\d+/g, " ").trim();
+  const token = String(fallback || local || "Member").trim();
+  return token
+    .split(/\s+/)
+    .map(part => part ? (part[0].toUpperCase() + part.slice(1).toLowerCase()) : "")
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 60) || "Member";
+}
+
+function buildApiCandidates(){
+  const out = [];
+  const push = (raw) => {
+    const value = String(raw || "").trim().replace(/\/+$/g, "");
+    if(!value) return;
+    if(!/^https?:\/\//i.test(value)) return;
+    if(!out.includes(value)) out.push(value);
+  };
+  try{
+    push(window.CONTEST_API_BASE);
+    push(window.API_BASE);
+    push(localStorage.getItem("contest_api_base"));
+    push(localStorage.getItem("api_base"));
+  }catch(_){ }
+  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+  push(DEFAULT_REMOTE_API_BASE);
+  return out;
+}
+
+async function syncAccountIdentity(user){
+  if(!user?.id) return false;
+  const displayName = deriveDisplayFromEmail(
+    user.email,
+    user.user_metadata?.full_name || user.user_metadata?.name || ""
+  );
+  const payload = {
+    user_id: user.id,
+    email: user.email || "",
+    full_name: displayName,
+    display_name: displayName,
+    username: String((user.email || "").split("@")[0] || "").toLowerCase()
+  };
+  const candidates = [""].concat(buildApiCandidates());
+  for(const base of candidates){
+    const url = `${base}/api/account/sync`;
+    try{
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+      if(res.ok) return true;
+    }catch(_){ }
+  }
+  return false;
+}
+
 function buildPublicConfigEndpoints(){
   const endpoints = [];
   const push = (value) => {
@@ -139,11 +198,16 @@ async function login(){
 
   // ✅ SINGLE SOURCE OF TRUTH
   localStorage.setItem("isLoggedIn", "true");
+  const displayName = deriveDisplayFromEmail(
+    user.email,
+    user.user_metadata?.full_name || user.user_metadata?.name || ""
+  );
   localStorage.setItem("user", JSON.stringify({
-    name: user.user_metadata?.name || "User",
+    name: displayName,
     email: user.email,
     uid: user.id
   }));
+  syncAccountIdentity(user).catch(()=>{});
 
   location.href = "index.html";
 }
@@ -170,13 +234,18 @@ async function signup(){
   }
 
   const user = data.user;
+  const displayName = deriveDisplayFromEmail(
+    user.email,
+    user.user_metadata?.full_name || user.user_metadata?.name || ""
+  );
 
   localStorage.setItem("isLoggedIn", "true");
   localStorage.setItem("user", JSON.stringify({
-    name: "User",
+    name: displayName,
     email: user.email,
     uid: user.id
   }));
+  syncAccountIdentity(user).catch(()=>{});
 
   location.href = "index.html";
 }
@@ -198,12 +267,17 @@ ensureSupabase()
     client.auth.onAuthStateChange((event, session) => {
       if(event === "SIGNED_IN" && session?.user){
         const user = session.user;
+        const displayName = deriveDisplayFromEmail(
+          user.email,
+          user.user_metadata?.full_name || user.user_metadata?.name || ""
+        );
         localStorage.setItem("isLoggedIn", "true");
         localStorage.setItem("user", JSON.stringify({
-          name: user.user_metadata?.full_name || user.user_metadata?.name || "User",
+          name: displayName,
           email: user.email,
           uid: user.id
         }));
+        syncAccountIdentity(user).catch(()=>{});
       }
     });
   })

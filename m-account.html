@@ -599,6 +599,40 @@ async function saveProfile(){
   }
 }
 
+function buildAutomationApiBases(){
+  const out = [];
+  const push = (raw) => {
+    const val = String(raw || "").trim().replace(/\/+$/g, "");
+    if(!val) return;
+    if(!/^https?:\/\//i.test(val)) return;
+    if(!out.includes(val)) out.push(val);
+  };
+  push(window.CONTEST_API_BASE || window.API_BASE || "");
+  try{
+    push(localStorage.getItem("contest_api_base"));
+    push(localStorage.getItem("api_base"));
+  }catch(_){ }
+  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+  push("https://novagapp-mart.onrender.com");
+  return out;
+}
+
+async function reportMediaUploadEvent(payload){
+  const eventPayload = payload && typeof payload === "object" ? payload : {};
+  const bases = buildAutomationApiBases();
+  for(const base of bases){
+    try{
+      const res = await fetch(`${base}/api/media/events/upload`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify(eventPayload)
+      });
+      if(res.ok) return true;
+    }catch(_){ }
+  }
+  return false;
+}
+
 function persistProfile(data){
   const key = "m_profile_" + user.id;
   localStorage.setItem(key, JSON.stringify(data));
@@ -614,6 +648,21 @@ function persistProfile(data){
       })
       .eq("user_id", user.id);
   }catch(_){}
+  try{
+    if(data.avatarData){
+      reportMediaUploadEvent({
+        user_id: user.id,
+        type: "profile_photo_upload",
+        source: "m_account_edit",
+        file_name: "profile-photo",
+        mime: "image/data-url",
+        size: Number(String(data.avatarData || "").length || 0),
+        url: String(data.avatarData || "").slice(0, 3000),
+        bucket: "profile",
+        path: `users/${user.id}/profile-photo`
+      }).catch(()=>{});
+    }
+  }catch(_){ }
   closeEdit();
 }
 

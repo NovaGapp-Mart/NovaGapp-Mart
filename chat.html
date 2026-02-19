@@ -971,18 +971,119 @@ function initMessageFlags(){
   deletedMessageMap = loadMessageFlagMap("deleted_messages");
 }
 
+function fallbackNameFromUserId(userId){
+  const shortId = String(userId || "")
+    .replace(/[^a-z0-9]/gi, "")
+    .slice(0, 6)
+    .toUpperCase();
+  return shortId ? `Member ${shortId}` : "Member";
+}
+
+function looksLikeRawUserId(text){
+  const value = String(text || "").trim().toLowerCase();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+}
+
+async function fetchBackendSummary(userId){
+  const id = String(userId || "").trim();
+  if(!id) return null;
+  const bases = [""];
+  const push = (value) => {
+    const clean = String(value || "").trim().replace(/\/+$/g, "");
+    if(!clean) return;
+    if(!/^https?:\/\//i.test(clean)) return;
+    if(!bases.includes(clean)) bases.push(clean);
+  };
+  try{
+    push(window.CONTEST_API_BASE);
+    push(window.API_BASE);
+    push(localStorage.getItem("contest_api_base"));
+    push(localStorage.getItem("api_base"));
+  }catch(_){ }
+  push("https://novagapp-mart.onrender.com");
+
+  for(const base of bases){
+    const url = `${base}/api/users/summary?ids=${encodeURIComponent(id)}`;
+    try{
+      const res = await fetch(url, { cache:"no-store" });
+      if(!res.ok) continue;
+      const payload = await res.json().catch(() => null);
+      const row = payload?.users?.[id];
+      if(row) return row;
+    }catch(_){ }
+  }
+  return null;
+}
+
+function buildAutomationApiBases(){
+  const out = [""];
+  const push = (raw) => {
+    const clean = String(raw || "").trim().replace(/\/+$/g, "");
+    if(!clean) return;
+    if(!/^https?:\/\//i.test(clean)) return;
+    if(!out.includes(clean)) out.push(clean);
+  };
+  try{
+    push(window.CONTEST_API_BASE);
+    push(window.API_BASE);
+    push(localStorage.getItem("contest_api_base"));
+    push(localStorage.getItem("api_base"));
+  }catch(_){ }
+  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+  push("https://novagapp-mart.onrender.com");
+  return out;
+}
+
+async function trackAutomationStep(step, meta){
+  if(!myUid) return;
+  const payload = {
+    user_id: myUid,
+    step: String(step || "").trim().toLowerCase(),
+    meta: meta && typeof meta === "object" ? meta : {}
+  };
+  const bases = buildAutomationApiBases();
+  for(const base of bases){
+    try{
+      const res = await fetch(`${base}/api/automation/track`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+      if(res.ok) break;
+    }catch(_){ }
+  }
+}
+
 async function getUserSummary(userId){
-  if(!userId) return { name:"User", photo:"", username:"" };
+  if(!userId) return { name:"Member", photo:"", username:"" };
   if(userCache.has(userId)) return userCache.get(userId);
-  const { data } = await supa
-    .from("users")
-    .select("username,full_name,photo")
-    .eq("user_id", userId)
-    .maybeSingle();
+  let data = null;
+  try{
+    const result = await supa
+      .from("users")
+      .select("username,full_name,photo")
+      .eq("user_id", userId)
+      .maybeSingle();
+    data = result?.data || null;
+  }catch(_){
+    data = null;
+  }
+  let backend = null;
+  if(!data?.full_name && !data?.username){
+    backend = await fetchBackendSummary(userId);
+  }
+  const rawUsername = data?.username || backend?.username || "";
+  const safeUsername = looksLikeRawUserId(rawUsername) ? "" : String(rawUsername || "");
+  const safeName = String(
+    data?.full_name ||
+    backend?.display_name ||
+    safeUsername ||
+    ""
+  ).trim();
   const summary = {
-    name: data?.full_name || data?.username || "User",
-    photo: data?.photo || "",
-    username: data?.username || ""
+    name: safeName || fallbackNameFromUserId(userId),
+    photo: data?.photo || backend?.photo || "",
+    username: safeUsername
   };
   userCache.set(userId, summary);
   return summary;
@@ -2654,6 +2755,11 @@ async function sendMsg(){
   }
 
   finalizeOptimisticMessage(pendingEl, data);
+  trackAutomationStep("chat", {
+    receiver_id: otherUid,
+    has_media: !!mediaUrl,
+    media_type: mediaType || "text"
+  }).catch(()=>{});
   scrollToBottom(true);
 }
 

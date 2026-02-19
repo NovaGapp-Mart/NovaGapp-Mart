@@ -253,6 +253,71 @@
       return { email, username, displayName, photo };
     }
 
+    function buildAutomationApiBases(){
+      const bases = [];
+      const push = (value) => {
+        const clean = cleanText(value).replace(/\/+$/g, "");
+        if(!clean) return;
+        if(!/^https?:\/\//i.test(clean)) return;
+        if(!bases.includes(clean)) bases.push(clean);
+      };
+      try{
+        push(window.CONTEST_API_BASE);
+        push(window.API_BASE);
+        push(localStorage.getItem("contest_api_base"));
+        push(localStorage.getItem("api_base"));
+        push(sessionStorage.getItem("contest_api_base"));
+        push(sessionStorage.getItem("api_base"));
+      }catch(_){ }
+      if(/^https?:\/\//i.test(location.origin || "")){
+        push(location.origin);
+      }
+      push("https://novagapp-mart.onrender.com");
+      return bases;
+    }
+
+    async function postToAutomationApi(path, body){
+      const payload = body && typeof body === "object" ? body : {};
+      const endpoint = String(path || "").trim();
+      if(!endpoint) return false;
+      const localFirst = [""].concat(buildAutomationApiBases());
+      for(const base of localFirst){
+        const url = base
+          ? `${base}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`
+          : endpoint;
+        try{
+          const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type":"application/json" },
+            body: JSON.stringify(payload),
+            credentials: "omit"
+          });
+          if(res.ok) return true;
+        }catch(_){ }
+      }
+      return false;
+    }
+
+    async function syncIdentityToBackend(user, profileLike){
+      const userId = cleanText(user?.id || profileLike?.user_id || "");
+      if(!userId) return false;
+      const defaults = deriveProfileDefaults(user || {});
+      const payload = {
+        user_id: userId,
+        email: cleanText(user?.email || profileLike?.email || defaults.email || ""),
+        username: cleanText(profileLike?.username || defaults.username || ""),
+        full_name: cleanText(profileLike?.full_name || defaults.displayName || ""),
+        display_name: cleanText(profileLike?.full_name || defaults.displayName || ""),
+        photo: cleanText(profileLike?.photo || defaults.photo || "")
+      };
+      return postToAutomationApi("/api/account/sync", payload);
+    }
+
+    window.NOVA.reportMediaUpload = async function(payload){
+      const data = payload && typeof payload === "object" ? payload : {};
+      return postToAutomationApi("/api/media/events/upload", data);
+    };
+
     async function readOwnProfileRow(userId){
       const plans = [
         "user_id,username,full_name,photo,email",
@@ -375,6 +440,13 @@
           (nextEmail && nextEmail !== currentEmail);
 
         if(!shouldWrite){
+          syncIdentityToBackend(user, current || {
+            user_id: userId,
+            username: nextUsername,
+            full_name: nextFullName,
+            photo: nextPhoto,
+            email: nextEmail
+          }).catch(()=>{});
           profileSyncDone.add(userId);
           return current;
         }
@@ -394,6 +466,7 @@
           throw upserted.error;
         }
 
+        syncIdentityToBackend(user, upserted.data || payload).catch(()=>{});
         profileSyncDone.add(userId);
         return upserted.data || payload;
       })();
@@ -589,7 +662,28 @@
     });
     if(error) throw error;
     const { data } = supa.storage.from(bucket).getPublicUrl(path);
-    return data.publicUrl;
+    const publicUrl = data.publicUrl;
+    try{
+      let uploaderId = cleanText(String(path || "").split("/")[0] || "");
+      if(!uploaderId){
+        const { data: authData } = await supa.auth.getUser();
+        uploaderId = cleanText(authData?.user?.id || "");
+      }
+      if(uploaderId && typeof window.NOVA.reportMediaUpload === "function"){
+        window.NOVA.reportMediaUpload({
+          user_id: uploaderId,
+          type: "bucket_upload",
+          bucket: cleanText(bucket),
+          path: cleanText(path),
+          url: cleanText(publicUrl),
+          file_name: cleanText(file?.name || ""),
+          mime: cleanText(file?.type || ""),
+          size: Number(file?.size || 0),
+          source: "social_upload"
+        }).catch(()=>{});
+      }
+    }catch(_){ }
+    return publicUrl;
   };
 
   window.NOVA.askMeta = async function(){

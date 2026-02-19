@@ -194,6 +194,7 @@ body{
   <button class="tab-btn active" data-tab="reels">Reels</button>
   <button class="tab-btn" data-tab="account">Sellers &amp; Buyers</button>
   <button class="tab-btn" data-tab="profile">Profile</button>
+  <button class="tab-btn" data-tab="users">Users</button>
 </div>
 
 <!-- ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ‚Â¤ RESULTS -->
@@ -219,265 +220,308 @@ body{
 </div>
 
 <script>
-/* DOM */
 const searchInput = document.getElementById("searchInput");
 const list = document.getElementById("list");
 const tabs = document.getElementById("tabs");
 let activeTab = "reels";
 let supa = window.NOVA && window.NOVA.supa;
 
-/* ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â LOGIN CHECK */
-(async function(){
+function escapeHtml(text){
+  return String(text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function safeDisplayName(user){
+  const direct = String(user?.display_name || user?.full_name || user?.username || "").trim();
+  if(direct) return direct;
+  const email = String(user?.email || "").trim().toLowerCase();
+  const local = String((email.split("@")[0] || "")).replace(/[._-]+/g, " ").trim();
+  if(local) return local;
+  return "Member";
+}
+
+function tokenized(text){
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9@._ -]/g, " ")
+    .split(/[\s@._-]+/)
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+function scoreUser(user, tokens){
+  if(!tokens.length) return 1;
+  const hay = [
+    safeDisplayName(user),
+    user?.username || "",
+    user?.email || ""
+  ].join(" ").toLowerCase();
+  let score = 0;
+  tokens.forEach((token, idx) => {
+    if(!token) return;
+    if(hay.includes(token)) score += 100 - idx;
+    if(hay.startsWith(token)) score += 120 - idx;
+  });
+  return score;
+}
+
+function buildApiBases(){
+  const out = [];
+  const push = (raw) => {
+    const value = String(raw || "").trim().replace(/\/+$/g, "");
+    if(!value) return;
+    if(!/^https?:\/\//i.test(value)) return;
+    if(!out.includes(value)) out.push(value);
+  };
+  try{
+    push(window.CONTEST_API_BASE);
+    push(window.API_BASE);
+    push(localStorage.getItem("contest_api_base"));
+    push(localStorage.getItem("api_base"));
+    push(sessionStorage.getItem("contest_api_base"));
+    push(sessionStorage.getItem("api_base"));
+  }catch(_){ }
+  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+  push("https://novagapp-mart.onrender.com");
+  return out;
+}
+
+async function trackAutomationStep(step, meta){
   if(!supa) return;
+  try{
+    const { data } = await supa.auth.getSession();
+    const userId = data?.session?.user?.id || "";
+    if(!userId) return;
+    const payload = {
+      user_id: userId,
+      step: String(step || "").trim().toLowerCase(),
+      meta: meta && typeof meta === "object" ? meta : {}
+    };
+    const bases = [""].concat(buildApiBases());
+    for(const base of bases){
+      try{
+        const res = await fetch(`${base}/api/automation/track`, {
+          method: "POST",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify(payload)
+        });
+        if(res.ok) break;
+      }catch(_){ }
+    }
+  }catch(_){ }
+}
+
+async function ensureSession(){
+  if(!supa) supa = window.NOVA && window.NOVA.supa;
+  if(!supa){
+    alert("Please refresh and try again.");
+    throw new Error("supabase_unavailable");
+  }
   const { data } = await supa.auth.getSession();
   if(!data.session){
     location.href = "login.html";
+    throw new Error("login_required");
   }
-})();
+  return data.session.user;
+}
 
-/* ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â SEARCH FUNCTION (SUPABASE ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ INSTAGRAM TYPE) */
-async function searchUsers(){
-  const q = searchInput.value.trim();
-  list.innerHTML = "";
-
-  if(!supa){
-    supa = window.NOVA && window.NOVA.supa;
+async function fetchUsersFromApi(q){
+  const search = String(q || "").trim();
+  const localFirst = [""].concat(buildApiBases());
+  for(const base of localFirst){
+    const prefix = base ? base : "";
+    const url = `${prefix}/api/users/discover?q=${encodeURIComponent(search)}&limit=120`;
+    try{
+      const res = await fetch(url, { cache:"no-store" });
+      if(!res.ok) continue;
+      const payload = await res.json().catch(() => null);
+      if(payload?.ok && Array.isArray(payload.users)){
+        return payload.users;
+      }
+    }catch(_){ }
   }
-  if(!supa){
-    alert("Please refresh and try again.");
-    return;
-  }
+  return [];
+}
 
-  if(!q){
-    alert("Type username first");
-    return;
+async function fetchUsersFallback(q){
+  if(!supa) return [];
+  const query = String(q || "").trim();
+  const buildRequest = (withExtendedColumns) => {
+    let request = supa
+      .from("users")
+      .select(withExtendedColumns
+        ? "user_id,username,full_name,display_name,photo,email"
+        : "user_id,username,full_name,photo,email")
+      .limit(180);
+    if(query){
+      const clean = query.replace(/[%*,()]/g, "").trim();
+      if(clean){
+        request = request.or(withExtendedColumns
+          ? `username.ilike.%${clean}%,full_name.ilike.%${clean}%,display_name.ilike.%${clean}%,email.ilike.%${clean}%`
+          : `username.ilike.%${clean}%,full_name.ilike.%${clean}%,email.ilike.%${clean}%`);
+      }
+    }
+    return request;
+  };
+  let { data, error } = await buildRequest(true);
+  if(error){
+    const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+    if(text.includes("column") && text.includes("does not exist")){
+      ({ data, error } = await buildRequest(false));
+    }
   }
+  if(error){
+    console.error("users fallback error", error);
+    return [];
+  }
+  return Array.isArray(data) ? data : [];
+}
 
-  const reelsReq = supa
+async function fetchUsers(q){
+  const query = String(q || "").trim();
+  const tokens = tokenized(query);
+  let users = await fetchUsersFromApi(query);
+  if(!users.length){
+    users = await fetchUsersFallback(query);
+  }
+  const mapped = (users || [])
+    .map(user => ({
+      user_id: user.user_id || "",
+      display_name: safeDisplayName(user),
+      username: String(user.username || "").trim(),
+      photo: String(user.photo || "").trim(),
+      email: String(user.email || "").trim().toLowerCase()
+    }))
+    .filter(user => user.user_id)
+    .map(user => ({ ...user, score: scoreUser(user, tokens) }))
+    .filter(user => tokens.length ? user.score > 0 : true)
+    .sort((a, b) => b.score - a.score);
+  return mapped;
+}
+
+async function fetchReels(q){
+  if(!supa) return [];
+  const query = String(q || "").trim();
+  let request = supa
     .from("reels")
     .select("id,video_url,title,description,user_id")
-    .or(`title.ilike.%${q}%,description.ilike.%${q}%`)
     .limit(12);
-
-  const usersReq = supa
-    .from("users")
-    .select("user_id, username, full_name, photo")
-    .or(`username.ilike.%${q}%,full_name.ilike.%${q}%`)
-    .order("username", { ascending:true })
-    .limit(50);
-
-  const [{ data: reels, error: reelsErr }, { data: users, error: usersErr }] =
-    await Promise.all([reelsReq, usersReq]);
-
-  if(reelsErr || usersErr){
-    alert("Search error: " + (reelsErr?.message || usersErr?.message));
-    return;
+  if(query){
+    const clean = query.replace(/[%*,()]/g, "").trim();
+    if(clean){
+      request = request.or(`title.ilike.%${clean}%,description.ilike.%${clean}%`);
+    }
   }
-
-  const sellerBadgeSet = new Set();
-  const productOwnerSet = new Set();
-  const userIds = (users || []).map(u => u.user_id).filter(Boolean);
-  if(userIds.length){
-    const { data: sellers } = await supa
-      .from("sellers")
-      .select("user_id,is_paid,show_badge")
-      .in("user_id", userIds);
-    (sellers || []).forEach(s => {
-      if(s?.is_paid && s?.show_badge) sellerBadgeSet.add(s.user_id);
-    });
-
-    const { data: productOwners } = await supa
-      .from("products")
-      .select("owner_id")
-      .in("owner_id", userIds)
-      .limit(300);
-    (productOwners || []).forEach(p => {
-      if(p?.owner_id) productOwnerSet.add(p.owner_id);
-    });
-    productOwnerSet.forEach(id => {
-      if(!sellerBadgeSet.has(id)) sellerBadgeSet.add(id);
-    });
+  const { data, error } = await request;
+  if(error){
+    console.error("reels fetch error", error);
+    return [];
   }
+  return Array.isArray(data) ? data : [];
+}
 
-  const sectionReels = document.createElement("div");
-  sectionReels.className = "section";
-  sectionReels.dataset.section = "reels";
-  sectionReels.innerHTML = `<div class="section-title">REELS</div>`;
-  const reelsWrap = document.createElement("div");
-  if(!reels || reels.length === 0){
-    reelsWrap.innerHTML = "<p style='padding:0 12px 12px;color:#777'>No reels found</p>";
+function renderReelsSection(reels){
+  const section = document.createElement("div");
+  section.className = "section";
+  section.dataset.section = "reels";
+  section.innerHTML = `<div class="section-title">REELS</div>`;
+  const wrap = document.createElement("div");
+  if(!reels.length){
+    wrap.innerHTML = "<p style='padding:0 12px 12px;color:#777'>No reels found</p>";
   }else{
-    reels.forEach(r=>{
+    reels.forEach(r => {
       const row = document.createElement("div");
       row.className = "reel-item";
       row.innerHTML = `
-        <video src="${r.video_url}" muted></video>
+        <video src="${escapeHtml(r.video_url || "")}" muted></video>
         <div class="meta">
-          <div><b>${r.title || "Reel"}</b></div>
-          <small>${r.description || ""}</small>
+          <div><b>${escapeHtml(r.title || "Reel")}</b></div>
+          <small>${escapeHtml(r.description || "")}</small>
         </div>
       `;
       row.onclick = () => location.href = "reel.html";
-      reelsWrap.appendChild(row);
+      wrap.appendChild(row);
     });
   }
-  sectionReels.appendChild(reelsWrap);
-  list.appendChild(sectionReels);
-
-  const sectionAccount = document.createElement("div");
-  sectionAccount.className = "section";
-  sectionAccount.dataset.section = "account";
-  sectionAccount.innerHTML = `<div class="section-title">SELLERS &amp; BUYERS</div>`;
-  const accountWrap = document.createElement("div");
-  if(!users || users.length === 0){
-    accountWrap.innerHTML = "<p style='padding:0 12px 12px;color:#777'>No accounts found</p>";
-  }else{
-    users.forEach(u=>{
-      const d = document.createElement("div");
-      d.className = "user";
-      const accountName = u.username || u.full_name || "User";
-      const accountSub = u.full_name && u.full_name !== accountName ? u.full_name : "";
-      const sellerBadge = sellerBadgeSet.has(u.user_id)
-        ? `<span class="seller-star">&#11088; Seller</span>`
-        : "";
-      d.innerHTML = `
-        <img src="${u.photo || 'Images/user.png'}">
-        <div class="info">
-          <div class="name-row">
-            <b>${accountName}</b>
-            ${sellerBadge}
-          </div>
-          <span>${accountSub}</span>
-        </div>
-      `;
-      d.onclick = () => location.href = `account.html?uid=${u.user_id}`;
-      accountWrap.appendChild(d);
-    });
-  }
-  sectionAccount.appendChild(accountWrap);
-  list.appendChild(sectionAccount);
-
-  const sectionProfile = document.createElement("div");
-  sectionProfile.className = "section";
-  sectionProfile.dataset.section = "profile";
-  sectionProfile.innerHTML = `<div class="section-title">PROFILE</div>`;
-  const profileWrap = document.createElement("div");
-  if(!users || users.length === 0){
-    profileWrap.innerHTML = "<p style='padding:0 12px 12px;color:#777'>No profiles found</p>";
-  }else{
-    const { data: sessionData } = await supa.auth.getSession();
-    const currentUserId = sessionData?.session?.user?.id || null;
-    const followSet = new Set();
-    const ids = users.map(u=>u.user_id).filter(Boolean);
-    const sellerSet = new Set();
-    const productsByOwner = {};
-
-    if(ids.length){
-      if(currentUserId){
-        const { data: follows } = await supa
-          .from("follows")
-          .select("following_id")
-          .eq("follower_id", currentUserId)
-          .in("following_id", ids);
-        (follows || []).forEach(f=> followSet.add(f.following_id));
-      }
-
-      const { data: sellers } = await supa
-        .from("sellers")
-        .select("user_id,is_paid,show_badge")
-        .in("user_id", ids);
-      (sellers || []).forEach(s => {
-        if(s?.is_paid && s?.show_badge) sellerSet.add(s.user_id);
-      });
-
-      const { data: products } = await supa
-        .from("products")
-        .select("owner_id,name,created_at")
-        .in("owner_id", ids)
-        .order("created_at", { ascending:false })
-        .limit(200);
-      (products || []).forEach(p => {
-        if(!p?.owner_id || !p?.name) return;
-        if(!productsByOwner[p.owner_id]) productsByOwner[p.owner_id] = [];
-        if(productsByOwner[p.owner_id].length < 3){
-          productsByOwner[p.owner_id].push(p.name);
-        }
-      });
-    }
-
-    users.forEach(u=>{
-      const d = document.createElement("div");
-      d.className = "user";
-      const name = u.full_name || u.username || "User";
-      const productNames = productsByOwner[u.user_id] || [];
-      const productText = productNames.length ? productNames.join(", ") : "No products listed";
-      const badgeHtml = sellerSet.has(u.user_id) ? `<span class="seller-badge">Seller</span>` : "";
-      d.innerHTML = `
-        <img src="${u.photo || 'Images/user.png'}">
-        <div class="info">
-          <div class="name-row">
-            <b>${name}</b>
-            ${badgeHtml}
-          </div>
-          <div class="product-list">${productText}</div>
-          <div class="profile-actions">
-            <button class="action-btn follow follow-btn">Follow</button>
-            <button class="action-btn message message-btn">Message</button>
-          </div>
-        </div>
-      `;
-      d.onclick = () => location.href = `m-account.html?uid=${u.user_id}`;
-
-      const followBtn = d.querySelector(".follow-btn");
-      const msgBtn = d.querySelector(".message-btn");
-
-      if(followSet.has(u.user_id)){
-        followBtn.textContent = "Followed";
-        followBtn.classList.add("followed");
-      }
-
-      followBtn.onclick = async e => {
-        e.stopPropagation();
-        if(!currentUserId){
-          location.href = "login.html";
-          return;
-        }
-        followBtn.disabled = true;
-        if(followSet.has(u.user_id)){
-          await supa
-            .from("follows")
-            .delete()
-            .eq("follower_id", currentUserId)
-            .eq("following_id", u.user_id);
-          followSet.delete(u.user_id);
-          followBtn.textContent = "Follow";
-          followBtn.classList.remove("followed");
-        }else{
-          await supa
-            .from("follows")
-            .insert({ follower_id: currentUserId, following_id: u.user_id });
-          followSet.add(u.user_id);
-          followBtn.textContent = "Followed";
-          followBtn.classList.add("followed");
-        }
-        followBtn.disabled = false;
-      };
-
-      msgBtn.onclick = e => {
-        e.stopPropagation();
-        location.href = `chat.html?uid=${u.user_id}`;
-      };
-
-      profileWrap.appendChild(d);
-    });
-  }
-  sectionProfile.appendChild(profileWrap);
-  list.appendChild(sectionProfile);
-  setActiveTab(activeTab);
+  section.appendChild(wrap);
+  return section;
 }
 
-/* ENTER KEY */
-searchInput.addEventListener("keydown", e=>{
+function renderUserSection(users, tabKey, title){
+  const section = document.createElement("div");
+  section.className = "section";
+  section.dataset.section = tabKey;
+  section.innerHTML = `<div class="section-title">${escapeHtml(title)}</div>`;
+  const wrap = document.createElement("div");
+  if(!users.length){
+    wrap.innerHTML = "<p style='padding:0 12px 12px;color:#777'>No users found</p>";
+  }else{
+    users.forEach(u => {
+      const row = document.createElement("div");
+      row.className = "user";
+      const subText = u.username ? `@${u.username}` : "";
+      row.innerHTML = `
+        <img src="${escapeHtml(u.photo || "Images/user.png")}">
+        <div class="info">
+          <div class="name-row"><b>${escapeHtml(u.display_name || "Member")}</b></div>
+          <span>${escapeHtml(subText)}</span>
+          <div class="profile-actions">
+            <button class="action-btn message js-message">Message</button>
+            <button class="action-btn js-view">View profile</button>
+          </div>
+        </div>
+      `;
+      row.onclick = () => location.href = `m-account.html?uid=${encodeURIComponent(u.user_id)}`;
+      const msgBtn = row.querySelector(".js-message");
+      const viewBtn = row.querySelector(".js-view");
+      msgBtn.onclick = e => {
+        e.stopPropagation();
+        location.href = `chat.html?uid=${encodeURIComponent(u.user_id)}`;
+      };
+      viewBtn.onclick = e => {
+        e.stopPropagation();
+        location.href = `m-account.html?uid=${encodeURIComponent(u.user_id)}`;
+      };
+      wrap.appendChild(row);
+    });
+  }
+  section.appendChild(wrap);
+  return section;
+}
+
+async function searchUsers(){
+  const query = searchInput.value.trim();
+  list.innerHTML = "<p style='padding:12px;color:#777'>Loading...</p>";
+  try{
+    await ensureSession();
+    const [users, reels] = await Promise.all([
+      fetchUsers(query),
+      fetchReels(query)
+    ]);
+    list.innerHTML = "";
+    list.appendChild(renderReelsSection(reels));
+    list.appendChild(renderUserSection(users, "account", "SELLERS & BUYERS"));
+    list.appendChild(renderUserSection(users, "profile", "PROFILE"));
+    list.appendChild(renderUserSection(users, "users", "USERS"));
+    setActiveTab(activeTab);
+    trackAutomationStep("discovery", {
+      query_length: query.length,
+      user_results: users.length,
+      reel_results: reels.length
+    }).catch(()=>{});
+  }catch(err){
+    if(String(err?.message || "").toLowerCase() === "login_required"){
+      return;
+    }
+    list.innerHTML = "<p style='padding:12px;color:#c00'>Unable to load search results</p>";
+  }
+}
+
+searchInput.addEventListener("keydown", e => {
   if(e.key === "Enter") searchUsers();
 });
 
@@ -498,6 +542,8 @@ function setActiveTab(tabKey){
 }
 
 function go(p){ location.href = p; }
+
+searchUsers();
 </script>
 
 </body>

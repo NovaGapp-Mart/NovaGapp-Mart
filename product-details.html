@@ -938,6 +938,7 @@ function normalizePlanValue(planValue){
   if(
     raw === ENTERPRISE_PLAN ||
     raw === "ENTERPRISE_PLAN" ||
+    raw === "BUSINESS" ||
     raw.includes("ENTERPRISE") ||
     digits === "4000"
   ){
@@ -946,6 +947,8 @@ function normalizePlanValue(planValue){
   if(
     raw === PRO_PLAN ||
     raw === "PRO_PLAN" ||
+    raw === "PLUS" ||
+    raw === "CREATOR" ||
     raw.includes("PRO") ||
     digits === "40"
   ){
@@ -972,21 +975,34 @@ async function ensureActivePlan(){
     if(user){
       CURRENT_USER_ID = CURRENT_USER_ID || user.id;
       CURRENT_USER_EMAIL = CURRENT_USER_EMAIL || user.email;
-      const { data: sub } = await supa
-        .from("subscription")
-        .select("plan")
-        .eq("user_id", user.id)
-        .order("created_at",{ascending:false})
-        .limit(1)
-        .maybeSingle();
-      if(sub?.plan){
-        plan = normalizePlanValue(sub.plan);
+      try{
+        const subRes = await fetch(`${TRYON_API_BASE}/api/subscription/status?user_id=${encodeURIComponent(user.id)}`, {
+          cache: "no-store"
+        });
+        const subPayload = await subRes.json().catch(()=>null);
+        if(subRes.ok && subPayload?.ok && subPayload?.subscription?.plan){
+          plan = normalizePlanValue(subPayload.subscription.plan);
+        }
+      }catch(_){
+        const { data: sub } = await supa
+          .from("subscription")
+          .select("plan")
+          .eq("user_id", user.id)
+          .order("created_at",{ascending:false})
+          .limit(1)
+          .maybeSingle();
+        if(sub?.plan){
+          plan = normalizePlanValue(sub.plan);
+        }
       }
     }
   }catch(_){}
 
   ACTIVE_PLAN = plan;
   PLAN_READY = true;
+  try{
+    localStorage.setItem("userPlan", getPlanCode(plan));
+  }catch(_){ }
   return ACTIVE_PLAN;
 }
 
@@ -1062,6 +1078,22 @@ function getBackendPlanValue(plan){
   return getPlanCode(plan);
 }
 
+async function trackAutomationStep(step, meta){
+  const userId = CURRENT_USER_ID || "";
+  if(!userId || userId === "guest") return;
+  try{
+    await fetch(`${TRYON_API_BASE}/api/automation/track`, {
+      method: "POST",
+      headers: { "Content-Type":"application/json" },
+      body: JSON.stringify({
+        user_id: userId,
+        step: String(step || "").trim().toLowerCase(),
+        meta: meta && typeof meta === "object" ? meta : {}
+      })
+    });
+  }catch(_){ }
+}
+
 function showTryOnError(message){
   AI_CANCEL_REQUIRED = true;
   aiScreen.style.display = "flex";
@@ -1101,6 +1133,21 @@ function showTryOnQueuedMessage(data){
   `;
 }
 
+function showTryOnQueueProgress(data){
+  const lane = String(data?.lane || "standard").toLowerCase() === "priority"
+    ? "Dedicated priority lane"
+    : "Standard processing lane";
+  const position = Number(data?.position || 0);
+  AI_CANCEL_REQUIRED = false;
+  aiScreen.style.display = "flex";
+  aiContent.innerHTML = `
+    <div class="loader"></div>
+    <h3>Your try-on request is queued</h3>
+    <p style="font-size:13px;color:#555">Lane: ${lane}</p>
+    <p style="font-size:13px;color:#777">${position > 0 ? `Queue position: ${position}` : "Processing started..."}</p>
+  `;
+}
+
 function showTryOnLoading(){
   AI_CANCEL_REQUIRED = false;
   aiScreen.style.display = "flex";
@@ -1127,6 +1174,49 @@ function showTryOnResult(imageUrl, downloadAllowed){
     img.style.pointerEvents = "none";
   }
   setTimeout(()=>{ aiScreen.style.display="none"; }, 12000);
+}
+
+async function pollTryOnJob(jobId, fallbackData){
+  const start = Date.now();
+  const timeoutMs = 90 * 1000;
+  const pollEveryMs = 1500;
+  while(Date.now() - start < timeoutMs){
+    await new Promise(resolve => setTimeout(resolve, pollEveryMs));
+    const statusRes = await fetch(`${TRYON_API_BASE}/api/tryon/jobs/${encodeURIComponent(jobId)}`, {
+      cache: "no-store"
+    });
+    const statusData = await statusRes.json().catch(() => null);
+    if(!statusRes.ok || !statusData?.ok){
+      continue;
+    }
+    if(statusData.status === "queued" || statusData.status === "processing"){
+      showTryOnQueueProgress(statusData);
+      continue;
+    }
+    if(statusData.status === "failed"){
+      throw new Error(statusData?.error || "tryon_job_failed");
+    }
+    if(statusData.status === "completed"){
+      const result = statusData.result || {};
+      if(result.status === "success" && result.image){
+        return result;
+      }
+      if(result.status === "manual_processing"){
+        return result;
+      }
+      if(result.image){
+        return { status:"success", image: result.image, download_allowed: result.download_allowed };
+      }
+      return fallbackData || result;
+    }
+  }
+  return fallbackData || {
+    status: "manual_processing",
+    waiting_message: "Just wait for moment your images will be ready.",
+    dm_delivery_message: "Technical issues are active right now, so your image cannot be generated at this moment. Your image will be delivered automatically in DM within 24 hours.",
+    pricing_info: "Per image price is $1, but due to this issue your image is free.",
+    free_delivery: true
+  };
 }
 
 async function runTryOn(file){
@@ -1158,6 +1248,10 @@ async function runTryOn(file){
     const username = CURRENT_USERNAME || localStorage.getItem("username") || "guest";
     const userEmail = CURRENT_USER_EMAIL || "";
     const userLanguage = window.USER_LANG || navigator.language || "en";
+    trackAutomationStep("trust", {
+      product_id: String(productId || ""),
+      plan: planCode
+    }).catch(()=>{});
 
     const form = new FormData();
     form.append("userImage", file, "user.jpg");
@@ -1189,14 +1283,45 @@ async function runTryOn(file){
       return;
     }
 
+    if(data?.status === "blocked"){
+      showTryOnError("Too many requests detected. Please wait and try again.");
+      return;
+    }
+
+    if(data?.status === "queued" && data?.job_id){
+      showTryOnQueueProgress(data);
+      const jobResult = await pollTryOnJob(data.job_id, data);
+      if(jobResult?.status === "manual_processing"){
+        incrementTryOnCounter(userId, plan);
+        trackAutomationStep("ai_tryon", { mode:"manual", plan: planCode }).catch(()=>{});
+        showTryOnQueuedMessage(jobResult);
+        return;
+      }
+      if(jobResult?.status === "success" && jobResult?.image){
+        incrementTryOnCounter(userId, plan);
+        trackAutomationStep("ai_tryon", { mode:"success", plan: planCode }).catch(()=>{});
+        showTryOnResult(jobResult.image, jobResult.download_allowed);
+        return;
+      }
+      if(jobResult?.image){
+        incrementTryOnCounter(userId, plan);
+        showTryOnResult(jobResult.image, jobResult.download_allowed);
+        return;
+      }
+      showTryOnQueuedMessage(jobResult);
+      return;
+    }
+
     if(data?.status === "manual_processing"){
       incrementTryOnCounter(userId, plan);
+      trackAutomationStep("ai_tryon", { mode:"manual", plan: planCode }).catch(()=>{});
       showTryOnQueuedMessage(data);
       return;
     }
 
     if(data?.status === "success" && data?.image){
       incrementTryOnCounter(userId, plan);
+      trackAutomationStep("ai_tryon", { mode:"success", plan: planCode }).catch(()=>{});
       showTryOnResult(data.image, data.download_allowed);
       return;
     }
@@ -1205,6 +1330,7 @@ async function runTryOn(file){
       throw new Error(data?.error || "Try-on failed.");
     }
     incrementTryOnCounter(userId, plan);
+    trackAutomationStep("ai_tryon", { mode:"success", plan: planCode }).catch(()=>{});
     showTryOnResult(data.image, data.download_allowed);
   }catch(err){
     showTryOnQueuedMessage({
@@ -1257,5 +1383,3 @@ if(aiScreen){
 
 </body>
 </html>
-
-

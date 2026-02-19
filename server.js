@@ -50,17 +50,39 @@ const PORT = process.env.PORT || 3000;
 const UPLOADS_DIR = path.join(__dirname, "uploads");
 const MANUAL_DIR = path.join(UPLOADS_DIR, "manual-requests");
 const MANUAL_JSON_PATH = path.join(MANUAL_DIR, "requests.json");
+const SYSTEM_DIR = path.join(UPLOADS_DIR, "system");
+const SYSTEM_STATE_PATH = path.join(SYSTEM_DIR, "state.json");
 const FREE_PLAN_DAILY_LIMIT = 2;
 const PRO_PLAN_DAILY_LIMIT = 20;
 const TRYON_PRICE_PER_IMAGE_USD = 1;
+const PLAN_40_USD = 40;
+const PLAN_4000_USD = 4000;
+const PLAN_BILLING_DAYS = 30;
+const PLAN_4000_SEAT_LIMIT = 5;
+const DEFAULT_TRUST_FLOW = ["discovery", "chat", "trust", "ai_tryon", "checkout"];
 const ADMIN_DM_EMAIL = String(process.env.TRYON_ADMIN_EMAIL || "prashikbhalerao0208@gmail.com").trim();
 const ADMIN_DM_WEBHOOK_URL = String(process.env.TRYON_ADMIN_DM_WEBHOOK || "").trim();
+const ADMIN_AUTOMATION_EMAIL = String(process.env.ADMIN_AUTOMATION_EMAIL || "novagapp2026@gmail.com").trim();
 const RESEND_API_KEY = String(process.env.RESEND_API_KEY || "").trim();
 const RESEND_FROM_EMAIL = String(process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev").trim();
+const RAZORPAY_WEBHOOK_SECRET = String(
+  process.env.RAZORPAY_WEBHOOK_SECRET ||
+  process.env.WEBHOOK_SECRET ||
+  ""
+).trim();
 
 const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || "").trim();
 
-app.use(express.json({ limit: "15mb" }));
+app.use(express.json({
+  limit: "15mb",
+  verify: (req, _res, buf) => {
+    try{
+      req.rawBody = Buffer.from(buf || []);
+    }catch(_){
+      req.rawBody = Buffer.alloc(0);
+    }
+  }
+}));
 app.use(cors());
 app.use("/uploads", express.static(UPLOADS_DIR));
 app.use(express.static(__dirname, {
@@ -188,6 +210,92 @@ async function fetchPublicLongVideos(params){
   }
   const rows = await response.json().catch(() => []);
   return Array.isArray(rows) ? rows : [];
+}
+
+function isAutomationSupabaseConfigured(){
+  return Boolean(getSocialSupabaseBase() && getSocialSupabaseServiceRoleKey());
+}
+
+async function automationSupabaseUpsert(tableName, rows, onConflict){
+  if(!isAutomationSupabaseConfigured()) return;
+  const table = String(tableName || "").trim();
+  const conflict = String(onConflict || "").trim();
+  const list = Array.isArray(rows) ? rows.filter(Boolean) : [];
+  if(!table || !conflict || !list.length) return;
+
+  const base = getSocialSupabaseBase();
+  const key = getSocialSupabaseServiceRoleKey();
+  const endpoint = `${base}/rest/v1/${table}?on_conflict=${encodeURIComponent(conflict)}`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal"
+    },
+    body: JSON.stringify(list)
+  });
+  if(!response.ok){
+    const body = await response.text().catch(() => "");
+    throw new Error(`automation_supabase_upsert_failed_${table}_${response.status}:${body.slice(0, 220)}`);
+  }
+}
+
+async function fetchRemoteSubscriptionState(userId){
+  const uid = sanitizeUserId(userId);
+  if(!uid || !isAutomationSupabaseConfigured()){
+    return null;
+  }
+  const base = getSocialSupabaseBase();
+  const key = getSocialSupabaseServiceRoleKey();
+  const endpoint = new URL("/rest/v1/subscription_state", base + "/");
+  endpoint.searchParams.set("select", "user_id,plan,status,expires_at,source,payment_id,order_id,amount_paise,currency,updated_at");
+  endpoint.searchParams.set("user_id", `eq.${uid}`);
+  endpoint.searchParams.set("limit", "1");
+  const response = await fetch(endpoint.toString(), {
+    method: "GET",
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`
+    }
+  });
+  if(!response.ok){
+    return null;
+  }
+  const rows = await response.json().catch(() => []);
+  if(!Array.isArray(rows) || !rows[0]){
+    return null;
+  }
+  return rows[0];
+}
+
+async function fetchRemoteWebhookEvent(eventId){
+  const id = String(eventId || "").trim().slice(0, 120);
+  if(!id || !isAutomationSupabaseConfigured()){
+    return null;
+  }
+  const base = getSocialSupabaseBase();
+  const key = getSocialSupabaseServiceRoleKey();
+  const endpoint = new URL("/rest/v1/subscription_webhook_events", base + "/");
+  endpoint.searchParams.set("select", "event_id,event_name,payment_id,order_id,created_at");
+  endpoint.searchParams.set("event_id", `eq.${id}`);
+  endpoint.searchParams.set("limit", "1");
+  const response = await fetch(endpoint.toString(), {
+    method: "GET",
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`
+    }
+  });
+  if(!response.ok){
+    return null;
+  }
+  const rows = await response.json().catch(() => []);
+  if(!Array.isArray(rows) || !rows[0]){
+    return null;
+  }
+  return rows[0];
 }
 
 function normalizeLongVideoPublishPayload(raw){
@@ -533,6 +641,775 @@ async function fetchImageBuffer(imageUrl){
     contentType,
     buffer: Buffer.from(await res.arrayBuffer())
   };
+}
+
+let systemStateQueue = Promise.resolve();
+
+function createDefaultSystemState(){
+  const nowIso = new Date().toISOString();
+  return {
+    version: 1,
+    created_at: nowIso,
+    updated_at: nowIso,
+    identities: {},
+    subscriptions: {
+      users: {},
+      payments: {},
+      webhooks: {},
+      transitions: []
+    },
+    premium: {
+      seats: {},
+      invites: {}
+    },
+    automation: {
+      funnel_events: [],
+      media_events: [],
+      notifications: [],
+      followups: [],
+      reports: {}
+    },
+    tryon: {
+      abuse: {},
+      lane_metrics: {
+        standard_queued: 0,
+        priority_queued: 0,
+        completed: 0,
+        failed: 0
+      }
+    }
+  };
+}
+
+function normalizeSystemState(input){
+  const state = input && typeof input === "object"
+    ? input
+    : createDefaultSystemState();
+
+  state.version = Math.max(1, Math.floor(safeNumber(state.version) || 1));
+  if(!state.created_at) state.created_at = new Date().toISOString();
+  if(!state.updated_at) state.updated_at = new Date().toISOString();
+
+  if(!state.identities || typeof state.identities !== "object"){
+    state.identities = {};
+  }
+  if(!state.subscriptions || typeof state.subscriptions !== "object"){
+    state.subscriptions = {};
+  }
+  if(!state.subscriptions.users || typeof state.subscriptions.users !== "object"){
+    state.subscriptions.users = {};
+  }
+  if(!state.subscriptions.payments || typeof state.subscriptions.payments !== "object"){
+    state.subscriptions.payments = {};
+  }
+  if(!state.subscriptions.webhooks || typeof state.subscriptions.webhooks !== "object"){
+    state.subscriptions.webhooks = {};
+  }
+  if(!Array.isArray(state.subscriptions.transitions)){
+    state.subscriptions.transitions = [];
+  }
+  if(!state.premium || typeof state.premium !== "object"){
+    state.premium = {};
+  }
+  if(!state.premium.seats || typeof state.premium.seats !== "object"){
+    state.premium.seats = {};
+  }
+  if(!state.premium.invites || typeof state.premium.invites !== "object"){
+    state.premium.invites = {};
+  }
+  if(!state.automation || typeof state.automation !== "object"){
+    state.automation = {};
+  }
+  if(!Array.isArray(state.automation.funnel_events)){
+    state.automation.funnel_events = [];
+  }
+  if(!Array.isArray(state.automation.media_events)){
+    state.automation.media_events = [];
+  }
+  if(!Array.isArray(state.automation.notifications)){
+    state.automation.notifications = [];
+  }
+  if(!Array.isArray(state.automation.followups)){
+    state.automation.followups = [];
+  }
+  if(!state.automation.reports || typeof state.automation.reports !== "object"){
+    state.automation.reports = {};
+  }
+  if(!state.tryon || typeof state.tryon !== "object"){
+    state.tryon = {};
+  }
+  if(!state.tryon.abuse || typeof state.tryon.abuse !== "object"){
+    state.tryon.abuse = {};
+  }
+  if(!state.tryon.lane_metrics || typeof state.tryon.lane_metrics !== "object"){
+    state.tryon.lane_metrics = {};
+  }
+  state.tryon.lane_metrics.standard_queued = safeNumber(state.tryon.lane_metrics.standard_queued);
+  state.tryon.lane_metrics.priority_queued = safeNumber(state.tryon.lane_metrics.priority_queued);
+  state.tryon.lane_metrics.completed = safeNumber(state.tryon.lane_metrics.completed);
+  state.tryon.lane_metrics.failed = safeNumber(state.tryon.lane_metrics.failed);
+
+  return state;
+}
+
+async function readSystemState(){
+  try{
+    const raw = await fs.readFile(SYSTEM_STATE_PATH, "utf8");
+    const parsed = raw ? JSON.parse(raw) : null;
+    return normalizeSystemState(parsed);
+  }catch(_){
+    return createDefaultSystemState();
+  }
+}
+
+async function writeSystemState(state){
+  await ensureDir(SYSTEM_DIR);
+  await fs.writeFile(SYSTEM_STATE_PATH, JSON.stringify(state, null, 2), "utf8");
+}
+
+async function mutateSystemState(mutator){
+  const run = systemStateQueue.then(async () => {
+    const state = await readSystemState();
+    const result = await mutator(state);
+    state.updated_at = new Date().toISOString();
+    await writeSystemState(state);
+    return result;
+  });
+  systemStateQueue = run.catch(() => {});
+  return run;
+}
+
+function pushBounded(list, item, max){
+  if(!Array.isArray(list)) return;
+  list.push(item);
+  const cap = Math.max(1, Math.floor(safeNumber(max) || 1000));
+  while(list.length > cap){
+    list.shift();
+  }
+}
+
+function titleCaseWords(text){
+  return String(text || "")
+    .split(/\s+/)
+    .map(part => {
+      const token = String(part || "").trim();
+      if(!token) return "";
+      return token.slice(0, 1).toUpperCase() + token.slice(1).toLowerCase();
+    })
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 64);
+}
+
+function tokenizeIdentityText(value){
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9@._ -]+/g, " ")
+    .split(/[\s@._-]+/)
+    .map(part => part.trim())
+    .filter(Boolean)
+    .slice(0, 40);
+}
+
+function deriveIdentityDefaults(input){
+  const userId = sanitizeUserId(input?.user_id);
+  const email = String(input?.email || "").trim().toLowerCase().slice(0, 180);
+  const rawName = sanitizeDisplayName(
+    input?.display_name ||
+    input?.full_name ||
+    input?.username ||
+    input?.user_name ||
+    ""
+  );
+  const emailLocal = String((email.split("@")[0] || "")).trim();
+  const emailLocalWords = emailLocal
+    .replace(/[._-]+/g, " ")
+    .replace(/\d+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const displaySeed = rawName || emailLocalWords || emailLocal || "Member";
+  const displayName = titleCaseWords(displaySeed) || "Member";
+  const userSeed = String(rawName || emailLocal || displayName || "member")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 24);
+  const username = userSeed || `member_${String(userId || "").replace(/[^a-z0-9]/gi, "").slice(0, 6) || "user"}`;
+  const photo = String(input?.photo || input?.avatar_url || "").trim().slice(0, 3000);
+  const searchTokens = Array.from(new Set([
+    ...tokenizeIdentityText(displayName),
+    ...tokenizeIdentityText(username),
+    ...tokenizeIdentityText(emailLocalWords),
+    ...tokenizeIdentityText(emailLocal),
+    ...tokenizeIdentityText(email)
+  ])).slice(0, 48);
+
+  return {
+    user_id: userId,
+    email,
+    email_local: emailLocal.slice(0, 120),
+    display_name: displayName,
+    username,
+    photo,
+    search_tokens: searchTokens,
+    updated_at: new Date().toISOString()
+  };
+}
+
+function safePublicNameFromIdentity(identity, userId){
+  const preferred = sanitizeDisplayName(
+    identity?.display_name ||
+    identity?.full_name ||
+    identity?.username ||
+    ""
+  );
+  if(preferred){
+    return preferred;
+  }
+  const shortId = String(userId || "")
+    .replace(/[^a-z0-9]/gi, "")
+    .slice(0, 6)
+    .toUpperCase();
+  return shortId ? `Member ${shortId}` : "Member";
+}
+
+function getPlanConfig(planCode){
+  const code = normalizePlanCode(planCode);
+  if(code === "4000"){
+    return {
+      code,
+      billing_days: PLAN_BILLING_DAYS,
+      monthly_price_usd: PLAN_4000_USD,
+      seat_limit: PLAN_4000_SEAT_LIMIT,
+      tryon_daily_limit: Infinity,
+      tryon_lane: "priority",
+      features: {
+        chat: true,
+        ai_tryon: true,
+        checkout: true,
+        analytics: true,
+        conversion_tracking: true,
+        smart_dm_assistant: true,
+        auto_followup: true,
+        monthly_report: true,
+        dedicated_processing_lane: true,
+        advanced_revenue_assistant: true,
+        behavioral_insights: true,
+        invite_only: true,
+        limited_seats: true
+      }
+    };
+  }
+  if(code === "40"){
+    return {
+      code,
+      billing_days: PLAN_BILLING_DAYS,
+      monthly_price_usd: PLAN_40_USD,
+      seat_limit: 1,
+      tryon_daily_limit: PRO_PLAN_DAILY_LIMIT,
+      tryon_lane: "standard",
+      features: {
+        chat: true,
+        ai_tryon: true,
+        checkout: true,
+        analytics: true,
+        conversion_tracking: true,
+        smart_dm_assistant: true,
+        auto_followup: true,
+        monthly_report: true
+      }
+    };
+  }
+  return {
+    code: "free",
+    billing_days: 0,
+    monthly_price_usd: 0,
+    seat_limit: 1,
+    tryon_daily_limit: FREE_PLAN_DAILY_LIMIT,
+    tryon_lane: "standard",
+    features: {
+      chat: true,
+      ai_tryon: true,
+      checkout: true
+    }
+  };
+}
+
+function getSubscriptionExpiryIso(planCode, startedAtIso){
+  const cfg = getPlanConfig(planCode);
+  if(!cfg.billing_days || cfg.billing_days <= 0){
+    return null;
+  }
+  const started = new Date(startedAtIso || Date.now());
+  const expires = new Date(started.getTime() + (cfg.billing_days * 24 * 60 * 60 * 1000));
+  return expires.toISOString();
+}
+
+function isIsoFuture(iso){
+  if(!iso) return false;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) && t > Date.now();
+}
+
+function normalizeSubscriptionRecord(userId, raw){
+  const nowIso = new Date().toISOString();
+  const normalizedUserId = sanitizeUserId(userId || raw?.user_id);
+  const plan = normalizePlanCode(raw?.plan);
+  const statusRaw = String(raw?.status || "").trim().toLowerCase();
+  let status = statusRaw || "free";
+  if(plan === "free" && status === "active"){
+    status = "free";
+  }
+  const startedAt = String(raw?.started_at || raw?.created_at || nowIso);
+  const expiresAt = raw?.expires_at ? String(raw.expires_at) : getSubscriptionExpiryIso(plan, startedAt);
+  if(plan !== "free" && status === "active" && expiresAt && !isIsoFuture(expiresAt)){
+    status = "expired";
+  }
+  if(plan === "free" && (status === "expired" || status === "downgraded")){
+    status = "free";
+  }
+  return {
+    user_id: normalizedUserId,
+    plan,
+    status,
+    started_at: startedAt,
+    expires_at: expiresAt,
+    source: String(raw?.source || "system").trim().slice(0, 40) || "system",
+    amount_paise: Math.max(0, Math.round(safeNumber(raw?.amount_paise))),
+    currency: sanitizeCurrencyCode(raw?.currency) || "INR",
+    last_payment_id: String(raw?.last_payment_id || raw?.payment_id || "").trim().slice(0, 120),
+    last_order_id: String(raw?.last_order_id || raw?.order_id || "").trim().slice(0, 120),
+    metadata: raw?.metadata && typeof raw.metadata === "object" ? raw.metadata : {},
+    created_at: String(raw?.created_at || nowIso),
+    updated_at: nowIso
+  };
+}
+
+function buildFreeSubscription(userId, reason){
+  const nowIso = new Date().toISOString();
+  return {
+    user_id: sanitizeUserId(userId),
+    plan: "free",
+    status: "free",
+    started_at: nowIso,
+    expires_at: null,
+    source: reason || "fallback",
+    amount_paise: 0,
+    currency: "INR",
+    last_payment_id: "",
+    last_order_id: "",
+    metadata: {},
+    created_at: nowIso,
+    updated_at: nowIso
+  };
+}
+
+function ensureActiveSeatState(state, ownerUserId){
+  const ownerId = sanitizeUserId(ownerUserId);
+  if(!ownerId) return null;
+  const existing = state.premium.seats[ownerId];
+  const nowIso = new Date().toISOString();
+  const row = existing && typeof existing === "object"
+    ? existing
+    : {
+      owner_user_id: ownerId,
+      seat_limit: PLAN_4000_SEAT_LIMIT,
+      members: [ownerId],
+      created_at: nowIso,
+      updated_at: nowIso
+    };
+  row.owner_user_id = ownerId;
+  row.seat_limit = Math.max(1, Math.floor(safeNumber(row.seat_limit) || PLAN_4000_SEAT_LIMIT));
+  row.members = Array.isArray(row.members)
+    ? Array.from(new Set(row.members.map(sanitizeUserId).filter(Boolean)))
+    : [ownerId];
+  if(!row.members.includes(ownerId)){
+    row.members.unshift(ownerId);
+  }
+  if(!row.created_at) row.created_at = nowIso;
+  row.updated_at = nowIso;
+  state.premium.seats[ownerId] = row;
+  return row;
+}
+
+function getSeatOwnerForMember(state, memberUserId){
+  const targetId = sanitizeUserId(memberUserId);
+  if(!targetId) return "";
+  const entries = Object.entries(state.premium?.seats || {});
+  for(const [ownerId, seatRow] of entries){
+    const members = Array.isArray(seatRow?.members) ? seatRow.members : [];
+    if(members.includes(targetId)){
+      return sanitizeUserId(ownerId);
+    }
+  }
+  return "";
+}
+
+function getEffectiveSubscription(state, userId){
+  const normalizedUserId = sanitizeUserId(userId);
+  if(!normalizedUserId){
+    return buildFreeSubscription("", "guest");
+  }
+
+  const direct = normalizeSubscriptionRecord(
+    normalizedUserId,
+    state.subscriptions.users[normalizedUserId] || buildFreeSubscription(normalizedUserId, "missing")
+  );
+  if(direct.plan !== "free" && direct.status === "active"){
+    return direct;
+  }
+
+  const ownerId = getSeatOwnerForMember(state, normalizedUserId);
+  if(ownerId && ownerId !== normalizedUserId){
+    const owner = normalizeSubscriptionRecord(ownerId, state.subscriptions.users[ownerId] || {});
+    if(owner.plan === "4000" && owner.status === "active" && isIsoFuture(owner.expires_at)){
+      return {
+        ...owner,
+        user_id: normalizedUserId,
+        source: "seat_invite",
+        metadata: {
+          ...(owner.metadata || {}),
+          seat_owner_id: ownerId
+        }
+      };
+    }
+  }
+
+  return buildFreeSubscription(normalizedUserId, "inactive");
+}
+
+function buildFeatureGateForSubscription(subRecord){
+  const record = normalizeSubscriptionRecord(subRecord?.user_id, subRecord || {});
+  const config = getPlanConfig(record.plan);
+  const active = record.plan === "free"
+    ? true
+    : (record.status === "active" && isIsoFuture(record.expires_at));
+  const features = active ? { ...config.features } : { chat:true, ai_tryon:true, checkout:true };
+
+  return {
+    user_id: record.user_id,
+    plan: active ? record.plan : "free",
+    status: active ? record.status : "free",
+    expires_at: active ? record.expires_at : null,
+    source: record.source,
+    seat_limit: config.seat_limit,
+    tryon_lane: active ? config.tryon_lane : "standard",
+    tryon_daily_limit: active ? config.tryon_daily_limit : FREE_PLAN_DAILY_LIMIT,
+    features
+  };
+}
+
+function ensureSubscriptionExpirySweep(state){
+  const nowIso = new Date().toISOString();
+  Object.entries(state.subscriptions.users || {}).forEach(([userId, raw]) => {
+    const normalized = normalizeSubscriptionRecord(userId, raw);
+    if(normalized.plan !== "free" && normalized.status === "active" && normalized.expires_at && !isIsoFuture(normalized.expires_at)){
+      const downgraded = buildFreeSubscription(userId, "auto_expiry_downgrade");
+      downgraded.status = "downgraded";
+      downgraded.metadata = {
+        previous_plan: normalized.plan,
+        expired_at: normalized.expires_at || nowIso
+      };
+      state.subscriptions.users[userId] = downgraded;
+      pushBounded(state.subscriptions.transitions, {
+        type: "auto_downgrade",
+        user_id: userId,
+        previous_plan: normalized.plan,
+        next_plan: "free",
+        expired_at: normalized.expires_at || nowIso,
+        at: nowIso
+      }, 4000);
+    }
+  });
+}
+
+function activateSubscriptionInState(state, payload){
+  const userId = sanitizeUserId(payload?.user_id);
+  if(!userId){
+    return { ok:false, error:"user_id_required", subscription:buildFreeSubscription("", "invalid") };
+  }
+
+  ensureSubscriptionExpirySweep(state);
+  const nowIso = new Date().toISOString();
+  const plan = normalizePlanCode(payload?.plan);
+  const existing = normalizeSubscriptionRecord(userId, state.subscriptions.users[userId] || {});
+  const paymentId = String(payload?.payment_id || payload?.razorpay_payment_id || "").trim();
+  const orderId = String(payload?.order_id || payload?.razorpay_order_id || "").trim();
+
+  if(paymentId && state.subscriptions.payments[paymentId]){
+    const known = normalizeSubscriptionRecord(userId, state.subscriptions.users[userId] || existing);
+    return { ok:true, idempotent:true, subscription:known };
+  }
+
+  let next = buildFreeSubscription(userId, payload?.source || "activation");
+  if(plan !== "free"){
+    next = normalizeSubscriptionRecord(userId, {
+      ...existing,
+      user_id: userId,
+      plan,
+      status: "active",
+      started_at: nowIso,
+      expires_at: getSubscriptionExpiryIso(plan, nowIso),
+      source: String(payload?.source || "payment").trim().slice(0, 40) || "payment",
+      amount_paise: Math.max(0, Math.round(safeNumber(payload?.amount_paise || payload?.payment_amount_paise))),
+      currency: sanitizeCurrencyCode(payload?.currency || payload?.payment_currency) || "INR",
+      payment_id: paymentId,
+      order_id: orderId,
+      metadata: payload?.metadata && typeof payload.metadata === "object"
+        ? payload.metadata
+        : {}
+    });
+  }else{
+    next.source = String(payload?.source || "downgrade").trim().slice(0, 40) || "downgrade";
+  }
+
+  state.subscriptions.users[userId] = next;
+  if(paymentId){
+    state.subscriptions.payments[paymentId] = {
+      user_id: userId,
+      plan: next.plan,
+      order_id: orderId,
+      activated_at: nowIso
+    };
+  }
+  pushBounded(state.subscriptions.transitions, {
+    type: "activation",
+    user_id: userId,
+    previous_plan: existing.plan || "free",
+    next_plan: next.plan,
+    payment_id: paymentId,
+    order_id: orderId,
+    at: nowIso
+  }, 4000);
+
+  if(next.plan === "4000" && next.status === "active"){
+    ensureActiveSeatState(state, userId);
+  }
+  if(next.plan !== "4000"){
+    const seat = state.premium.seats[userId];
+    if(seat && Array.isArray(seat.members)){
+      seat.members = [userId];
+      seat.updated_at = nowIso;
+    }
+  }
+
+  return { ok:true, idempotent:false, subscription:next };
+}
+
+async function notifyAutomationAdmin(subject, payload){
+  const nowIso = new Date().toISOString();
+  const safeSubject = String(subject || "system_event").trim().slice(0, 120) || "system_event";
+  const details = payload && typeof payload === "object" ? payload : {};
+  const lines = [
+    `Event: ${safeSubject}`,
+    `Timestamp: ${nowIso}`,
+    "",
+    JSON.stringify(details, null, 2)
+  ];
+  if(ADMIN_DM_WEBHOOK_URL){
+    try{
+      await fetch(ADMIN_DM_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event: "system_automation",
+          subject: safeSubject,
+          timestamp: nowIso,
+          payload: details
+        })
+      });
+      return { ok:true, channel:"webhook" };
+    }catch(_){ }
+  }
+  if(RESEND_API_KEY){
+    try{
+      await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${RESEND_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          from: RESEND_FROM_EMAIL,
+          to: [ADMIN_AUTOMATION_EMAIL],
+          subject: `NOVAGAPP Automation: ${safeSubject}`,
+          text: lines.join("\n")
+        })
+      });
+      return { ok:true, channel:"email" };
+    }catch(_){ }
+  }
+  return { ok:false, channel:"none" };
+}
+
+function sanitizeTrustStep(step){
+  const normalized = String(step || "").trim().toLowerCase().replace(/[^a-z0-9_ -]/g, "").replace(/\s+/g, "_");
+  if(DEFAULT_TRUST_FLOW.includes(normalized)){
+    return normalized;
+  }
+  return "discovery";
+}
+
+function sanitizeUserSearchQuery(text){
+  return String(text || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[^\w@._ -]/g, "")
+    .slice(0, 120);
+}
+
+function buildUserSearchTokens(text){
+  return Array.from(new Set(tokenizeIdentityText(sanitizeUserSearchQuery(text))))
+    .slice(0, 8);
+}
+
+function scoreUserSearchMatch(user, tokens){
+  const hay = [
+    String(user?.display_name || "").toLowerCase(),
+    String(user?.full_name || "").toLowerCase(),
+    String(user?.username || "").toLowerCase(),
+    String(user?.email_local || "").toLowerCase(),
+    String(user?.email || "").toLowerCase(),
+    Array.isArray(user?.search_tokens) ? user.search_tokens.join(" ").toLowerCase() : ""
+  ].join(" ");
+  if(!tokens.length){
+    return 1;
+  }
+  let score = 0;
+  tokens.forEach((token, idx) => {
+    if(!token) return;
+    if(hay === token){
+      score += 300 - idx;
+      return;
+    }
+    if(hay.startsWith(token)){
+      score += 200 - idx;
+      return;
+    }
+    if(hay.includes(token)){
+      score += 120 - idx;
+      return;
+    }
+    const compactToken = token.replace(/\s+/g, "");
+    if(compactToken && hay.includes(compactToken)){
+      score += 80 - idx;
+    }
+  });
+  return score;
+}
+
+async function upsertIdentityToUsersTable(identity){
+  const base = getSocialSupabaseBase();
+  const key = getSocialSupabaseServiceRoleKey();
+  if(!base || !key || !identity?.user_id){
+    return null;
+  }
+
+  const endpoint = new URL("/rest/v1/users", base + "/");
+  endpoint.searchParams.set("on_conflict", "user_id");
+
+  let row = {
+    user_id: identity.user_id,
+    username: identity.username,
+    full_name: identity.display_name,
+    display_name: identity.display_name,
+    email: identity.email || null,
+    email_local: identity.email_local || null,
+    search_tokens: identity.search_tokens || [],
+    photo: identity.photo || null
+  };
+  const required = new Set(["user_id"]);
+
+  for(let attempt = 0; attempt < 10; attempt += 1){
+    const response = await fetch(endpoint.toString(), {
+      method: "POST",
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=representation"
+      },
+      body: JSON.stringify([row])
+    });
+    if(response.ok){
+      const data = await response.json().catch(() => []);
+      if(Array.isArray(data) && data[0]){
+        return data[0];
+      }
+      return row;
+    }
+    const body = await response.text().catch(() => "");
+    const missing = detectMissingColumnName(body);
+    if(missing && Object.prototype.hasOwnProperty.call(row, missing) && !required.has(missing)){
+      delete row[missing];
+      continue;
+    }
+    throw new Error(`users_identity_upsert_failed_${response.status}:${body.slice(0, 240)}`);
+  }
+  return row;
+}
+
+async function fetchUsersForDiscovery(tokens, limit){
+  const base = getSocialSupabaseBase();
+  const key = getSocialSupabaseReadKey();
+  if(!base || !key){
+    return [];
+  }
+  const max = Math.max(1, Math.min(500, Math.floor(Number(limit) || 100)));
+  const endpoint = new URL("/rest/v1/users", base + "/");
+  endpoint.searchParams.set("select", "user_id,username,full_name,display_name,email,email_local,photo,search_tokens,created_at");
+  endpoint.searchParams.set("limit", String(max));
+  endpoint.searchParams.set("order", "created_at.desc");
+  if(Array.isArray(tokens) && tokens.length){
+    const checks = [];
+    tokens.slice(0, 4).forEach(token => {
+      const clean = String(token || "").replace(/[%*,()]/g, "").trim();
+      if(!clean) return;
+      checks.push(`username.ilike.*${clean}*`);
+      checks.push(`full_name.ilike.*${clean}*`);
+      checks.push(`display_name.ilike.*${clean}*`);
+      checks.push(`email.ilike.*${clean}*`);
+      checks.push(`email_local.ilike.*${clean}*`);
+    });
+    if(checks.length){
+      endpoint.searchParams.set("or", checks.join(","));
+    }
+  }
+
+  const response = await fetch(endpoint.toString(), {
+    method: "GET",
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`
+    }
+  });
+  if(!response.ok){
+    const body = await response.text().catch(() => "");
+    const missing = detectMissingColumnName(body);
+    if(missing){
+      const fallback = new URL("/rest/v1/users", base + "/");
+      fallback.searchParams.set("select", "user_id,username,full_name,photo,created_at");
+      fallback.searchParams.set("limit", String(max));
+      fallback.searchParams.set("order", "created_at.desc");
+      const fallbackRes = await fetch(fallback.toString(), {
+        method: "GET",
+        headers: {
+          apikey: key,
+          Authorization: `Bearer ${key}`
+        }
+      });
+      if(!fallbackRes.ok){
+        return [];
+      }
+      const rows = await fallbackRes.json().catch(() => []);
+      return Array.isArray(rows) ? rows : [];
+    }
+    return [];
+  }
+
+  const rows = await response.json().catch(() => []);
+  return Array.isArray(rows) ? rows : [];
 }
 
 /* ======================
@@ -1780,6 +2657,173 @@ function sanitizeCurrencyCode(value){
     .slice(0, 3);
 }
 
+function verifyRazorpayWebhookSignature(rawBody, signature){
+  if(!RAZORPAY_WEBHOOK_SECRET) return false;
+  const payload = Buffer.isBuffer(rawBody)
+    ? rawBody
+    : Buffer.from(String(rawBody || ""), "utf8");
+  const expected = crypto
+    .createHmac("sha256", RAZORPAY_WEBHOOK_SECRET)
+    .update(payload)
+    .digest();
+  const providedHex = String(signature || "").trim().toLowerCase();
+  if(!/^[a-f0-9]{64}$/.test(providedHex)){
+    return false;
+  }
+  const provided = Buffer.from(providedHex, "hex");
+  if(provided.length !== expected.length){
+    return false;
+  }
+  return crypto.timingSafeEqual(expected, provided);
+}
+
+function resolveSubscriptionPlanFromNotes(notes){
+  const planFromNotes = normalizePlanCode(notes?.plan || notes?.subscription_plan || notes?.tier || "");
+  if(planFromNotes !== "free"){
+    return planFromNotes;
+  }
+  const baseAmountRaw = safeNumber(notes?.base_amount || notes?.amount || 0);
+  if(baseAmountRaw >= PLAN_4000_USD){
+    return "4000";
+  }
+  if(baseAmountRaw >= PLAN_40_USD){
+    return "40";
+  }
+  const appAmountPaise = Math.round(safeNumber(notes?.app_amount_paise || notes?.amount_paise || 0));
+  if(appAmountPaise >= PLAN_4000_USD * 100){
+    return "4000";
+  }
+  if(appAmountPaise >= PLAN_40_USD * 100){
+    return "40";
+  }
+  return "free";
+}
+
+function isSubscriptionPaymentContext(notes){
+  const source = String(notes?.source || "").trim().toLowerCase();
+  return source === "subscription_page" ||
+    source === "m_subscription_page" ||
+    source === "subscription" ||
+    source === "m-subscription";
+}
+
+function parseMonthlyKey(input){
+  const raw = String(input || "").trim();
+  if(/^\d{4}-\d{2}$/.test(raw)){
+    return raw;
+  }
+  const now = new Date();
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function toIsoDateKey(input){
+  const t = new Date(input || Date.now());
+  const y = t.getUTCFullYear();
+  const m = String(t.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(t.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function buildAssistantReply(mode, payload){
+  const objective = String(payload?.objective || "").trim().slice(0, 280) || "increase conversion";
+  const leadName = safePublicNameFromIdentity(payload?.lead || {}, payload?.lead?.user_id || "");
+  const productName = String(payload?.product_name || "your product").trim().slice(0, 120) || "your product";
+  const tone = String(payload?.tone || "friendly").trim().toLowerCase();
+  if(mode === "revenue"){
+    return {
+      opener: `Hi ${leadName}, thanks for checking ${productName}.`,
+      angle: `Based on your activity, the best revenue move is a limited-time bundle with direct checkout.`,
+      cta: "Reply with your preferred quantity and I will lock the discounted order link.",
+      follow_up_in_hours: 12,
+      tone
+    };
+  }
+  return {
+    opener: `Hi ${leadName}, thanks for your interest in ${productName}.`,
+    angle: `I can help you choose quickly so you can complete checkout with confidence.`,
+    cta: "Tell me your size/color preference and I will share the best match now.",
+    follow_up_in_hours: 24,
+    objective,
+    tone
+  };
+}
+
+function sanitizeAutomationMeta(input){
+  if(!input || typeof input !== "object"){
+    return {};
+  }
+  const out = {};
+  Object.entries(input).slice(0, 20).forEach(([key, value]) => {
+    const cleanKey = sanitizeToken(key, 40).toLowerCase();
+    if(!cleanKey) return;
+    if(value === null || value === undefined){
+      return;
+    }
+    if(typeof value === "number"){
+      out[cleanKey] = Number.isFinite(value) ? value : 0;
+      return;
+    }
+    if(typeof value === "boolean"){
+      out[cleanKey] = value;
+      return;
+    }
+    out[cleanKey] = String(value).trim().slice(0, 400);
+  });
+  return out;
+}
+
+function runFollowupSweep(state){
+  const nowMs = Date.now();
+  const due = [];
+  (state.automation.followups || []).forEach(item => {
+    if(!item || item.status !== "scheduled") return;
+    const dueMs = new Date(item.due_at || "").getTime();
+    if(Number.isFinite(dueMs) && dueMs <= nowMs){
+      item.status = "ready";
+      item.ready_at = new Date().toISOString();
+      due.push(item);
+    }
+  });
+  return due;
+}
+
+function computeMonthlyReport(state, userId, monthKey){
+  const uid = sanitizeUserId(userId);
+  const month = parseMonthlyKey(monthKey);
+  const events = (state.automation.funnel_events || []).filter(item => {
+    if(uid && sanitizeUserId(item?.user_id) !== uid) return false;
+    return String(item?.month || "") === month;
+  });
+  const counts = {};
+  DEFAULT_TRUST_FLOW.forEach(step => { counts[step] = 0; });
+  events.forEach(item => {
+    const step = sanitizeTrustStep(item?.step);
+    counts[step] = safeNumber(counts[step]) + 1;
+  });
+  const discovery = safeNumber(counts.discovery);
+  const checkout = safeNumber(counts.checkout);
+  const conversionRate = discovery > 0 ? Math.round((checkout / discovery) * 10000) / 100 : 0;
+  const dropoffs = {
+    discovery_to_chat: Math.max(0, safeNumber(counts.discovery) - safeNumber(counts.chat)),
+    chat_to_trust: Math.max(0, safeNumber(counts.chat) - safeNumber(counts.trust)),
+    trust_to_ai_tryon: Math.max(0, safeNumber(counts.trust) - safeNumber(counts.ai_tryon)),
+    ai_tryon_to_checkout: Math.max(0, safeNumber(counts.ai_tryon) - safeNumber(counts.checkout))
+  };
+  const followups = (state.automation.followups || []).filter(item => {
+    if(uid && sanitizeUserId(item?.user_id) !== uid) return false;
+    return String(item?.month || "") === month;
+  });
+  return {
+    month,
+    total_events: events.length,
+    funnel: counts,
+    conversion_rate_pct: conversionRate,
+    dropoffs,
+    followups_scheduled: followups.length,
+    followups_ready: followups.filter(item => item.status === "ready").length
+  };
+}
+
 async function convertBaseAmountToInrPaise(baseAmount, baseCurrency){
   const amount = safeNumber(baseAmount);
   if(!amount || amount <= 0){
@@ -2012,6 +3056,57 @@ app.post("/api/payment/razorpay/verify", async (req, res) => {
       });
     }
 
+    const paymentNotes = sanitizePaymentNotes(paymentSnapshot?.notes || {});
+    const noteUserId = sanitizeUserId(
+      paymentNotes.app_user_id ||
+      paymentNotes.user_id ||
+      req.body?.user_id
+    );
+    const notePlan = resolveSubscriptionPlanFromNotes(paymentNotes);
+    const shouldHandleSubscription = isSubscriptionPaymentContext(paymentNotes) && notePlan !== "free" && noteUserId;
+    let subscription = null;
+
+    if(shouldHandleSubscription){
+      const activation = await mutateSystemState(state => {
+        const activated = activateSubscriptionInState(state, {
+          user_id: noteUserId,
+          plan: notePlan,
+          source: "payment_verify",
+          payment_id: paymentId,
+          order_id: orderId,
+          amount_paise: paymentAmountPaise,
+          currency: paymentCurrency || "INR",
+          metadata: {
+            notes: paymentNotes
+          }
+        });
+        ensureSubscriptionExpirySweep(state);
+        return activated;
+      });
+      subscription = buildFeatureGateForSubscription(activation.subscription);
+      if(subscription?.user_id){
+        automationSupabaseUpsert("subscription_state", [{
+          user_id: String(subscription.user_id || ""),
+          plan: String(subscription.plan || "free"),
+          status: String(subscription.status || "free"),
+          expires_at: subscription.expires_at || null,
+          source: "payment_verify",
+          payment_id: paymentId,
+          order_id: orderId,
+          amount_paise: paymentAmountPaise,
+          currency: paymentCurrency || "INR",
+          updated_at: new Date().toISOString()
+        }], "user_id").catch(() => {});
+      }
+    }else if(noteUserId){
+      const current = await mutateSystemState(state => {
+        ensureSubscriptionExpirySweep(state);
+        const sub = getEffectiveSubscription(state, noteUserId);
+        return sub;
+      });
+      subscription = buildFeatureGateForSubscription(current);
+    }
+
     return res.json({
       ok: true,
       verified: true,
@@ -2019,7 +3114,8 @@ app.post("/api/payment/razorpay/verify", async (req, res) => {
       razorpay_payment_id: paymentId,
       payment_status: paymentStatus || "verified",
       payment_currency: paymentCurrency || "INR",
-      payment_amount_paise: paymentAmountPaise
+      payment_amount_paise: paymentAmountPaise,
+      subscription
     });
   }catch(err){
     console.error("shop_order_verify_error:", err?.stack || err);
@@ -2028,6 +3124,878 @@ app.post("/api/payment/razorpay/verify", async (req, res) => {
       error: "shop_order_verify_failed",
       message: String(err?.message || "Unable to verify payment.")
     });
+  }
+});
+
+app.post("/api/payment/razorpay/webhook", async (req, res) => {
+  if(!RAZORPAY_WEBHOOK_SECRET){
+    return res.status(503).json({
+      ok:false,
+      error:"webhook_secret_missing",
+      message:"Set RAZORPAY_WEBHOOK_SECRET for webhook verification."
+    });
+  }
+
+  const signature = String(req.headers["x-razorpay-signature"] || "").trim();
+  const rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body || {}), "utf8");
+  if(!signature || !verifyRazorpayWebhookSignature(rawBody, signature)){
+    return res.status(401).json({ ok:false, error:"invalid_webhook_signature" });
+  }
+
+  const eventName = String(req.body?.event || "").trim().toLowerCase();
+  const paymentEntity = req.body?.payload?.payment?.entity || {};
+  const eventId = String(req.body?.payload?.payment?.entity?.id || req.body?.event || "").trim().slice(0, 120);
+  const paymentId = String(paymentEntity?.id || "").trim();
+  const orderId = String(paymentEntity?.order_id || "").trim();
+  const notes = sanitizePaymentNotes(paymentEntity?.notes || {});
+  const noteUserId = sanitizeUserId(notes.app_user_id || notes.user_id || "");
+  const notePlan = resolveSubscriptionPlanFromNotes(notes);
+  const amountPaise = Math.max(0, Math.round(safeNumber(paymentEntity?.amount)));
+  const currency = sanitizeCurrencyCode(paymentEntity?.currency) || "INR";
+
+  try{
+    const remoteEvent = eventId ? await fetchRemoteWebhookEvent(eventId).catch(() => null) : null;
+    if(remoteEvent){
+      const existingSubscription = noteUserId
+        ? await mutateSystemState(state => {
+          ensureSubscriptionExpirySweep(state);
+          return buildFeatureGateForSubscription(getEffectiveSubscription(state, noteUserId));
+        })
+        : null;
+      return res.json({
+        ok:true,
+        event:eventName || "unknown",
+        idempotent:true,
+        payment_id: paymentId || String(remoteEvent.payment_id || ""),
+        order_id: orderId || String(remoteEvent.order_id || ""),
+        subscription: existingSubscription
+      });
+    }
+
+    const result = await mutateSystemState(state => {
+      ensureSubscriptionExpirySweep(state);
+      if(eventId && state.subscriptions.webhooks[eventId]){
+        return {
+          ok:true,
+          idempotent:true,
+          subscription: noteUserId
+            ? buildFeatureGateForSubscription(getEffectiveSubscription(state, noteUserId))
+            : null
+        };
+      }
+      if(eventId){
+        state.subscriptions.webhooks[eventId] = {
+          event: eventName,
+          payment_id: paymentId,
+          order_id: orderId,
+          processed_at: new Date().toISOString()
+        };
+      }
+
+      let subscription = null;
+      if(eventName === "payment.captured" && isSubscriptionPaymentContext(notes) && notePlan !== "free" && noteUserId){
+        const activated = activateSubscriptionInState(state, {
+          user_id: noteUserId,
+          plan: notePlan,
+          source: "payment_webhook",
+          payment_id: paymentId,
+          order_id: orderId,
+          amount_paise: amountPaise,
+          currency,
+          metadata: { notes, webhook_event: eventName }
+        });
+        subscription = buildFeatureGateForSubscription(activated.subscription);
+      }else if(noteUserId){
+        subscription = buildFeatureGateForSubscription(getEffectiveSubscription(state, noteUserId));
+      }
+      return { ok:true, idempotent:false, subscription };
+    });
+
+    if(eventId){
+      automationSupabaseUpsert("subscription_webhook_events", [{
+        event_id: eventId,
+        event_name: eventName || "unknown",
+        payment_id: paymentId || null,
+        order_id: orderId || null,
+        payload: req.body || {},
+        created_at: new Date().toISOString()
+      }], "event_id").catch(() => {});
+    }
+    if(result?.subscription?.user_id){
+      automationSupabaseUpsert("subscription_state", [{
+        user_id: String(result.subscription.user_id || ""),
+        plan: String(result.subscription.plan || "free"),
+        status: String(result.subscription.status || "free"),
+        expires_at: result.subscription.expires_at || null,
+        source: "payment_webhook",
+        payment_id: paymentId || null,
+        order_id: orderId || null,
+        amount_paise: amountPaise,
+        currency,
+        updated_at: new Date().toISOString()
+      }], "user_id").catch(() => {});
+    }
+
+    return res.json({
+      ok:true,
+      event:eventName || "unknown",
+      idempotent: !!result?.idempotent,
+      payment_id: paymentId || "",
+      order_id: orderId || "",
+      subscription: result?.subscription || null
+    });
+  }catch(err){
+    console.error("razorpay_webhook_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"webhook_processing_failed" });
+  }
+});
+
+app.post("/api/account/sync", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  const identityInput = {
+    user_id: userId,
+    email: req.body?.email,
+    display_name: req.body?.display_name,
+    full_name: req.body?.full_name,
+    username: req.body?.username,
+    user_name: req.body?.user_name,
+    photo: req.body?.photo || req.body?.avatar_url
+  };
+  const derived = deriveIdentityDefaults(identityInput);
+
+  try{
+    const result = await mutateSystemState(state => {
+      ensureSubscriptionExpirySweep(state);
+      const current = state.identities[userId] && typeof state.identities[userId] === "object"
+        ? state.identities[userId]
+        : {};
+      const merged = {
+        ...current,
+        ...derived,
+        user_id: userId,
+        display_name: derived.display_name || safePublicNameFromIdentity(current, userId),
+        username: derived.username || current.username || `member_${userId.slice(0, 6)}`,
+        email: derived.email || current.email || "",
+        email_local: derived.email_local || current.email_local || "",
+        photo: derived.photo || current.photo || "",
+        search_tokens: Array.from(new Set([
+          ...(Array.isArray(current.search_tokens) ? current.search_tokens : []),
+          ...(Array.isArray(derived.search_tokens) ? derived.search_tokens : [])
+        ])).slice(0, 60),
+        created_at: current.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      state.identities[userId] = merged;
+      const subscription = getEffectiveSubscription(state, userId);
+      return {
+        identity: merged,
+        subscription
+      };
+    });
+
+    let usersRow = null;
+    let syncWarning = "";
+    try{
+      usersRow = await upsertIdentityToUsersTable(result.identity);
+    }catch(err){
+      syncWarning = String(err?.message || "users_sync_failed");
+    }
+
+    try{
+      if(canContestUserPay(userId)){
+        await mutateContestState(state => {
+          registerContestAccount(
+            state,
+            userId,
+            result.identity.display_name || result.identity.username,
+            result.identity.email
+          );
+          return true;
+        });
+      }
+    }catch(_){ }
+
+    return res.json({
+      ok:true,
+      identity:{
+        user_id: userId,
+        display_name: safePublicNameFromIdentity(result.identity, userId),
+        username: String(result.identity.username || "").trim(),
+        email: String(result.identity.email || "").trim(),
+        photo: String(result.identity.photo || "").trim(),
+        search_tokens: Array.isArray(result.identity.search_tokens) ? result.identity.search_tokens : []
+      },
+      subscription: buildFeatureGateForSubscription(result.subscription),
+      synced_to_users_table: !!usersRow,
+      warning: syncWarning || undefined
+    });
+  }catch(err){
+    console.error("account_sync_error:", err?.stack || err);
+    return res.status(500).json({
+      ok:false,
+      error:"account_sync_failed",
+      message:String(err?.message || "Unable to sync profile identity.")
+    });
+  }
+});
+
+app.get("/api/users/discover", async (req, res) => {
+  const query = sanitizeUserSearchQuery(req.query?.q);
+  const tokens = buildUserSearchTokens(query);
+  const limit = Math.max(1, Math.min(200, Math.floor(Number(req.query?.limit) || 60)));
+
+  try{
+    const [remoteRows, systemState] = await Promise.all([
+      fetchUsersForDiscovery(tokens, Math.max(limit * 3, 120)),
+      readSystemState()
+    ]);
+    ensureSubscriptionExpirySweep(systemState);
+
+    const merged = new Map();
+    const push = (row) => {
+      const userId = sanitizeUserId(row?.user_id);
+      if(!userId) return;
+      const stateIdentity = systemState.identities[userId] || {};
+      const displayName = safePublicNameFromIdentity({
+        display_name: row?.display_name || row?.full_name || row?.username || stateIdentity.display_name,
+        username: row?.username || stateIdentity.username
+      }, userId);
+      const username = sanitizeDisplayName(row?.username || stateIdentity.username || "");
+      const email = String(row?.email || stateIdentity.email || "").trim().toLowerCase().slice(0, 180);
+      const emailLocal = String(row?.email_local || stateIdentity.email_local || (email.split("@")[0] || "")).trim().slice(0, 120);
+      const photo = String(row?.photo || stateIdentity.photo || "").trim().slice(0, 3000);
+      const searchTokens = Array.from(new Set([
+        ...(Array.isArray(row?.search_tokens) ? row.search_tokens : []),
+        ...(Array.isArray(stateIdentity.search_tokens) ? stateIdentity.search_tokens : []),
+        ...tokenizeIdentityText(displayName),
+        ...tokenizeIdentityText(username),
+        ...tokenizeIdentityText(emailLocal)
+      ])).slice(0, 64);
+      merged.set(userId, {
+        user_id: userId,
+        display_name: displayName,
+        username,
+        full_name: displayName,
+        email,
+        email_local: emailLocal,
+        photo,
+        search_tokens: searchTokens,
+        created_at: String(row?.created_at || stateIdentity.created_at || "").trim()
+      });
+    };
+
+    (remoteRows || []).forEach(push);
+    Object.values(systemState.identities || {}).forEach(push);
+
+    const rows = Array.from(merged.values())
+      .map(item => ({
+        ...item,
+        score: scoreUserSearchMatch(item, tokens)
+      }))
+      .filter(item => tokens.length ? item.score > 0 : true)
+      .sort((a, b) => {
+        if(b.score !== a.score){
+          return b.score - a.score;
+        }
+        return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+      })
+      .slice(0, limit)
+      .map(item => ({
+        user_id: item.user_id,
+        display_name: item.display_name,
+        username: item.username || "",
+        photo: item.photo || "",
+        can_message: true,
+        profile_url: `m-account.html?uid=${encodeURIComponent(item.user_id)}`
+      }));
+
+    return res.json({
+      ok:true,
+      query,
+      tokens,
+      total: rows.length,
+      users: rows
+    });
+  }catch(err){
+    console.error("users_discover_error:", err?.stack || err);
+    return res.status(500).json({
+      ok:false,
+      error:"users_discover_failed",
+      message:String(err?.message || "Unable to load users.")
+    });
+  }
+});
+
+app.get("/api/users/summary", async (req, res) => {
+  const ids = String(req.query?.ids || "")
+    .split(",")
+    .map(sanitizeUserId)
+    .filter(Boolean)
+    .slice(0, 100);
+  if(!ids.length){
+    return res.json({ ok:true, users:{} });
+  }
+  try{
+    const state = await readSystemState();
+    const map = {};
+    ids.forEach(userId => {
+      const identity = state.identities[userId] || {};
+      map[userId] = {
+        user_id: userId,
+        display_name: safePublicNameFromIdentity(identity, userId),
+        username: String(identity.username || "").trim(),
+        photo: String(identity.photo || "").trim()
+      };
+    });
+    return res.json({ ok:true, users: map });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"users_summary_failed" });
+  }
+});
+
+app.get("/api/subscription/status", async (req, res) => {
+  const userId = sanitizeUserId(req.query?.user_id);
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  try{
+    const remote = await fetchRemoteSubscriptionState(userId).catch(() => null);
+    const payload = await mutateSystemState(state => {
+      if(remote && typeof remote === "object"){
+        state.subscriptions.users[userId] = normalizeSubscriptionRecord(userId, {
+          user_id: userId,
+          plan: remote.plan,
+          status: remote.status,
+          expires_at: remote.expires_at,
+          source: remote.source || "remote_sync",
+          payment_id: remote.payment_id,
+          order_id: remote.order_id,
+          amount_paise: remote.amount_paise,
+          currency: remote.currency,
+          updated_at: remote.updated_at
+        });
+      }
+      ensureSubscriptionExpirySweep(state);
+      const subscription = getEffectiveSubscription(state, userId);
+      const gate = buildFeatureGateForSubscription(subscription);
+      const ownerId = getSeatOwnerForMember(state, userId) || userId;
+      const seat = state.premium.seats[ownerId] || null;
+      return {
+        subscription: gate,
+        seat: seat
+          ? {
+            owner_user_id: sanitizeUserId(seat.owner_user_id),
+            seat_limit: Math.max(1, Math.floor(safeNumber(seat.seat_limit) || 1)),
+            members: Array.isArray(seat.members) ? seat.members.map(sanitizeUserId).filter(Boolean) : []
+          }
+          : null
+      };
+    });
+    return res.json({
+      ok:true,
+      ...payload
+    });
+  }catch(err){
+    console.error("subscription_status_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"subscription_status_failed" });
+  }
+});
+
+app.post("/api/subscription/activate", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  const plan = normalizePlanCode(req.body?.plan);
+  if(!userId || plan === "free"){
+    return res.status(400).json({
+      ok:false,
+      error:"invalid_subscription_activation",
+      message:"Valid user_id and paid plan are required."
+    });
+  }
+
+  try{
+    const activation = await mutateSystemState(state => {
+      ensureSubscriptionExpirySweep(state);
+      return activateSubscriptionInState(state, {
+        user_id: userId,
+        plan,
+        source: String(req.body?.source || "manual_activation").slice(0, 40),
+        payment_id: req.body?.payment_id || req.body?.razorpay_payment_id,
+        order_id: req.body?.order_id || req.body?.razorpay_order_id,
+        amount_paise: req.body?.amount_paise || req.body?.payment_amount_paise,
+        currency: req.body?.currency || req.body?.payment_currency,
+        metadata: sanitizeAutomationMeta(req.body?.metadata || {})
+      });
+    });
+    const gate = buildFeatureGateForSubscription(activation?.subscription || {});
+    automationSupabaseUpsert("subscription_state", [{
+      user_id: String(gate.user_id || userId),
+      plan: String(gate.plan || "free"),
+      status: String(gate.status || "free"),
+      expires_at: gate.expires_at || null,
+      source: String(req.body?.source || "manual_activation").slice(0, 40),
+      payment_id: String(req.body?.payment_id || req.body?.razorpay_payment_id || ""),
+      order_id: String(req.body?.order_id || req.body?.razorpay_order_id || ""),
+      amount_paise: Math.max(0, Math.round(safeNumber(req.body?.amount_paise || req.body?.payment_amount_paise))),
+      currency: sanitizeCurrencyCode(req.body?.currency || req.body?.payment_currency) || "INR",
+      metadata: sanitizeAutomationMeta(req.body?.metadata || {}),
+      updated_at: new Date().toISOString()
+    }], "user_id").catch(() => {});
+    return res.json({
+      ok:true,
+      activation: {
+        idempotent: !!activation?.idempotent
+      },
+      subscription: gate
+    });
+  }catch(err){
+    console.error("subscription_activate_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"subscription_activate_failed" });
+  }
+});
+
+app.get("/api/feature-gates", async (req, res) => {
+  const userId = sanitizeUserId(req.query?.user_id);
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  try{
+    const gate = await mutateSystemState(state => {
+      ensureSubscriptionExpirySweep(state);
+      return buildFeatureGateForSubscription(getEffectiveSubscription(state, userId));
+    });
+    return res.json({ ok:true, gates: gate });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"feature_gate_failed" });
+  }
+});
+
+app.post("/api/automation/track", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  const step = sanitizeTrustStep(req.body?.step);
+  const eventId = sanitizeToken(req.body?.event_id, 80) || `${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+  const meta = sanitizeAutomationMeta(req.body?.meta || {});
+  const nowIso = new Date().toISOString();
+  const month = parseMonthlyKey(nowIso.slice(0, 7));
+
+  try{
+    const result = await mutateSystemState(state => {
+      ensureSubscriptionExpirySweep(state);
+      runFollowupSweep(state);
+
+      const subscription = getEffectiveSubscription(state, userId);
+      const gate = buildFeatureGateForSubscription(subscription);
+      pushBounded(state.automation.funnel_events, {
+        id: eventId,
+        user_id: userId,
+        step,
+        month,
+        at: nowIso,
+        meta
+      }, 8000);
+
+      if(step === "chat" && gate.features.auto_followup){
+        const dueAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        pushBounded(state.automation.followups, {
+          id: `fu_${eventId}`,
+          user_id: userId,
+          month,
+          step: "checkout",
+          status: "scheduled",
+          due_at: dueAt,
+          created_at: nowIso,
+          meta: {
+            reason: "post_chat_nudge",
+            objective: "checkout_completion"
+          }
+        }, 4000);
+      }
+
+      if(step === "checkout"){
+        const identity = state.identities[userId] || {};
+        const points = Math.max(0, Math.floor(safeNumber(identity.growth_points) || 0)) + 10;
+        const previous = Math.max(0, Math.floor(safeNumber(identity.growth_points) || 0));
+        identity.growth_points = points;
+        identity.updated_at = nowIso;
+        state.identities[userId] = identity;
+        const prevTier = Math.floor(previous / 100);
+        const nextTier = Math.floor(points / 100);
+        if(nextTier > prevTier){
+          pushBounded(state.automation.notifications, {
+            id: `growth_${userId}_${points}`,
+            type: "growth_reward_unlocked",
+            user_id: userId,
+            created_at: nowIso,
+            payload: {
+              points,
+              unlocked_tier: nextTier,
+              reward: "priority_boost_coupon"
+            }
+          }, 6000);
+        }
+      }
+
+      const report = computeMonthlyReport(state, userId, month);
+      state.automation.reports[`${userId}:${month}`] = report;
+      const identity = state.identities[userId] || {};
+      const points = Math.max(0, Math.floor(safeNumber(identity.growth_points) || 0));
+      const nextRewardAt = (Math.floor(points / 100) + 1) * 100;
+      return {
+        gate,
+        report,
+        growth: {
+          points,
+          next_reward_at: nextRewardAt,
+          to_next_reward: Math.max(0, nextRewardAt - points)
+        }
+      };
+    });
+    automationSupabaseUpsert("automation_funnel_events", [{
+      id: eventId,
+      user_id: userId,
+      step,
+      month_key: month,
+      meta,
+      created_at: nowIso
+    }], "id").catch(() => {});
+
+    return res.json({
+      ok:true,
+      tracked:true,
+      step,
+      subscription: result.gate,
+      report: result.report,
+      growth: result.growth
+    });
+  }catch(err){
+    console.error("automation_track_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"automation_track_failed" });
+  }
+});
+
+app.get("/api/reports/monthly", async (req, res) => {
+  const userId = sanitizeUserId(req.query?.user_id);
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  const month = parseMonthlyKey(req.query?.month);
+  try{
+    const payload = await mutateSystemState(state => {
+      ensureSubscriptionExpirySweep(state);
+      runFollowupSweep(state);
+      const subscription = getEffectiveSubscription(state, userId);
+      const gate = buildFeatureGateForSubscription(subscription);
+      const report = computeMonthlyReport(state, userId, month);
+      const key = `${userId}:${month}`;
+      state.automation.reports[key] = report;
+      return { gate, report };
+    });
+    return res.json({
+      ok:true,
+      user_id:userId,
+      month,
+      subscription: payload.gate,
+      report: {
+        ...payload.report,
+        behavioral_insights: payload.gate.features.behavioral_insights
+          ? {
+            likely_drop_stage: Object.entries(payload.report.dropoffs || {})
+              .sort((a, b) => safeNumber(b[1]) - safeNumber(a[1]))[0]?.[0] || "none",
+            recommendation: "Use targeted follow-ups at the largest drop-off stage."
+          }
+          : null
+      }
+    });
+  }catch(err){
+    console.error("monthly_report_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"monthly_report_failed" });
+  }
+});
+
+app.get("/api/growth/incentives", async (req, res) => {
+  const userId = sanitizeUserId(req.query?.user_id);
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  try{
+    const payload = await mutateSystemState(state => {
+      ensureSubscriptionExpirySweep(state);
+      const identity = state.identities[userId] || {};
+      const points = Math.max(0, Math.floor(safeNumber(identity.growth_points) || 0));
+      const tier = Math.floor(points / 100);
+      const nextRewardAt = (tier + 1) * 100;
+      const notifications = (state.automation.notifications || [])
+        .filter(item => sanitizeUserId(item?.user_id) === userId && item?.type === "growth_reward_unlocked")
+        .slice(-10)
+        .reverse();
+      return {
+        points,
+        current_tier: tier,
+        next_reward_at: nextRewardAt,
+        to_next_reward: Math.max(0, nextRewardAt - points),
+        recent_rewards: notifications
+      };
+    });
+    return res.json({ ok:true, user_id:userId, ...payload });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"growth_incentives_failed" });
+  }
+});
+
+app.post("/api/assistant/dm", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  const requestedMode = String(req.body?.mode || "").trim().toLowerCase();
+  try{
+    const gate = await mutateSystemState(state => {
+      ensureSubscriptionExpirySweep(state);
+      return buildFeatureGateForSubscription(getEffectiveSubscription(state, userId));
+    });
+    const canStandard = !!gate.features.smart_dm_assistant;
+    const canAdvanced = !!gate.features.advanced_revenue_assistant;
+    if(!canStandard && !canAdvanced){
+      return res.status(403).json({
+        ok:false,
+        error:"plan_upgrade_required",
+        message:"DM assistant is available on paid plans."
+      });
+    }
+    const mode = (requestedMode === "revenue" && canAdvanced) ? "revenue" : "standard";
+    const suggestion = buildAssistantReply(mode, req.body || {});
+    return res.json({
+      ok:true,
+      mode,
+      subscription: gate,
+      suggestion
+    });
+  }catch(err){
+    console.error("assistant_dm_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"assistant_dm_failed" });
+  }
+});
+
+app.post("/api/premium/invite/create", async (req, res) => {
+  const ownerUserId = sanitizeUserId(req.body?.owner_user_id || req.body?.user_id);
+  if(!ownerUserId){
+    return res.status(400).json({ ok:false, error:"owner_user_id_required" });
+  }
+  const inviteEmail = String(req.body?.invitee_email || "").trim().toLowerCase().slice(0, 180);
+  const nowIso = new Date().toISOString();
+  try{
+    const result = await mutateSystemState(state => {
+      ensureSubscriptionExpirySweep(state);
+      const ownerSub = getEffectiveSubscription(state, ownerUserId);
+      const ownerGate = buildFeatureGateForSubscription(ownerSub);
+      if(ownerGate.plan !== "4000" || !ownerGate.features.invite_only){
+        return { ok:false, error:"premium_plan_required" };
+      }
+      const seat = ensureActiveSeatState(state, ownerUserId);
+      const members = Array.isArray(seat.members) ? seat.members : [];
+      if(members.length >= seat.seat_limit){
+        return { ok:false, error:"seat_limit_reached", seat };
+      }
+      const token = `inv_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      state.premium.invites[token] = {
+        token,
+        owner_user_id: ownerUserId,
+        invitee_email: inviteEmail || "",
+        status: "pending",
+        created_at: nowIso,
+        expires_at: expiresAt
+      };
+      return {
+        ok:true,
+        invite: state.premium.invites[token],
+        seat
+      };
+    });
+
+    if(!result.ok){
+      return res.status(409).json(result);
+    }
+    return res.json({
+      ok:true,
+      invite: result.invite,
+      seat: {
+        owner_user_id: result.seat.owner_user_id,
+        seat_limit: result.seat.seat_limit,
+        members: result.seat.members
+      }
+    });
+  }catch(err){
+    console.error("premium_invite_create_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"premium_invite_create_failed" });
+  }
+});
+
+app.post("/api/premium/invite/redeem", async (req, res) => {
+  const token = String(req.body?.token || "").trim();
+  const userId = sanitizeUserId(req.body?.user_id);
+  const email = String(req.body?.email || "").trim().toLowerCase().slice(0, 180);
+  if(!token || !userId){
+    return res.status(400).json({ ok:false, error:"token_and_user_id_required" });
+  }
+  try{
+    const result = await mutateSystemState(state => {
+      ensureSubscriptionExpirySweep(state);
+      const invite = state.premium.invites[token];
+      if(!invite || invite.status !== "pending"){
+        return { ok:false, error:"invite_invalid" };
+      }
+      if(invite.expires_at && !isIsoFuture(invite.expires_at)){
+        invite.status = "expired";
+        return { ok:false, error:"invite_expired" };
+      }
+      if(invite.invitee_email && email && invite.invitee_email !== email){
+        return { ok:false, error:"invite_email_mismatch" };
+      }
+      const ownerId = sanitizeUserId(invite.owner_user_id);
+      const ownerSub = getEffectiveSubscription(state, ownerId);
+      const ownerGate = buildFeatureGateForSubscription(ownerSub);
+      if(ownerGate.plan !== "4000"){
+        return { ok:false, error:"owner_plan_inactive" };
+      }
+      const seat = ensureActiveSeatState(state, ownerId);
+      if(!seat.members.includes(userId)){
+        if(seat.members.length >= seat.seat_limit){
+          return { ok:false, error:"seat_limit_reached" };
+        }
+        seat.members.push(userId);
+        seat.updated_at = new Date().toISOString();
+      }
+      invite.status = "redeemed";
+      invite.redeemed_by = userId;
+      invite.redeemed_at = new Date().toISOString();
+      return { ok:true, owner_user_id: ownerId, seat };
+    });
+    if(!result.ok){
+      return res.status(409).json(result);
+    }
+    return res.json({
+      ok:true,
+      owner_user_id: result.owner_user_id,
+      seat: {
+        owner_user_id: result.seat.owner_user_id,
+        seat_limit: result.seat.seat_limit,
+        members: result.seat.members
+      }
+    });
+  }catch(err){
+    console.error("premium_invite_redeem_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"premium_invite_redeem_failed" });
+  }
+});
+
+app.get("/api/premium/seats", async (req, res) => {
+  const userId = sanitizeUserId(req.query?.user_id);
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  try{
+    const data = await mutateSystemState(state => {
+      ensureSubscriptionExpirySweep(state);
+      const ownerId = getSeatOwnerForMember(state, userId) || userId;
+      const seat = state.premium.seats[ownerId] || null;
+      const ownerSub = getEffectiveSubscription(state, ownerId);
+      return {
+        owner_user_id: ownerId,
+        seat: seat
+          ? {
+            owner_user_id: sanitizeUserId(seat.owner_user_id),
+            seat_limit: Math.max(1, Math.floor(safeNumber(seat.seat_limit) || 1)),
+            members: Array.isArray(seat.members) ? seat.members.map(sanitizeUserId).filter(Boolean) : []
+          }
+          : null,
+        owner_subscription: buildFeatureGateForSubscription(ownerSub)
+      };
+    });
+    return res.json({ ok:true, ...data });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"premium_seats_failed" });
+  }
+});
+
+app.post("/api/media/events/upload", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  const event = {
+    id: `med_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
+    user_id: userId,
+    type: String(req.body?.type || req.body?.media_type || "upload").trim().slice(0, 40),
+    bucket: String(req.body?.bucket || "").trim().slice(0, 80),
+    path: String(req.body?.path || "").trim().slice(0, 320),
+    url: String(req.body?.url || "").trim().slice(0, 3000),
+    file_name: String(req.body?.file_name || "").trim().slice(0, 180),
+    mime: String(req.body?.mime || "").trim().slice(0, 120),
+    size: Math.max(0, Math.round(safeNumber(req.body?.size))),
+    source: String(req.body?.source || "web").trim().slice(0, 80),
+    product_id: String(req.body?.product_id || "").trim().slice(0, 120),
+    created_at: new Date().toISOString()
+  };
+
+  try{
+    await mutateSystemState(state => {
+      ensureSubscriptionExpirySweep(state);
+      pushBounded(state.automation.media_events, event, 6000);
+      pushBounded(state.automation.notifications, {
+        id: `notif_${event.id}`,
+        type: "media_upload",
+        user_id: userId,
+        created_at: event.created_at,
+        payload: event
+      }, 6000);
+      return true;
+    });
+    automationSupabaseUpsert("automation_media_events", [{
+      id: event.id,
+      user_id: event.user_id,
+      media_type: event.type || "upload",
+      bucket: event.bucket || null,
+      path: event.path || null,
+      url: event.url || null,
+      file_name: event.file_name || null,
+      mime: event.mime || null,
+      size_bytes: Math.max(0, Math.round(safeNumber(event.size))),
+      source: event.source || null,
+      product_id: event.product_id || null,
+      created_at: event.created_at
+    }], "id").catch(() => {});
+    notifyAutomationAdmin("media_upload", event).catch(()=>{});
+    return res.json({ ok:true, event });
+  }catch(err){
+    console.error("media_event_upload_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"media_event_upload_failed" });
+  }
+});
+
+app.get("/api/admin/events", async (req, res) => {
+  const limit = Math.max(1, Math.min(300, Math.floor(Number(req.query?.limit) || 50)));
+  try{
+    const state = await readSystemState();
+    ensureSubscriptionExpirySweep(state);
+    const mediaEvents = (state.automation.media_events || []).slice(-limit).reverse();
+    const notifications = (state.automation.notifications || []).slice(-limit).reverse();
+    const followups = (state.automation.followups || []).slice(-limit).reverse();
+    return res.json({
+      ok:true,
+      events:{
+        media_uploads: mediaEvents,
+        notifications,
+        followups
+      }
+    });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"admin_events_failed" });
   }
 });
 
@@ -2624,11 +4592,303 @@ app.post("/products/cache", async (req, res) => {
   return res.json({ ok: true, caching: false, message: "Product caching disabled." });
 });
 
+const TRYON_LANE_CONFIG = {
+  standard: { concurrency: 1 },
+  priority: { concurrency: 2 }
+};
+const tryonQueueByLane = {
+  standard: [],
+  priority: []
+};
+const tryonActiveWorkers = {
+  standard: 0,
+  priority: 0
+};
+const tryonJobStore = new Map();
+const TRYON_JOB_MAX = 1200;
+
+function trimTryonJobStore(){
+  if(tryonJobStore.size <= TRYON_JOB_MAX){
+    return;
+  }
+  const jobs = Array.from(tryonJobStore.values())
+    .sort((a, b) => new Date(a?.created_at || 0).getTime() - new Date(b?.created_at || 0).getTime());
+  const removeCount = tryonJobStore.size - TRYON_JOB_MAX;
+  for(let i = 0; i < removeCount; i += 1){
+    const id = jobs[i]?.id;
+    if(id) tryonJobStore.delete(id);
+  }
+}
+
+function getTryonLane(planCode){
+  const cfg = getPlanConfig(planCode);
+  return cfg.tryon_lane === "priority" ? "priority" : "standard";
+}
+
+function getTryonDateKey(){
+  const now = new Date();
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(now.getUTCDate()).padStart(2, "0")}`;
+}
+
+function buildTryonAbuseKey(req, userId){
+  const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  const ip = forwarded || String(req.ip || "").trim();
+  const ua = String(req.headers["user-agent"] || "").trim();
+  const seed = `${sanitizeUserId(userId) || "guest"}|${ip}|${ua}`;
+  return crypto.createHash("sha1").update(seed).digest("hex").slice(0, 24);
+}
+
+function detectTryonAbuse(req, userId){
+  const store = app.locals.tryonAbuse || (app.locals.tryonAbuse = new Map());
+  const key = buildTryonAbuseKey(req, userId);
+  const now = Date.now();
+  const bucket = store.get(key) || { stamps: [], blocked_until: 0 };
+  bucket.stamps = (bucket.stamps || []).filter(ts => now - ts < 60 * 1000);
+  if(bucket.blocked_until && bucket.blocked_until > now){
+    store.set(key, bucket);
+    return {
+      blocked: true,
+      retry_after_seconds: Math.max(1, Math.ceil((bucket.blocked_until - now) / 1000)),
+      reason: "rate_abuse"
+    };
+  }
+  bucket.stamps.push(now);
+  if(bucket.stamps.length > 18){
+    bucket.blocked_until = now + 10 * 60 * 1000;
+  }
+  store.set(key, bucket);
+  return {
+    blocked: bucket.blocked_until > now,
+    retry_after_seconds: bucket.blocked_until > now
+      ? Math.max(1, Math.ceil((bucket.blocked_until - now) / 1000))
+      : 0,
+    reason: bucket.blocked_until > now ? "rate_abuse" : ""
+  };
+}
+
+async function resolveTryonGate(userIdInput, requestedPlanInput){
+  const userId = sanitizeUserId(userIdInput);
+  if(!userId || userId === "guest"){
+    return buildFeatureGateForSubscription(buildFreeSubscription("guest", "guest"));
+  }
+  return mutateSystemState(state => {
+    ensureSubscriptionExpirySweep(state);
+    const sub = getEffectiveSubscription(state, userId);
+    return buildFeatureGateForSubscription(sub);
+  });
+}
+
+async function processTryonJob(job){
+  const planCode = normalizePlanCode(job?.plan);
+  const payload = job?.payload || {};
+  const userImage = payload.userImageBuffer || null;
+  const userImageMime = payload.userImageMime || "image/jpeg";
+  const productInfo = payload.productInfo || {};
+
+  const manualPayload = {
+    userId: payload.userId,
+    username: payload.username,
+    userEmail: payload.userEmail,
+    plan: planCode,
+    language: payload.language,
+    userImageBuffer: userImage,
+    userImageMime,
+    productInfo
+  };
+
+  if(!userImage || !userImage.length){
+    return manualProcessingResponse(planCode);
+  }
+
+  const productImageUrl = String(productInfo.image || payload.product_url || "").trim();
+  const productFetch = await fetchImageBuffer(productImageUrl);
+  if(!productFetch.ok || !productFetch.buffer || !productFetch.buffer.length){
+    const saved = await saveManualRequest(manualPayload);
+    return manualProcessingResponse(planCode, { request_id: saved?.request_id || "" });
+  }
+
+  if(!FormDataCtor){
+    const saved = await saveManualRequest(manualPayload);
+    return manualProcessingResponse(planCode, { request_id: saved?.request_id || "" });
+  }
+
+  const form = new FormDataCtor();
+  form.append("model", "gpt-image-1.5");
+  const productMime = productFetch.contentType || "image/jpeg";
+  if(FormDataCtor === global.FormData && BlobCtor){
+    form.append("image[]", new BlobCtor([userImage], { type: userImageMime }), "user.jpg");
+    form.append("image[]", new BlobCtor([productFetch.buffer], { type: productMime }), "product.jpg");
+  }else{
+    form.append("image[]", userImage, "user.jpg");
+    form.append("image[]", productFetch.buffer, "product.jpg");
+  }
+  form.append(
+    "prompt",
+    "Make the person wear the product naturally. Perfect fit, realistic folds, lighting and shadows. Do not change background. Photorealistic."
+  );
+
+  const headers = { Authorization: `Bearer ${OPENAI_API_KEY}` };
+  if(typeof form.getHeaders === "function"){
+    Object.assign(headers, form.getHeaders());
+  }
+
+  const response = await fetch("https://api.openai.com/v1/images/edits", {
+    method: "POST",
+    headers,
+    body: form
+  });
+
+  const raw = await response.text();
+  let data = null;
+  try{
+    data = raw ? JSON.parse(raw) : null;
+  }catch(_){
+    data = { raw };
+  }
+
+  if(!response.ok){
+    const saved = await saveManualRequest(manualPayload);
+    return manualProcessingResponse(planCode, { request_id: saved?.request_id || "" });
+  }
+
+  const imageBase64 = data?.data?.[0]?.b64_json || "";
+  const image = imageBase64 ? `data:image/png;base64,${imageBase64}` : "";
+  if(!image){
+    const saved = await saveManualRequest(manualPayload);
+    return manualProcessingResponse(planCode, { request_id: saved?.request_id || "" });
+  }
+
+  return {
+    status: "success",
+    image,
+    plan: planCode,
+    download_allowed: true
+  };
+}
+
+function scheduleTryonWorkers(lane){
+  const laneName = lane === "priority" ? "priority" : "standard";
+  const cfg = TRYON_LANE_CONFIG[laneName] || TRYON_LANE_CONFIG.standard;
+  while(
+    tryonActiveWorkers[laneName] < Math.max(1, Math.floor(cfg.concurrency || 1)) &&
+    tryonQueueByLane[laneName].length
+  ){
+    runTryonWorker(laneName).catch(err => {
+      console.error("tryon_worker_error:", err?.stack || err);
+    });
+  }
+}
+
+async function runTryonWorker(lane){
+  const laneName = lane === "priority" ? "priority" : "standard";
+  if(!tryonQueueByLane[laneName].length){
+    return;
+  }
+  tryonActiveWorkers[laneName] += 1;
+  try{
+    while(tryonQueueByLane[laneName].length){
+      const jobId = tryonQueueByLane[laneName].shift();
+      const job = tryonJobStore.get(jobId);
+      if(!job) continue;
+
+      job.status = "processing";
+      job.started_at = new Date().toISOString();
+      try{
+        const result = await processTryonJob(job);
+        job.result = result;
+        job.status = "completed";
+        job.completed_at = new Date().toISOString();
+        await mutateSystemState(state => {
+          state.tryon.lane_metrics.completed += 1;
+          return true;
+        });
+      }catch(err){
+        console.error("tryon_job_process_error:", err?.stack || err);
+        job.status = "failed";
+        job.error = String(err?.message || "tryon_failed");
+        job.completed_at = new Date().toISOString();
+        await mutateSystemState(state => {
+          state.tryon.lane_metrics.failed += 1;
+          pushBounded(state.automation.notifications, {
+            id: `tryon_fail_${job.id}`,
+            type: "tryon_failed",
+            user_id: job.user_id,
+            lane: laneName,
+            created_at: new Date().toISOString(),
+            payload: {
+              job_id: job.id,
+              error: job.error
+            }
+          }, 6000);
+          return true;
+        });
+      }
+      trimTryonJobStore();
+    }
+  }finally{
+    tryonActiveWorkers[laneName] = Math.max(0, tryonActiveWorkers[laneName] - 1);
+    if(tryonQueueByLane[laneName].length){
+      setImmediate(() => scheduleTryonWorkers(laneName));
+    }
+  }
+}
+
+function enqueueTryonJob(job){
+  const lane = job.lane === "priority" ? "priority" : "standard";
+  tryonJobStore.set(job.id, job);
+  tryonQueueByLane[lane].push(job.id);
+  trimTryonJobStore();
+  scheduleTryonWorkers(lane);
+  return tryonQueueByLane[lane].length;
+}
+
 app.options("/tryon", (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.sendStatus(204);
+});
+
+app.get("/api/tryon/jobs/:jobId", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const jobId = String(req.params?.jobId || "").trim();
+  if(!jobId){
+    return res.status(400).json({ ok:false, error:"job_id_required" });
+  }
+  const job = tryonJobStore.get(jobId);
+  if(!job){
+    return res.status(404).json({ ok:false, error:"job_not_found" });
+  }
+  if(job.status === "completed"){
+    return res.json({
+      ok:true,
+      job_id: job.id,
+      lane: job.lane,
+      status: "completed",
+      result: job.result || null
+    });
+  }
+  if(job.status === "failed"){
+    return res.json({
+      ok:true,
+      job_id: job.id,
+      lane: job.lane,
+      status: "failed",
+      error: job.error || "tryon_failed"
+    });
+  }
+  const queue = tryonQueueByLane[job.lane === "priority" ? "priority" : "standard"] || [];
+  const position = job.status === "processing"
+    ? 0
+    : Math.max(1, queue.findIndex(id => id === job.id) + 1);
+  return res.json({
+    ok:true,
+    job_id: job.id,
+    lane: job.lane,
+    status: job.status,
+    position,
+    poll_after_ms: 1500
+  });
 });
 
 app.post("/tryon", upload.single("userImage"), async (req, res) => {
@@ -2637,7 +4897,7 @@ app.post("/tryon", upload.single("userImage"), async (req, res) => {
   const userId = String(req.body?.user_id || "guest").trim() || "guest";
   const username = String(req.body?.username || req.body?.user_name || "guest").trim() || "guest";
   const userEmail = String(req.body?.user_email || "").trim();
-  const planCode = normalizePlanCode(req.body?.user_plan);
+  const requestedPlanCode = normalizePlanCode(req.body?.user_plan);
   const language = String(req.body?.user_language || "en").trim() || "en";
   const userImage = req.file?.buffer || null;
   const userImageMime = req.file?.mimetype || "image/jpeg";
@@ -2650,24 +4910,49 @@ app.post("/tryon", upload.single("userImage"), async (req, res) => {
     }catch(_){ }
   }
   if(!productInfo.id && req.body?.product_id) productInfo.id = String(req.body.product_id);
-  const manualPayload = {
-    userId,
-    username,
-    userEmail,
-    plan: planCode,
-    language,
-    userImageBuffer: userImage,
-    userImageMime,
-    productInfo
-  };
 
   try{
+    const gate = await resolveTryonGate(userId, requestedPlanCode);
+    const planCode = normalizePlanCode(gate?.plan || requestedPlanCode);
+    const lane = getTryonLane(planCode);
+
+    if(userId && userId !== "guest"){
+      await mutateSystemState(state => {
+        const current = state.identities[userId] || {};
+        const derived = deriveIdentityDefaults({
+          user_id: userId,
+          email: userEmail,
+          username,
+          display_name: username
+        });
+        state.identities[userId] = {
+          ...current,
+          ...derived,
+          user_id: userId,
+          created_at: current.created_at || new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        return true;
+      });
+    }
+
+    const abuse = detectTryonAbuse(req, userId);
+    if(abuse.blocked){
+      return res.status(429).json({
+        status: "blocked",
+        error: "abuse_detected",
+        retry_after_seconds: abuse.retry_after_seconds,
+        plan: planCode
+      });
+    }
+
     const usageStore = app.locals.tryonUsage || (app.locals.tryonUsage = new Map());
-    const now = new Date();
-    const dateKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-    const usageKey = `${userId}::${dateKey}`;
+    const dateKey = getTryonDateKey();
+    const usageKey = `${sanitizeUserId(userId) || "guest"}::${dateKey}`;
     const used = usageStore.get(usageKey) || 0;
-    const limit = getPlanDailyLimit(planCode);
+    const limit = gate?.tryon_daily_limit === Infinity
+      ? Infinity
+      : Math.max(0, Math.floor(safeNumber(gate?.tryon_daily_limit) || getPlanDailyLimit(planCode)));
 
     if(limit !== Infinity && used >= limit){
       return res.json({
@@ -2678,88 +4963,69 @@ app.post("/tryon", upload.single("userImage"), async (req, res) => {
       });
     }
 
-    if(limit !== Infinity){
-      usageStore.set(usageKey, used + 1);
-    }
-
     if(!userImage || !userImage.length){
       return res.json(manualProcessingResponse(planCode));
     }
 
-    const productImageUrl = String(productInfo.image || req.body?.product_url || "").trim();
-    const productFetch = await fetchImageBuffer(productImageUrl);
-    if(!productFetch.ok || !productFetch.buffer || !productFetch.buffer.length){
-      const saved = await saveManualRequest(manualPayload);
-      return res.json(manualProcessingResponse(planCode, { request_id: saved?.request_id || "" }));
+    if(limit !== Infinity){
+      usageStore.set(usageKey, used + 1);
     }
 
-    if (!FormDataCtor) {
-      const saved = await saveManualRequest(manualPayload);
-      return res.json(manualProcessingResponse(planCode, { request_id: saved?.request_id || "" }));
-    }
-
-    const form = new FormDataCtor();
-    form.append("model", "gpt-image-1.5");
-    const productMime = productFetch.contentType || "image/jpeg";
-    if (FormDataCtor === global.FormData && BlobCtor) {
-      form.append("image[]", new BlobCtor([userImage], { type: userImageMime }), "user.jpg");
-      form.append("image[]", new BlobCtor([productFetch.buffer], { type: productMime }), "product.jpg");
-    } else {
-      form.append("image[]", userImage, "user.jpg");
-      form.append("image[]", productFetch.buffer, "product.jpg");
-    }
-    form.append(
-      "prompt",
-      "Make the person wear the product naturally. Perfect fit, realistic folds, lighting and shadows. Do not change background. Photorealistic."
-    );
-
-    const headers = { Authorization: `Bearer ${OPENAI_API_KEY}` };
-    if (typeof form.getHeaders === "function") {
-      Object.assign(headers, form.getHeaders());
-    }
-
-    const response = await fetch("https://api.openai.com/v1/images/edits", {
-      method: "POST",
-      headers,
-      body: form
+    const jobId = typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+    const job = {
+      id: jobId,
+      user_id: sanitizeUserId(userId) || "guest",
+      lane,
+      plan: planCode,
+      status: "queued",
+      created_at: new Date().toISOString(),
+      payload: {
+        userId,
+        username,
+        userEmail,
+        language,
+        userImageBuffer: userImage,
+        userImageMime,
+        productInfo,
+        product_url: String(req.body?.product_url || "").trim()
+      }
+    };
+    const position = enqueueTryonJob(job);
+    await mutateSystemState(state => {
+      if(lane === "priority"){
+        state.tryon.lane_metrics.priority_queued += 1;
+      }else{
+        state.tryon.lane_metrics.standard_queued += 1;
+      }
+      pushBounded(state.automation.funnel_events, {
+        id: `tryon_queue_${jobId}`,
+        user_id: job.user_id,
+        step: "ai_tryon",
+        month: parseMonthlyKey(),
+        at: new Date().toISOString(),
+        meta: {
+          lane,
+          plan: planCode
+        }
+      }, 8000);
+      return true;
     });
 
-    const raw = await response.text();
-    let data = null;
-    try{
-      data = raw ? JSON.parse(raw) : null;
-    }catch(_){
-      data = { raw };
-    }
-
-    if(!response.ok){
-      const saved = await saveManualRequest(manualPayload);
-      return res.json(manualProcessingResponse(planCode, { request_id: saved?.request_id || "" }));
-    }
-
-    const imageBase64 = data?.data?.[0]?.b64_json || "";
-    const image = imageBase64 ? `data:image/png;base64,${imageBase64}` : "";
-    if(!image){
-      const saved = await saveManualRequest(manualPayload);
-      return res.json(manualProcessingResponse(planCode, { request_id: saved?.request_id || "" }));
-    }
-
     return res.json({
-      status: "success",
-      image
+      status: "queued",
+      job_id: jobId,
+      lane,
+      position,
+      plan: planCode,
+      poll_after_ms: 1500,
+      poll_url: `/api/tryon/jobs/${encodeURIComponent(jobId)}`
     });
 
   } catch (err) {
     console.error("Try-on error:", err?.stack || err);
-    let saved = null;
-    try{
-      if(userImage && userImage.length){
-        saved = await saveManualRequest(manualPayload);
-      }
-    }catch(queueErr){
-      console.error("Manual request save failed:", queueErr?.stack || queueErr);
-    }
-    return res.json(manualProcessingResponse(planCode, { request_id: saved?.request_id || "" }));
+    return res.json(manualProcessingResponse(requestedPlanCode));
   }
 });
 
@@ -2771,6 +5037,28 @@ app.use((err, req, res, next) => {
   }
   return next(err);
 });
+
+const systemMaintenanceTimer = setInterval(() => {
+  mutateSystemState(state => {
+    ensureSubscriptionExpirySweep(state);
+    const due = runFollowupSweep(state);
+    due.forEach(item => {
+      pushBounded(state.automation.notifications, {
+        id: `fu_ready_${item.id}`,
+        type: "followup_ready",
+        user_id: sanitizeUserId(item.user_id),
+        created_at: new Date().toISOString(),
+        payload: item
+      }, 6000);
+    });
+    return true;
+  }).catch(err => {
+    console.error("system_maintenance_error:", err?.stack || err);
+  });
+}, 60 * 1000);
+if(systemMaintenanceTimer && typeof systemMaintenanceTimer.unref === "function"){
+  systemMaintenanceTimer.unref();
+}
 
 function startServer(){
   app.listen(PORT, "0.0.0.0", () => {

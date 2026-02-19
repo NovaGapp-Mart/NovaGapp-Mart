@@ -125,6 +125,41 @@ function resolveTryonApiBase(){
 }
 const API_BASE = resolveTryonApiBase();
 
+function buildAutomationApiBases(){
+  const out = [];
+  const push = (raw) => {
+    const val = String(raw || "").trim().replace(/\/+$/g, "");
+    if(!val) return;
+    if(!/^https?:\/\//i.test(val)) return;
+    if(!out.includes(val)) out.push(val);
+  };
+  push(API_BASE);
+  push(window.CONTEST_API_BASE || window.API_BASE || "");
+  try{
+    push(localStorage.getItem("contest_api_base"));
+    push(localStorage.getItem("api_base"));
+  }catch(_){ }
+  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+  push("https://novagapp-mart.onrender.com");
+  return out;
+}
+
+async function reportMediaUploadEvent(payload){
+  const eventPayload = payload && typeof payload === "object" ? payload : {};
+  const bases = buildAutomationApiBases();
+  for(const base of bases){
+    try{
+      const res = await fetch(`${base}/api/media/events/upload`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify(eventPayload)
+      });
+      if(res.ok) return true;
+    }catch(_){ }
+  }
+  return false;
+}
+
 function buildProductLink(productId){
   const cleanId = String(productId || "").trim();
   if(!cleanId) return "";
@@ -325,6 +360,22 @@ publishBtn.onclick=async()=>{
     data?.id,
     (data?.images && data.images[0]) || (product.images && product.images[0])
   );
+
+  try{
+    const firstFile = files[0] || null;
+    await reportMediaUploadEvent({
+      user_id: currentUser?.id || "",
+      type: "product_upload",
+      source: "add_product",
+      product_id: String(data?.id || ""),
+      file_name: String(firstFile?.name || ""),
+      mime: String(firstFile?.type || "image/*"),
+      size: Number(firstFile?.size || 0),
+      url: String((data?.images && data.images[0]) || ""),
+      bucket: "products",
+      path: ""
+    });
+  }catch(_){ }
 
   const generatedLink = buildProductLink(data?.id);
   setProductLinkUi(generatedLink);

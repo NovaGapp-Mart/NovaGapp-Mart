@@ -163,6 +163,50 @@ function getBackendPlanCode(planInput){
   return "free";
 }
 
+function buildApiBases(){
+  const out = [];
+  const push = (raw) => {
+    const value = String(raw || "").trim().replace(/\/+$/g, "");
+    if(!value) return;
+    if(!/^https?:\/\//i.test(value)) return;
+    if(!out.includes(value)) out.push(value);
+  };
+  try{
+    push(window.CONTEST_API_BASE);
+    push(window.API_BASE);
+    push(localStorage.getItem("contest_api_base"));
+    push(localStorage.getItem("api_base"));
+    push(sessionStorage.getItem("contest_api_base"));
+    push(sessionStorage.getItem("api_base"));
+  }catch(_){ }
+  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+  push("https://novagapp-mart.onrender.com");
+  return out;
+}
+
+async function callAutomationApi(path, options){
+  const req = options || {};
+  const method = req.method || "GET";
+  const body = req.body;
+  const candidates = [""].concat(buildApiBases());
+  for(const base of candidates){
+    const url = `${base}${path}`;
+    try{
+      const res = await fetch(url, {
+        method,
+        headers: body ? { "Content-Type":"application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+        cache: "no-store"
+      });
+      const payload = await res.json().catch(() => null);
+      if(res.ok && payload){
+        return payload;
+      }
+    }catch(_){ }
+  }
+  return null;
+}
+
 function extractMissingColumnName(error){
   const text = `${error?.message || ""} ${error?.details || ""}`;
   const pgMatch = text.match(/column\s+\"?([a-zA-Z0-9_.]+)\"?\s+does not exist/i);
@@ -192,6 +236,16 @@ function extractMissingColumnName(error){
 })();
 
 async function loadPlan(){
+  const automated = await callAutomationApi(`/api/subscription/status?user_id=${encodeURIComponent(currentUser.id)}`, { method:"GET" });
+  const automatedPlan = normalizeDesktopPlan(automated?.subscription?.plan || "");
+  if(automated?.ok && automatedPlan){
+    activePlan = automatedPlan;
+    try{
+      localStorage.setItem("userPlan", getBackendPlanCode(activePlan));
+    }catch(_){ }
+    return;
+  }
+
   let query = supaClient
     .from("subscription")
     .select("plan")
@@ -217,6 +271,9 @@ async function loadPlan(){
   }
   if(data?.plan){
     activePlan = normalizeDesktopPlan(data.plan);
+    try{
+      localStorage.setItem("userPlan", getBackendPlanCode(activePlan));
+    }catch(_){ }
   }
 }
 
@@ -333,38 +390,42 @@ async function verifyPayment(razorpayResponse){
   return payload;
 }
 
-async function saveSubscription(plan, amountInr, verifyPayload){
-  const payload = {
-    user_id: currentUser.id,
-    plan: normalizeDesktopPlan(plan),
-    amount: Number(amountInr || 0),
-    currency: "INR",
-    payment_id: String(verifyPayload?.razorpay_payment_id || ""),
-    status: "active",
-    razorpay_order_id: String(verifyPayload?.razorpay_order_id || "")
-  };
-
-  let row = { ...payload };
-  let attempts = 0;
-  while(attempts < 8){
-    const { error } = await supaClient.from("subscription").insert(row);
-    if(!error){
-      try{
-        localStorage.setItem("userPlan", getBackendPlanCode(payload.plan));
-      }catch(_){}
-      return;
+async function activateSubscriptionAutomation(plan, amountInr, verifyPayload){
+  const payload = await callAutomationApi("/api/subscription/activate", {
+    method: "POST",
+    body: {
+      user_id: currentUser.id,
+      plan: getBackendPlanCode(plan),
+      source: "subscription_checkout",
+      amount_paise: Math.round(Number(amountInr || 0) * 100),
+      currency: "INR",
+      payment_id: String(verifyPayload?.razorpay_payment_id || ""),
+      order_id: String(verifyPayload?.razorpay_order_id || ""),
+      metadata: {
+        ui_plan: normalizeDesktopPlan(plan)
+      }
     }
-    if(!missingColumnError(error)){
-      throw error;
-    }
-    const missingCol = extractMissingColumnName(error);
-    if(!missingCol || !Object.prototype.hasOwnProperty.call(row, missingCol)){
-      throw error;
-    }
-    delete row[missingCol];
-    attempts += 1;
+  });
+  if(payload?.ok){
+    const normalized = normalizeDesktopPlan(payload?.subscription?.plan || plan);
+    activePlan = normalized;
+    try{
+      localStorage.setItem("userPlan", getBackendPlanCode(normalized));
+    }catch(_){ }
+    return normalized;
   }
-  throw new Error("subscription_insert_failed");
+
+  const status = await callAutomationApi(`/api/subscription/status?user_id=${encodeURIComponent(currentUser.id)}`, { method:"GET" });
+  if(status?.ok && status?.subscription?.plan){
+    const normalized = normalizeDesktopPlan(status.subscription.plan);
+    activePlan = normalized;
+    try{
+      localStorage.setItem("userPlan", getBackendPlanCode(normalized));
+    }catch(_){ }
+    return normalized;
+  }
+
+  throw new Error("subscription_activation_failed");
 }
 
 async function openCheckout(order, amountInr, plan){
@@ -443,9 +504,9 @@ async function pay(amount, plan, currency){
     const order = await createPaymentOrder(amountInr, nextPlan, baseAmount, baseCurrency);
     const response = await openCheckout(order, amountInr, nextPlan);
     const verified = await verifyPayment(response);
-    await saveSubscription(nextPlan, amountInr, verified);
+    const activatedPlan = await activateSubscriptionAutomation(nextPlan, amountInr, verified);
 
-    activePlan = nextPlan;
+    activePlan = activatedPlan || nextPlan;
     markCurrent();
     alert("Plan activated");
   }catch(err){
