@@ -410,29 +410,23 @@ async function signup(){
     return;
   }
 
-  const { data: loginData, error: loginError } = await supa.auth.signInWithPassword({
-    email,
-    password
-  });
-
-  if(loginError){
-    const lower = String(loginError.message || "").toLowerCase();
-    if(lower.includes("email not confirmed")){
-      alert("Signup successful. Please verify your email, then login.");
-      location.href = "login.html";
-      return;
-    }
-    if(lower.includes("invalid login credentials")){
-      alert("Account created. Please login with the same password.");
-      location.href = "login.html";
-      return;
-    }
-    alert("Account created. Please login.");
+  let user = signupData?.user || null;
+  let hasSession = Boolean(signupData?.session?.access_token);
+  if(!hasSession){
+    try{
+      const { data:sessionData } = await supa.auth.getSession();
+      hasSession = Boolean(sessionData?.session?.access_token);
+      if(!user?.id){
+        user = sessionData?.session?.user || null;
+      }
+    }catch(_){ }
+  }
+  if(!hasSession){
+    alert("Signup successful. Please verify your email, then login.");
     location.href = "login.html";
     return;
   }
 
-  let user = loginData?.user || signupData?.user || null;
   if(!user?.id){
     try{
       const { data:userData } = await supa.auth.getUser();

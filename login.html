@@ -399,7 +399,7 @@ async function login(){
   if(error){
     const msg = String(error.message || "").toLowerCase();
     if(msg.includes("invalid login credentials")){
-      alert("Invalid email or password. Check password, or use Forgot password.");
+      alert("Invalid email or password. If this is a new account, verify your email first.");
       return;
     }
     if(msg.includes("email not confirmed")){
