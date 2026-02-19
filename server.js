@@ -647,6 +647,44 @@ async function fetchImageBuffer(imageUrl){
   };
 }
 
+function isPrivateOfflineProxyHost(hostname){
+  const host = String(hostname || "").trim().toLowerCase();
+  if(!host) return true;
+  if(host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "0.0.0.0"){
+    return true;
+  }
+  if(host.startsWith("10.") || host.startsWith("192.168.")){
+    return true;
+  }
+  const m172 = host.match(/^172\.(\d+)\./);
+  if(m172){
+    const second = Number(m172[1]);
+    if(Number.isFinite(second) && second >= 16 && second <= 31){
+      return true;
+    }
+  }
+  return false;
+}
+
+function parseSafeOfflineVideoUrl(urlInput){
+  const raw = String(urlInput || "").trim();
+  if(!raw || raw.length > 3000){
+    return null;
+  }
+  try{
+    const parsed = new URL(raw);
+    if(parsed.protocol !== "http:" && parsed.protocol !== "https:"){
+      return null;
+    }
+    if(isPrivateOfflineProxyHost(parsed.hostname)){
+      return null;
+    }
+    return parsed.toString();
+  }catch(_){
+    return null;
+  }
+}
+
 let systemStateQueue = Promise.resolve();
 
 function createDefaultSystemState(){
@@ -1630,59 +1668,70 @@ async function fetchUsersForDiscovery(tokens, limit){
     return [];
   }
   const max = Math.max(1, Math.min(500, Math.floor(Number(limit) || 100)));
-  const endpoint = new URL("/rest/v1/users", base + "/");
-  endpoint.searchParams.set("select", "user_id,username,full_name,display_name,email,email_local,photo,search_tokens,created_at");
-  endpoint.searchParams.set("limit", String(max));
-  endpoint.searchParams.set("order", "created_at.desc");
-  if(Array.isArray(tokens) && tokens.length){
-    const checks = [];
-    tokens.slice(0, 4).forEach(token => {
-      const clean = String(token || "").replace(/[%*,()]/g, "").trim();
-      if(!clean) return;
-      checks.push(`username.ilike.*${clean}*`);
-      checks.push(`full_name.ilike.*${clean}*`);
-      checks.push(`display_name.ilike.*${clean}*`);
-      checks.push(`email.ilike.*${clean}*`);
-      checks.push(`email_local.ilike.*${clean}*`);
-    });
-    if(checks.length){
-      endpoint.searchParams.set("or", checks.join(","));
+  const selectVariants = [
+    {
+      select: "user_id,username,full_name,display_name,email,email_local,photo,search_tokens,created_at",
+      searchCols: ["username", "full_name", "display_name", "email", "email_local"]
+    },
+    {
+      select: "user_id,username,full_name,email,photo,created_at",
+      searchCols: ["username", "full_name", "email"]
+    },
+    {
+      select: "user_id,username,full_name,email,photo",
+      searchCols: ["username", "full_name", "email"]
+    },
+    {
+      select: "user_id,username,full_name,photo,created_at",
+      searchCols: ["username", "full_name"]
+    },
+    {
+      select: "user_id,username,full_name,photo",
+      searchCols: ["username", "full_name"]
     }
-  }
+  ];
 
-  const response = await fetch(endpoint.toString(), {
-    method: "GET",
-    headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`
-    }
-  });
-  if(!response.ok){
-    const body = await response.text().catch(() => "");
-    const missing = detectMissingColumnName(body);
-    if(missing){
-      const fallback = new URL("/rest/v1/users", base + "/");
-      fallback.searchParams.set("select", "user_id,username,full_name,photo,created_at");
-      fallback.searchParams.set("limit", String(max));
-      fallback.searchParams.set("order", "created_at.desc");
-      const fallbackRes = await fetch(fallback.toString(), {
-        method: "GET",
-        headers: {
-          apikey: key,
-          Authorization: `Bearer ${key}`
-        }
+  for(const variant of selectVariants){
+    const endpoint = new URL("/rest/v1/users", base + "/");
+    endpoint.searchParams.set("select", variant.select);
+    endpoint.searchParams.set("limit", String(max));
+    endpoint.searchParams.set("order", "created_at.desc");
+
+    if(Array.isArray(tokens) && tokens.length){
+      const checks = [];
+      tokens.slice(0, 4).forEach(token => {
+        const clean = String(token || "").replace(/[%*,()]/g, "").trim();
+        if(!clean) return;
+        (variant.searchCols || []).forEach(col => {
+          checks.push(`${col}.ilike.*${clean}*`);
+        });
       });
-      if(!fallbackRes.ok){
-        return [];
+      if(checks.length){
+        endpoint.searchParams.set("or", checks.join(","));
       }
-      const rows = await fallbackRes.json().catch(() => []);
-      return Array.isArray(rows) ? rows : [];
     }
-    return [];
-  }
 
-  const rows = await response.json().catch(() => []);
-  return Array.isArray(rows) ? rows : [];
+    const response = await fetch(endpoint.toString(), {
+      method: "GET",
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`
+      }
+    });
+
+    if(!response.ok){
+      const body = await response.text().catch(() => "");
+      const missing = detectMissingColumnName(body);
+      if(missing){
+        continue;
+      }
+      return [];
+    }
+
+    const rows = await response.json().catch(() => []);
+    return Array.isArray(rows) ? rows : [];
+  }
+  return [];
 }
 
 /* ======================
@@ -5121,6 +5170,45 @@ app.options("/products/cache", (req, res) => {
 app.post("/products/cache", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   return res.json({ ok: true, caching: false, message: "Product caching disabled." });
+});
+
+app.get("/api/offline/video", async (req, res) => {
+  const sourceUrl = parseSafeOfflineVideoUrl(req.query?.url);
+  if(!sourceUrl){
+    return res.status(400).json({ ok:false, error:"invalid_url" });
+  }
+  try{
+    const upstream = await fetch(sourceUrl, {
+      method: "GET",
+      headers: {
+        "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+        "Accept":"video/*,*/*;q=0.8"
+      }
+    });
+    if(!upstream.ok){
+      return res.status(upstream.status).json({
+        ok:false,
+        error:"upstream_fetch_failed",
+        status: upstream.status
+      });
+    }
+    const contentType = String(upstream.headers.get("content-type") || "video/mp4").trim() || "video/mp4";
+    const contentLengthRaw = String(upstream.headers.get("content-length") || "").trim();
+    const contentLength = Number(contentLengthRaw);
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Content-Type", contentType);
+    if(Number.isFinite(contentLength) && contentLength > 0){
+      res.setHeader("Content-Length", String(contentLength));
+    }else{
+      res.setHeader("Content-Length", String(buffer.length));
+    }
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(200).send(buffer);
+  }catch(err){
+    console.error("offline_video_proxy_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"offline_video_proxy_failed" });
+  }
 });
 
 const TRYON_LANE_CONFIG = {

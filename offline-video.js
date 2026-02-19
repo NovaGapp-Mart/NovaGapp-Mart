@@ -83,7 +83,63 @@
         throw new Error("video_download_failed_" + response.status);
       }
       return response.blob();
+    }).catch(async directErr => {
+      const fallback = await fetchVideoBlobViaProxy(url).catch(() => null);
+      if(fallback){
+        return fallback;
+      }
+      throw directErr;
     });
+  }
+
+  function buildOfflineProxyBases(){
+    const out = [""];
+    const push = (raw) => {
+      const value = String(raw || "").trim().replace(/\/+$/g, "");
+      if(!value) return;
+      if(!/^https?:\/\//i.test(value)) return;
+      if(!out.includes(value)) out.push(value);
+    };
+    try{
+      push(window.CONTEST_API_BASE);
+      push(window.API_BASE);
+      push(localStorage.getItem("contest_api_base"));
+      push(localStorage.getItem("api_base"));
+      push(sessionStorage.getItem("contest_api_base"));
+      push(sessionStorage.getItem("api_base"));
+    }catch(_){ }
+    if(/^https?:\/\//i.test(location.origin || "")){
+      push(location.origin);
+    }
+    push("https://novagapp-mart.onrender.com");
+    return out;
+  }
+
+  async function fetchVideoBlobViaProxy(url){
+    const sourceUrl = String(url || "").trim();
+    if(!sourceUrl){
+      throw new Error("video_url_required");
+    }
+    const bases = buildOfflineProxyBases();
+    let lastError = null;
+    for(const base of bases){
+      const endpoint = `${base}/api/offline/video?url=${encodeURIComponent(sourceUrl)}`;
+      try{
+        const response = await fetch(endpoint, {
+          method: "GET",
+          credentials: "omit",
+          cache: "no-store"
+        });
+        if(!response.ok){
+          lastError = new Error("offline_proxy_failed_" + response.status);
+          continue;
+        }
+        return await response.blob();
+      }catch(err){
+        lastError = err;
+      }
+    }
+    throw lastError || new Error("offline_proxy_failed");
   }
 
   async function saveVideo(payload){
