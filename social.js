@@ -209,7 +209,88 @@
 
     function isPlaceholderName(value){
       const text = cleanText(value).toLowerCase();
-      return !text || text === "user" || text === "u" || text === "guest" || text === "unknown";
+      if(!text) return true;
+      if(text === "user" || text === "u" || text === "guest" || text === "unknown" || text === "unique" || text === "member"){
+        return true;
+      }
+      if(/^member[\s._-]*[a-z0-9]{4,}$/i.test(text)) return true;
+      if(/^user[\s._-]*[a-z0-9]{4,}$/i.test(text)) return true;
+      if(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)){
+        return true;
+      }
+      return false;
+    }
+
+    function toTitleWords(value){
+      return cleanText(value)
+        .split(/\s+/)
+        .map(part => {
+          const token = String(part || "").trim();
+          if(!token) return "";
+          return token.slice(0, 1).toUpperCase() + token.slice(1).toLowerCase();
+        })
+        .filter(Boolean)
+        .join(" ")
+        .slice(0, 64);
+    }
+
+    function splitCompactToken(value){
+      const token = cleanText(value).toLowerCase().replace(/[^a-z]+/g, "");
+      if(token.length < 9){
+        return token ? [token] : [];
+      }
+      const mid = Math.floor(token.length / 2);
+      const minSide = 3;
+      let bestIdx = -1;
+      let bestWeight = -Infinity;
+      for(let i = minSide; i <= token.length - minSide; i += 1){
+        const prev = token[i - 1];
+        const next = token[i];
+        const prevVowel = /[aeiou]/.test(prev);
+        const nextVowel = /[aeiou]/.test(next);
+        const dist = Math.abs(i - mid);
+        let weight = 0;
+        if(prevVowel && !nextVowel) weight += 4;
+        if(!prevVowel && nextVowel) weight += 3;
+        if(dist <= 1) weight += 3;
+        else if(dist <= 2) weight += 2;
+        else if(dist <= 4) weight += 1;
+        if(i >= 4 && token.length - i >= 4) weight += 1;
+        if(weight > bestWeight){
+          bestWeight = weight;
+          bestIdx = i;
+        }
+      }
+      if(bestIdx <= 0){
+        return [token];
+      }
+      const left = token.slice(0, bestIdx).trim();
+      const right = token.slice(bestIdx).trim();
+      if(!left || !right){
+        return [token];
+      }
+      return [left, right];
+    }
+
+    function parseEmailLocalWords(localPart){
+      const cleaned = cleanText(localPart)
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/g, " ")
+        .replace(/[._-]+/g, " ")
+        .replace(/\d+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if(!cleaned){
+        return "";
+      }
+      const out = [];
+      cleaned.split(/\s+/).forEach(piece => {
+        splitCompactToken(piece).forEach(part => {
+          const token = cleanText(part);
+          if(token) out.push(token);
+        });
+      });
+      return out.join(" ").trim().slice(0, 80);
     }
 
     function normalizeHandle(value){
@@ -233,8 +314,8 @@
 
     function deriveProfileDefaults(user){
       const email = cleanText(user?.email || "");
-      const emailLocal = cleanText((email.split("@")[0] || "").replace(/[._-]+/g, " "));
-      const noDigitsLocal = cleanText(emailLocal.replace(/\d+/g, " "));
+      const emailLocalRaw = cleanText(email.split("@")[0] || "");
+      const emailLocal = parseEmailLocalWords(emailLocalRaw);
       const metaName = cleanText(
         user?.user_metadata?.full_name ||
         user?.user_metadata?.name ||
@@ -242,12 +323,12 @@
         ""
       );
       const displayName = !isPlaceholderName(metaName)
-        ? metaName
-        : (noDigitsLocal || emailLocal || cleanText(email.split("@")[0] || "") || "user");
+        ? toTitleWords(metaName)
+        : (toTitleWords(emailLocal) || toTitleWords(emailLocalRaw) || "Member");
 
       const handleSeed = !isPlaceholderName(metaName)
         ? metaName
-        : (noDigitsLocal || cleanText(email.split("@")[0] || "") || "user");
+        : (emailLocalRaw || emailLocal || "member");
       const username = normalizeHandle(handleSeed) || "user";
       const photo = cleanText(user?.user_metadata?.avatar_url || user?.user_metadata?.picture || "");
       return { email, username, displayName, photo };

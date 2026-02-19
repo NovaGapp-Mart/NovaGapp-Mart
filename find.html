@@ -95,6 +95,15 @@ body{
   font-weight:700;
   box-shadow:0 2px 6px rgba(0,0,0,.18);
 }
+.verified-badge{
+  background:#0b57d0;
+  color:#fff;
+  font-size:10px;
+  padding:2px 7px;
+  border-radius:10px;
+  font-weight:700;
+  letter-spacing:.2px;
+}
 .product-list{font-size:12px;color:#666;margin-top:2px}
 .reel-item{
   display:flex;align-items:center;gap:12px;padding:10px;cursor:pointer;
@@ -235,12 +244,103 @@ function escapeHtml(text){
     .replace(/'/g, "&#39;");
 }
 
+function isPlaceholderName(value){
+  const text = String(value || "").trim().toLowerCase();
+  if(!text) return true;
+  if(text === "user" || text === "u" || text === "guest" || text === "unknown" || text === "member" || text === "unique"){
+    return true;
+  }
+  if(/^member[\s._-]*[a-z0-9]{4,}$/i.test(text)) return true;
+  if(/^user[\s._-]*[a-z0-9]{4,}$/i.test(text)) return true;
+  if(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)){
+    return true;
+  }
+  return false;
+}
+
+function splitCompactToken(value){
+  const token = String(value || "").toLowerCase().replace(/[^a-z]+/g, "");
+  if(token.length < 9){
+    return token ? [token] : [];
+  }
+  const mid = Math.floor(token.length / 2);
+  const minSide = 3;
+  let bestIdx = -1;
+  let bestWeight = -Infinity;
+  for(let i = minSide; i <= token.length - minSide; i += 1){
+    const prev = token[i - 1];
+    const next = token[i];
+    const prevVowel = /[aeiou]/.test(prev);
+    const nextVowel = /[aeiou]/.test(next);
+    const dist = Math.abs(i - mid);
+    let weight = 0;
+    if(prevVowel && !nextVowel) weight += 4;
+    if(!prevVowel && nextVowel) weight += 3;
+    if(dist <= 1) weight += 3;
+    else if(dist <= 2) weight += 2;
+    else if(dist <= 4) weight += 1;
+    if(i >= 4 && token.length - i >= 4) weight += 1;
+    if(weight > bestWeight){
+      bestWeight = weight;
+      bestIdx = i;
+    }
+  }
+  if(bestIdx <= 0){
+    return [token];
+  }
+  const left = token.slice(0, bestIdx).trim();
+  const right = token.slice(bestIdx).trim();
+  if(!left || !right){
+    return [token];
+  }
+  return [left, right];
+}
+
+function parseEmailLocalWords(emailLocal){
+  const cleaned = String(emailLocal || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, " ")
+    .replace(/[._-]+/g, " ")
+    .replace(/\d+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if(!cleaned){
+    return "";
+  }
+  const out = [];
+  cleaned.split(/\s+/).forEach(piece => {
+    splitCompactToken(piece).forEach(token => {
+      const next = String(token || "").trim();
+      if(next) out.push(next);
+    });
+  });
+  return out.join(" ").trim().slice(0, 80);
+}
+
+function toTitleWords(text){
+  return String(text || "")
+    .split(/\s+/)
+    .map(part => {
+      const token = String(part || "").trim();
+      if(!token) return "";
+      return token.slice(0, 1).toUpperCase() + token.slice(1).toLowerCase();
+    })
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 64);
+}
+
 function safeDisplayName(user){
   const direct = String(user?.display_name || user?.full_name || user?.username || "").trim();
-  if(direct) return direct;
+  if(direct && !isPlaceholderName(direct)){
+    return toTitleWords(direct) || direct;
+  }
   const email = String(user?.email || "").trim().toLowerCase();
-  const local = String((email.split("@")[0] || "")).replace(/[._-]+/g, " ").trim();
-  if(local) return local;
+  const local = String(email.split("@")[0] || "").trim();
+  const parsed = parseEmailLocalWords(local);
+  if(parsed){
+    return toTitleWords(parsed) || parsed;
+  }
   return "Member";
 }
 
@@ -254,7 +354,7 @@ function tokenized(text){
 }
 
 function scoreUser(user, tokens){
-  if(!tokens.length) return 1;
+  if(!tokens.length) return 1 + Math.max(0, Number(user?.search_boost || 0));
   const hay = [
     safeDisplayName(user),
     user?.username || "",
@@ -266,6 +366,7 @@ function scoreUser(user, tokens){
     if(hay.includes(token)) score += 100 - idx;
     if(hay.startsWith(token)) score += 120 - idx;
   });
+  score += Math.max(0, Number(user?.search_boost || 0));
   return score;
 }
 
@@ -394,7 +495,11 @@ async function fetchUsers(q){
       display_name: safeDisplayName(user),
       username: String(user.username || "").trim(),
       photo: String(user.photo || "").trim(),
-      email: String(user.email || "").trim().toLowerCase()
+      email: String(user.email || "").trim().toLowerCase(),
+      verified: !!user.verified,
+      trust_score: Math.max(0, Number(user.trust_score || 0)),
+      search_boost: Math.max(0, Number(user.search_boost || 0)),
+      followers_count: Math.max(0, Number(user.followers_count || 0))
     }))
     .filter(user => user.user_id)
     .map(user => ({ ...user, score: scoreUser(user, tokens) }))
@@ -464,11 +569,15 @@ function renderUserSection(users, tabKey, title){
       const row = document.createElement("div");
       row.className = "user";
       const subText = u.username ? `@${u.username}` : "";
+      const trustText = u.trust_score ? `Trust ${Math.round(u.trust_score)}` : "";
       row.innerHTML = `
         <img src="${escapeHtml(u.photo || "Images/user.png")}">
         <div class="info">
-          <div class="name-row"><b>${escapeHtml(u.display_name || "Member")}</b></div>
-          <span>${escapeHtml(subText)}</span>
+          <div class="name-row">
+            <b>${escapeHtml(u.display_name || "Member")}</b>
+            ${u.verified ? `<span class="verified-badge">Verified</span>` : ""}
+          </div>
+          <span>${escapeHtml([subText, trustText].filter(Boolean).join(" • "))}</span>
           <div class="profile-actions">
             <button class="action-btn message js-message">Message</button>
             <button class="action-btn js-view">View profile</button>

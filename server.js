@@ -53,16 +53,20 @@ const MANUAL_JSON_PATH = path.join(MANUAL_DIR, "requests.json");
 const SYSTEM_DIR = path.join(UPLOADS_DIR, "system");
 const SYSTEM_STATE_PATH = path.join(SYSTEM_DIR, "state.json");
 const FREE_PLAN_DAILY_LIMIT = 2;
-const PRO_PLAN_DAILY_LIMIT = 20;
+const PRO_PLAN_DAILY_LIMIT = 30;
 const TRYON_PRICE_PER_IMAGE_USD = 1;
 const PLAN_40_USD = 40;
 const PLAN_4000_USD = 4000;
 const PLAN_BILLING_DAYS = 30;
 const PLAN_4000_SEAT_LIMIT = 5;
+const VERIFIED_MIN_FOLLOWERS = 5000;
+const VERIFIED_TRUST_BONUS = 25;
+const VERIFIED_SEARCH_BOOST = 250;
 const DEFAULT_TRUST_FLOW = ["discovery", "chat", "trust", "ai_tryon", "checkout"];
 const ADMIN_DM_EMAIL = String(process.env.TRYON_ADMIN_EMAIL || "prashikbhalerao0208@gmail.com").trim();
 const ADMIN_DM_WEBHOOK_URL = String(process.env.TRYON_ADMIN_DM_WEBHOOK || "").trim();
 const ADMIN_AUTOMATION_EMAIL = String(process.env.ADMIN_AUTOMATION_EMAIL || "novagapp2026@gmail.com").trim();
+const ADMIN_AUTOMATION_TOKEN = String(process.env.ADMIN_AUTOMATION_TOKEN || "").trim();
 const RESEND_API_KEY = String(process.env.RESEND_API_KEY || "").trim();
 const RESEND_FROM_EMAIL = String(process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev").trim();
 const RAZORPAY_WEBHOOK_SECRET = String(
@@ -662,6 +666,11 @@ function createDefaultSystemState(){
       seats: {},
       invites: {}
     },
+    verification: {
+      by_user: {},
+      requests: {},
+      history: []
+    },
     automation: {
       funnel_events: [],
       media_events: [],
@@ -716,6 +725,18 @@ function normalizeSystemState(input){
   }
   if(!state.premium.invites || typeof state.premium.invites !== "object"){
     state.premium.invites = {};
+  }
+  if(!state.verification || typeof state.verification !== "object"){
+    state.verification = {};
+  }
+  if(!state.verification.by_user || typeof state.verification.by_user !== "object"){
+    state.verification.by_user = {};
+  }
+  if(!state.verification.requests || typeof state.verification.requests !== "object"){
+    state.verification.requests = {};
+  }
+  if(!Array.isArray(state.verification.history)){
+    state.verification.history = [];
   }
   if(!state.automation || typeof state.automation !== "object"){
     state.automation = {};
@@ -801,6 +822,94 @@ function titleCaseWords(text){
     .slice(0, 64);
 }
 
+const IDENTITY_PLACEHOLDER_NAMES = new Set([
+  "user",
+  "u",
+  "guest",
+  "unknown",
+  "member",
+  "unique",
+  "new",
+  "newuser",
+  "test",
+  "undefined",
+  "null"
+]);
+
+function isIdentityPlaceholderName(value){
+  const normalized = sanitizeDisplayName(value).toLowerCase();
+  if(!normalized) return true;
+  if(IDENTITY_PLACEHOLDER_NAMES.has(normalized)) return true;
+  if(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)
+  ){
+    return true;
+  }
+  if(/^member[\s._-]*[a-z0-9]{4,}$/i.test(normalized)) return true;
+  if(/^user[\s._-]*[a-z0-9]{4,}$/i.test(normalized)) return true;
+  return false;
+}
+
+function splitCompactIdentityToken(token){
+  const clean = String(token || "").toLowerCase().replace(/[^a-z]+/g, "");
+  if(clean.length < 9){
+    return clean ? [clean] : [];
+  }
+  const mid = Math.floor(clean.length / 2);
+  const minSide = 3;
+  let bestIdx = -1;
+  let bestWeight = -Infinity;
+  for(let i = minSide; i <= clean.length - minSide; i += 1){
+    const prev = clean[i - 1];
+    const next = clean[i];
+    const prevVowel = /[aeiou]/.test(prev);
+    const nextVowel = /[aeiou]/.test(next);
+    const dist = Math.abs(i - mid);
+    let weight = 0;
+    if(prevVowel && !nextVowel) weight += 4;
+    if(!prevVowel && nextVowel) weight += 3;
+    if(dist <= 1) weight += 3;
+    else if(dist <= 2) weight += 2;
+    else if(dist <= 4) weight += 1;
+    if(i >= 4 && clean.length - i >= 4) weight += 1;
+    if(weight > bestWeight){
+      bestWeight = weight;
+      bestIdx = i;
+    }
+  }
+  if(bestIdx <= 0){
+    return [clean];
+  }
+  const left = clean.slice(0, bestIdx).trim();
+  const right = clean.slice(bestIdx).trim();
+  if(!left || !right){
+    return [clean];
+  }
+  return [left, right];
+}
+
+function parseEmailLocalToWords(localPart){
+  const cleaned = String(localPart || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, " ")
+    .replace(/[._-]+/g, " ")
+    .replace(/\d+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if(!cleaned){
+    return "";
+  }
+  const expanded = [];
+  cleaned.split(/\s+/).forEach(piece => {
+    if(!piece) return;
+    splitCompactIdentityToken(piece).forEach(part => {
+      const token = String(part || "").trim();
+      if(token) expanded.push(token);
+    });
+  });
+  return expanded.join(" ").trim().slice(0, 80);
+}
+
 function tokenizeIdentityText(value){
   return String(value || "")
     .toLowerCase()
@@ -814,22 +923,23 @@ function tokenizeIdentityText(value){
 function deriveIdentityDefaults(input){
   const userId = sanitizeUserId(input?.user_id);
   const email = String(input?.email || "").trim().toLowerCase().slice(0, 180);
-  const rawName = sanitizeDisplayName(
+  const providedName = sanitizeDisplayName(
     input?.display_name ||
     input?.full_name ||
     input?.username ||
     input?.user_name ||
     ""
   );
+  const rawName = isIdentityPlaceholderName(providedName) ? "" : providedName;
   const emailLocal = String((email.split("@")[0] || "")).trim();
-  const emailLocalWords = emailLocal
-    .replace(/[._-]+/g, " ")
-    .replace(/\d+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const emailLocalWords = parseEmailLocalToWords(emailLocal);
   const displaySeed = rawName || emailLocalWords || emailLocal || "Member";
   const displayName = titleCaseWords(displaySeed) || "Member";
-  const userSeed = String(rawName || emailLocal || displayName || "member")
+  const providedUsername = sanitizeDisplayName(input?.username || "");
+  const usernameSeed = isIdentityPlaceholderName(providedUsername)
+    ? (emailLocal || emailLocalWords || rawName || displayName || "member")
+    : (providedUsername || emailLocal || emailLocalWords || rawName || displayName || "member");
+  const userSeed = String(usernameSeed)
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "_")
     .replace(/_+/g, "_")
@@ -864,8 +974,16 @@ function safePublicNameFromIdentity(identity, userId){
     identity?.username ||
     ""
   );
-  if(preferred){
-    return preferred;
+  if(preferred && !isIdentityPlaceholderName(preferred)){
+    return titleCaseWords(preferred) || preferred;
+  }
+  const fromEmailLocal = parseEmailLocalToWords(
+    identity?.email_local ||
+    String(identity?.email || "").split("@")[0] ||
+    ""
+  );
+  if(fromEmailLocal){
+    return titleCaseWords(fromEmailLocal) || "Member";
   }
   const shortId = String(userId || "")
     .replace(/[^a-z0-9]/gi, "")
@@ -896,8 +1014,10 @@ function getPlanConfig(planCode){
         dedicated_processing_lane: true,
         advanced_revenue_assistant: true,
         behavioral_insights: true,
+        elite_badge: true,
         invite_only: true,
-        limited_seats: true
+        limited_seats: true,
+        premium_visibility_boost: true
       }
     };
   }
@@ -917,7 +1037,8 @@ function getPlanConfig(planCode){
         conversion_tracking: true,
         smart_dm_assistant: true,
         auto_followup: true,
-        monthly_report: true
+        monthly_report: true,
+        priority_support: true
       }
     };
   }
@@ -1086,16 +1207,27 @@ function buildFeatureGateForSubscription(subRecord){
     ? true
     : (record.status === "active" && isIsoFuture(record.expires_at));
   const features = active ? { ...config.features } : { chat:true, ai_tryon:true, checkout:true };
+  const plan = active ? record.plan : "free";
+  const paidActive = plan !== "free";
+  const queueLane = active ? config.tryon_lane : "standard";
+  const premiumBadge = paidActive;
+  const autoActivationMessage = paidActive
+    ? "Payment verified. Plan auto-activated. No manual activation required."
+    : "Free plan active.";
 
   return {
     user_id: record.user_id,
-    plan: active ? record.plan : "free",
+    plan,
     status: active ? record.status : "free",
     expires_at: active ? record.expires_at : null,
     source: record.source,
     seat_limit: config.seat_limit,
-    tryon_lane: active ? config.tryon_lane : "standard",
+    tryon_lane: queueLane,
     tryon_daily_limit: active ? config.tryon_daily_limit : FREE_PLAN_DAILY_LIMIT,
+    plan_active: paidActive,
+    premium_badge: premiumBadge,
+    activation_mode: "automatic",
+    auto_activation_message: autoActivationMessage,
     features
   };
 }
@@ -1297,6 +1429,147 @@ function scoreUserSearchMatch(user, tokens){
     }
   });
   return score;
+}
+
+function parseBooleanFlag(value){
+  const raw = String(value === undefined || value === null ? "" : value).trim().toLowerCase();
+  if(!raw) return false;
+  return raw === "true" || raw === "1" || raw === "yes" || raw === "y" || raw === "on";
+}
+
+function normalizeVerificationStatus(value){
+  const raw = String(value || "").trim().toLowerCase();
+  if(
+    raw === "requirements_not_met" ||
+    raw === "pending_admin" ||
+    raw === "approved" ||
+    raw === "rejected" ||
+    raw === "not_requested"
+  ){
+    return raw;
+  }
+  return "not_requested";
+}
+
+function normalizeVerificationRecord(userIdInput, raw){
+  const userId = sanitizeUserId(userIdInput || raw?.user_id);
+  const followersCount = Math.max(0, Math.floor(safeNumber(raw?.followers_count)));
+  const kycCompleted = parseBooleanFlag(raw?.kyc_completed);
+  const approvedByAdmin = parseBooleanFlag(raw?.approved_by_admin);
+  const eligible = followersCount >= VERIFIED_MIN_FOLLOWERS && kycCompleted;
+  let status = normalizeVerificationStatus(raw?.status);
+  if(status === "not_requested" && raw?.requested_at){
+    status = "requirements_not_met";
+  }
+  if(status === "approved" && !eligible){
+    status = "requirements_not_met";
+  }
+  const verified = approvedByAdmin && eligible && status === "approved";
+  const baseTrust = Math.max(0, Math.floor(safeNumber(raw?.trust_score)));
+  const trustScore = verified
+    ? Math.max(baseTrust, 70 + VERIFIED_TRUST_BONUS)
+    : Math.max(baseTrust, eligible ? 65 : 0);
+  const searchBoost = verified ? VERIFIED_SEARCH_BOOST : 0;
+  return {
+    user_id: userId,
+    request_id: sanitizeToken(raw?.request_id, 80),
+    followers_count: followersCount,
+    kyc_completed: kycCompleted,
+    kyc_reference: String(raw?.kyc_reference || "").trim().slice(0, 120),
+    status,
+    approved_by_admin: approvedByAdmin,
+    verified,
+    trust_score: trustScore,
+    search_boost: searchBoost,
+    requested_at: raw?.requested_at ? String(raw.requested_at) : "",
+    approved_at: raw?.approved_at ? String(raw.approved_at) : "",
+    rejected_at: raw?.rejected_at ? String(raw.rejected_at) : "",
+    admin_id: sanitizeUserId(raw?.admin_id || ""),
+    admin_note: String(raw?.admin_note || "").trim().slice(0, 300),
+    updated_at: String(raw?.updated_at || new Date().toISOString())
+  };
+}
+
+function getVerificationForUser(state, userIdInput){
+  const userId = sanitizeUserId(userIdInput);
+  if(!userId){
+    return normalizeVerificationRecord("", {});
+  }
+  const raw = state?.verification?.by_user?.[userId] || {};
+  const normalized = normalizeVerificationRecord(userId, raw);
+  if(state?.verification?.by_user){
+    state.verification.by_user[userId] = normalized;
+  }
+  return normalized;
+}
+
+function applyVerificationToIdentity(state, userIdInput){
+  const userId = sanitizeUserId(userIdInput);
+  if(!userId || !state?.identities) return null;
+  const verification = getVerificationForUser(state, userId);
+  const identity = state.identities[userId] || {};
+  identity.trust_score = verification.trust_score;
+  identity.verified = verification.verified;
+  identity.verification_status = verification.status;
+  identity.search_boost = verification.search_boost;
+  identity.updated_at = new Date().toISOString();
+  state.identities[userId] = identity;
+  return verification;
+}
+
+function normalizeVerificationDecision(value){
+  const raw = String(value || "").trim().toLowerCase();
+  if(raw === "approve" || raw === "approved" || raw === "accept"){
+    return "approve";
+  }
+  if(raw === "reject" || raw === "rejected" || raw === "deny" || raw === "decline"){
+    return "reject";
+  }
+  return "";
+}
+
+function isAdminAutomationRequest(req){
+  if(!ADMIN_AUTOMATION_TOKEN){
+    return true;
+  }
+  const incoming = String(
+    req.headers["x-admin-token"] ||
+    req.headers["x-automation-token"] ||
+    req.body?.admin_token ||
+    ""
+  ).trim();
+  return incoming && incoming === ADMIN_AUTOMATION_TOKEN;
+}
+
+async function fetchFollowersCountForUser(userIdInput){
+  const userId = sanitizeUserId(userIdInput);
+  const base = getSocialSupabaseBase();
+  const key = getSocialSupabaseReadKey();
+  if(!userId || !base || !key){
+    return 0;
+  }
+  const endpoint = new URL("/rest/v1/follows", base + "/");
+  endpoint.searchParams.set("select", "follower_id");
+  endpoint.searchParams.set("following_id", `eq.${userId}`);
+  const response = await fetch(endpoint.toString(), {
+    method: "GET",
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      Prefer: "count=exact",
+      Range: "0-0"
+    }
+  });
+  if(!response.ok){
+    return 0;
+  }
+  const contentRange = String(response.headers.get("content-range") || "");
+  const match = contentRange.match(/\/(\d+)$/);
+  if(match && match[1]){
+    return Math.max(0, Math.floor(Number(match[1]) || 0));
+  }
+  const rows = await response.json().catch(() => []);
+  return Array.isArray(rows) ? rows.length : 0;
 }
 
 async function upsertIdentityToUsersTable(identity){
@@ -3289,10 +3562,13 @@ app.post("/api/account/sync", async (req, res) => {
         updated_at: new Date().toISOString()
       };
       state.identities[userId] = merged;
+      const verification = applyVerificationToIdentity(state, userId);
+      const identityWithTrust = state.identities[userId] || merged;
       const subscription = getEffectiveSubscription(state, userId);
       return {
-        identity: merged,
-        subscription
+        identity: identityWithTrust,
+        subscription,
+        verification
       };
     });
 
@@ -3326,8 +3602,11 @@ app.post("/api/account/sync", async (req, res) => {
         username: String(result.identity.username || "").trim(),
         email: String(result.identity.email || "").trim(),
         photo: String(result.identity.photo || "").trim(),
-        search_tokens: Array.isArray(result.identity.search_tokens) ? result.identity.search_tokens : []
+        search_tokens: Array.isArray(result.identity.search_tokens) ? result.identity.search_tokens : [],
+        trust_score: Math.max(0, Math.floor(safeNumber(result.identity.trust_score))),
+        verified: !!result.identity.verified
       },
+      verification: result.verification || normalizeVerificationRecord(userId, {}),
       subscription: buildFeatureGateForSubscription(result.subscription),
       synced_to_users_table: !!usersRow,
       warning: syncWarning || undefined
@@ -3359,9 +3638,12 @@ app.get("/api/users/discover", async (req, res) => {
       const userId = sanitizeUserId(row?.user_id);
       if(!userId) return;
       const stateIdentity = systemState.identities[userId] || {};
+      const verification = getVerificationForUser(systemState, userId);
       const displayName = safePublicNameFromIdentity({
         display_name: row?.display_name || row?.full_name || row?.username || stateIdentity.display_name,
-        username: row?.username || stateIdentity.username
+        username: row?.username || stateIdentity.username,
+        email_local: row?.email_local || stateIdentity.email_local,
+        email: row?.email || stateIdentity.email
       }, userId);
       const username = sanitizeDisplayName(row?.username || stateIdentity.username || "");
       const email = String(row?.email || stateIdentity.email || "").trim().toLowerCase().slice(0, 180);
@@ -3383,7 +3665,11 @@ app.get("/api/users/discover", async (req, res) => {
         email_local: emailLocal,
         photo,
         search_tokens: searchTokens,
-        created_at: String(row?.created_at || stateIdentity.created_at || "").trim()
+        created_at: String(row?.created_at || stateIdentity.created_at || "").trim(),
+        verified: !!verification.verified,
+        trust_score: Math.max(0, Math.floor(safeNumber(verification.trust_score))),
+        search_boost: Math.max(0, Math.floor(safeNumber(verification.search_boost))),
+        followers_count: Math.max(0, Math.floor(safeNumber(verification.followers_count)))
       });
     };
 
@@ -3393,7 +3679,7 @@ app.get("/api/users/discover", async (req, res) => {
     const rows = Array.from(merged.values())
       .map(item => ({
         ...item,
-        score: scoreUserSearchMatch(item, tokens)
+        score: scoreUserSearchMatch(item, tokens) + Math.max(0, Math.floor(safeNumber(item.search_boost)))
       }))
       .filter(item => tokens.length ? item.score > 0 : true)
       .sort((a, b) => {
@@ -3408,6 +3694,11 @@ app.get("/api/users/discover", async (req, res) => {
         display_name: item.display_name,
         username: item.username || "",
         photo: item.photo || "",
+        verified: !!item.verified,
+        verified_badge: item.verified ? "Verified" : "",
+        trust_score: Math.max(0, Math.floor(safeNumber(item.trust_score))),
+        followers_count: Math.max(0, Math.floor(safeNumber(item.followers_count))),
+        search_boost: Math.max(0, Math.floor(safeNumber(item.search_boost))),
         can_message: true,
         profile_url: `m-account.html?uid=${encodeURIComponent(item.user_id)}`
       }));
@@ -3443,16 +3734,256 @@ app.get("/api/users/summary", async (req, res) => {
     const map = {};
     ids.forEach(userId => {
       const identity = state.identities[userId] || {};
+      const verification = getVerificationForUser(state, userId);
       map[userId] = {
         user_id: userId,
         display_name: safePublicNameFromIdentity(identity, userId),
         username: String(identity.username || "").trim(),
-        photo: String(identity.photo || "").trim()
+        photo: String(identity.photo || "").trim(),
+        verified: !!verification.verified,
+        trust_score: Math.max(0, Math.floor(safeNumber(verification.trust_score)))
       };
     });
     return res.json({ ok:true, users: map });
   }catch(err){
     return res.status(500).json({ ok:false, error:"users_summary_failed" });
+  }
+});
+
+app.get("/api/verification/status", async (req, res) => {
+  const userId = sanitizeUserId(req.query?.user_id);
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  try{
+    const verification = await mutateSystemState(state => {
+      ensureSubscriptionExpirySweep(state);
+      const next = applyVerificationToIdentity(state, userId) || getVerificationForUser(state, userId);
+      return next;
+    });
+    return res.json({
+      ok:true,
+      user_id: userId,
+      min_followers: VERIFIED_MIN_FOLLOWERS,
+      verification: {
+        ...verification,
+        verified_badge: verification.verified ? "Verified" : ""
+      }
+    });
+  }catch(err){
+    console.error("verification_status_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"verification_status_failed" });
+  }
+});
+
+app.post("/api/verification/request", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  const kycCompleted = parseBooleanFlag(req.body?.kyc_completed);
+  const kycReference = String(req.body?.kyc_reference || req.body?.kyc_id || "").trim().slice(0, 120);
+  const fallbackFollowers = Math.max(0, Math.floor(safeNumber(req.body?.followers_count)));
+  const requestId = sanitizeToken(req.body?.request_id, 80) || `vr_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+  const nowIso = new Date().toISOString();
+
+  try{
+    const followersCount = fallbackFollowers > 0
+      ? fallbackFollowers
+      : await fetchFollowersCountForUser(userId).catch(() => 0);
+
+    const payload = await mutateSystemState(state => {
+      ensureSubscriptionExpirySweep(state);
+      const previous = getVerificationForUser(state, userId);
+      const eligible = followersCount >= VERIFIED_MIN_FOLLOWERS && kycCompleted;
+      const status = eligible ? "pending_admin" : "requirements_not_met";
+      const next = normalizeVerificationRecord(userId, {
+        ...previous,
+        user_id: userId,
+        request_id: requestId,
+        followers_count: followersCount,
+        kyc_completed: kycCompleted,
+        kyc_reference: kycReference || previous.kyc_reference || "",
+        status,
+        approved_by_admin: false,
+        requested_at: nowIso,
+        approved_at: "",
+        rejected_at: "",
+        admin_id: "",
+        admin_note: "",
+        updated_at: nowIso
+      });
+      state.verification.by_user[userId] = next;
+      state.verification.requests[requestId] = {
+        request_id: requestId,
+        user_id: userId,
+        followers_count: followersCount,
+        kyc_completed: kycCompleted,
+        kyc_reference: next.kyc_reference || "",
+        status,
+        created_at: nowIso,
+        updated_at: nowIso
+      };
+      pushBounded(state.verification.history, {
+        type: "request",
+        request_id: requestId,
+        user_id: userId,
+        status,
+        at: nowIso
+      }, 4000);
+      pushBounded(state.automation.notifications, {
+        id: `verification_req_${requestId}`,
+        type: "verification_request",
+        user_id: userId,
+        created_at: nowIso,
+        payload: {
+          request_id: requestId,
+          followers_count: followersCount,
+          kyc_completed: kycCompleted,
+          status
+        }
+      }, 6000);
+      applyVerificationToIdentity(state, userId);
+      return {
+        eligible,
+        verification: getVerificationForUser(state, userId)
+      };
+    });
+
+    notifyAutomationAdmin("verification_request", {
+      request_id: requestId,
+      user_id: userId,
+      followers_count: followersCount,
+      kyc_completed: kycCompleted,
+      status: payload.verification.status
+    }).catch(() => {});
+
+    return res.json({
+      ok:true,
+      user_id: userId,
+      min_followers: VERIFIED_MIN_FOLLOWERS,
+      eligible: payload.eligible,
+      next_step: payload.eligible ? "await_admin_approval" : "complete_requirements",
+      verification: {
+        ...payload.verification,
+        verified_badge: payload.verification.verified ? "Verified" : ""
+      }
+    });
+  }catch(err){
+    console.error("verification_request_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"verification_request_failed" });
+  }
+});
+
+app.post("/api/admin/verification/decision", async (req, res) => {
+  if(!isAdminAutomationRequest(req)){
+    return res.status(401).json({ ok:false, error:"admin_auth_required" });
+  }
+  const requestId = sanitizeToken(req.body?.request_id, 80);
+  const decision = normalizeVerificationDecision(req.body?.decision || req.body?.status);
+  const adminId = sanitizeUserId(req.body?.admin_id || "admin");
+  const adminNote = String(req.body?.admin_note || "").trim().slice(0, 300);
+  if(!requestId || !decision){
+    return res.status(400).json({ ok:false, error:"request_id_and_decision_required" });
+  }
+  const nowIso = new Date().toISOString();
+
+  try{
+    const payload = await mutateSystemState(state => {
+      ensureSubscriptionExpirySweep(state);
+      const requestRow = state.verification.requests[requestId];
+      if(!requestRow){
+        return { ok:false, error:"request_not_found" };
+      }
+      const userId = sanitizeUserId(requestRow.user_id);
+      const previous = getVerificationForUser(state, userId);
+      const followersCount = Math.max(0, Math.floor(safeNumber(requestRow.followers_count || previous.followers_count)));
+      const kycCompleted = parseBooleanFlag(requestRow.kyc_completed || previous.kyc_completed);
+      const eligible = followersCount >= VERIFIED_MIN_FOLLOWERS && kycCompleted;
+      let status = decision === "approve" ? "approved" : "rejected";
+      let approvedByAdmin = decision === "approve";
+      if(decision === "approve" && !eligible){
+        status = "requirements_not_met";
+        approvedByAdmin = false;
+      }
+      const next = normalizeVerificationRecord(userId, {
+        ...previous,
+        request_id: requestId,
+        followers_count: followersCount,
+        kyc_completed: kycCompleted,
+        kyc_reference: requestRow.kyc_reference || previous.kyc_reference || "",
+        status,
+        approved_by_admin: approvedByAdmin,
+        approved_at: approvedByAdmin ? nowIso : "",
+        rejected_at: status === "rejected" ? nowIso : "",
+        admin_id: adminId,
+        admin_note: adminNote,
+        updated_at: nowIso
+      });
+      state.verification.by_user[userId] = next;
+      requestRow.status = status;
+      requestRow.decision = decision;
+      requestRow.eligible = eligible;
+      requestRow.admin_id = adminId;
+      requestRow.admin_note = adminNote;
+      requestRow.decided_at = nowIso;
+      requestRow.updated_at = nowIso;
+      state.verification.requests[requestId] = requestRow;
+      pushBounded(state.verification.history, {
+        type: "decision",
+        request_id: requestId,
+        user_id: userId,
+        decision,
+        status,
+        at: nowIso
+      }, 4000);
+      pushBounded(state.automation.notifications, {
+        id: `verification_decision_${requestId}`,
+        type: "verification_decision",
+        user_id: userId,
+        created_at: nowIso,
+        payload: {
+          request_id: requestId,
+          decision,
+          status
+        }
+      }, 6000);
+      const verification = applyVerificationToIdentity(state, userId) || next;
+      return {
+        ok:true,
+        request_id: requestId,
+        user_id: userId,
+        decision,
+        eligible,
+        verification
+      };
+    });
+
+    if(!payload.ok){
+      return res.status(404).json(payload);
+    }
+
+    notifyAutomationAdmin("verification_decision", {
+      request_id: payload.request_id,
+      user_id: payload.user_id,
+      decision: payload.decision,
+      status: payload.verification.status
+    }).catch(() => {});
+
+    return res.json({
+      ok:true,
+      request_id: payload.request_id,
+      user_id: payload.user_id,
+      decision: payload.decision,
+      eligible: payload.eligible,
+      verification: {
+        ...payload.verification,
+        verified_badge: payload.verification.verified ? "Verified" : ""
+      }
+    });
+  }catch(err){
+    console.error("verification_decision_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"verification_decision_failed" });
   }
 });
 
@@ -3521,7 +4052,7 @@ app.post("/api/subscription/activate", async (req, res) => {
       return activateSubscriptionInState(state, {
         user_id: userId,
         plan,
-        source: String(req.body?.source || "manual_activation").slice(0, 40),
+        source: String(req.body?.source || "automatic_activation").slice(0, 40),
         payment_id: req.body?.payment_id || req.body?.razorpay_payment_id,
         order_id: req.body?.order_id || req.body?.razorpay_order_id,
         amount_paise: req.body?.amount_paise || req.body?.payment_amount_paise,
@@ -3535,7 +4066,7 @@ app.post("/api/subscription/activate", async (req, res) => {
       plan: String(gate.plan || "free"),
       status: String(gate.status || "free"),
       expires_at: gate.expires_at || null,
-      source: String(req.body?.source || "manual_activation").slice(0, 40),
+      source: String(req.body?.source || "automatic_activation").slice(0, 40),
       payment_id: String(req.body?.payment_id || req.body?.razorpay_payment_id || ""),
       order_id: String(req.body?.order_id || req.body?.razorpay_order_id || ""),
       amount_paise: Math.max(0, Math.round(safeNumber(req.body?.amount_paise || req.body?.payment_amount_paise))),

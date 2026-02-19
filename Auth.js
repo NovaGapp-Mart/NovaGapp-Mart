@@ -24,10 +24,80 @@ function isLoopbackBase(base){
   return value.startsWith("http://");
 }
 
+function splitCompactToken(value){
+  const token = String(value || "").toLowerCase().replace(/[^a-z]+/g, "");
+  if(token.length < 9){
+    return token ? [token] : [];
+  }
+  const mid = Math.floor(token.length / 2);
+  const minSide = 3;
+  let bestIdx = -1;
+  let bestWeight = -Infinity;
+  for(let i = minSide; i <= token.length - minSide; i += 1){
+    const prev = token[i - 1];
+    const next = token[i];
+    const prevVowel = /[aeiou]/.test(prev);
+    const nextVowel = /[aeiou]/.test(next);
+    const dist = Math.abs(i - mid);
+    let weight = 0;
+    if(prevVowel && !nextVowel) weight += 4;
+    if(!prevVowel && nextVowel) weight += 3;
+    if(dist <= 1) weight += 3;
+    else if(dist <= 2) weight += 2;
+    else if(dist <= 4) weight += 1;
+    if(i >= 4 && token.length - i >= 4) weight += 1;
+    if(weight > bestWeight){
+      bestWeight = weight;
+      bestIdx = i;
+    }
+  }
+  if(bestIdx <= 0){
+    return [token];
+  }
+  const left = token.slice(0, bestIdx).trim();
+  const right = token.slice(bestIdx).trim();
+  if(!left || !right){
+    return [token];
+  }
+  return [left, right];
+}
+
+function parseEmailLocalWords(email){
+  const local = String((String(email || "").trim().toLowerCase().split("@")[0] || ""))
+    .replace(/[^a-z0-9._-]+/g, " ")
+    .replace(/[._-]+/g, " ")
+    .replace(/\d+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if(!local){
+    return "";
+  }
+  const out = [];
+  local.split(/\s+/).forEach(piece => {
+    splitCompactToken(piece).forEach(token => {
+      const next = String(token || "").trim();
+      if(next) out.push(next);
+    });
+  });
+  return out.join(" ").trim().slice(0, 80);
+}
+
+function isPlaceholderName(value){
+  const text = String(value || "").trim().toLowerCase();
+  if(!text) return true;
+  if(text === "user" || text === "u" || text === "guest" || text === "unknown" || text === "unique" || text === "member"){
+    return true;
+  }
+  if(/^member[\s._-]*[a-z0-9]{4,}$/i.test(text)) return true;
+  if(/^user[\s._-]*[a-z0-9]{4,}$/i.test(text)) return true;
+  return false;
+}
+
 function deriveDisplayFromEmail(email, fallback){
-  const raw = String(email || "").trim().toLowerCase();
-  const local = String((raw.split("@")[0] || "")).replace(/[._-]+/g, " ").replace(/\d+/g, " ").trim();
-  const token = String(fallback || local || "Member").trim();
+  const parsedLocal = parseEmailLocalWords(email);
+  const token = isPlaceholderName(fallback)
+    ? (parsedLocal || String(email || "").split("@")[0] || "Member")
+    : String(fallback || "").trim();
   return token
     .split(/\s+/)
     .map(part => part ? (part[0].toUpperCase() + part.slice(1).toLowerCase()) : "")
@@ -61,12 +131,18 @@ async function syncAccountIdentity(user){
     user.email,
     user.user_metadata?.full_name || user.user_metadata?.name || ""
   );
+  const usernameSeed = String((user.email || "").split("@")[0] || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 24) || "member";
   const payload = {
     user_id: user.id,
     email: user.email || "",
     full_name: displayName,
     display_name: displayName,
-    username: String((user.email || "").split("@")[0] || "").toLowerCase()
+    username: usernameSeed
   };
   const candidates = [""].concat(buildApiCandidates());
   for(const base of candidates){

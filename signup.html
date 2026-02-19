@@ -168,10 +168,69 @@ function toTitleCaseWords(text){
     .slice(0, 60);
 }
 
+function splitCompactToken(value){
+  const token = String(value || "").toLowerCase().replace(/[^a-z]+/g, "");
+  if(token.length < 9){
+    return token ? [token] : [];
+  }
+  const mid = Math.floor(token.length / 2);
+  const minSide = 3;
+  let bestIdx = -1;
+  let bestWeight = -Infinity;
+  for(let i = minSide; i <= token.length - minSide; i += 1){
+    const prev = token[i - 1];
+    const next = token[i];
+    const prevVowel = /[aeiou]/.test(prev);
+    const nextVowel = /[aeiou]/.test(next);
+    const dist = Math.abs(i - mid);
+    let weight = 0;
+    if(prevVowel && !nextVowel) weight += 4;
+    if(!prevVowel && nextVowel) weight += 3;
+    if(dist <= 1) weight += 3;
+    else if(dist <= 2) weight += 2;
+    else if(dist <= 4) weight += 1;
+    if(i >= 4 && token.length - i >= 4) weight += 1;
+    if(weight > bestWeight){
+      bestWeight = weight;
+      bestIdx = i;
+    }
+  }
+  if(bestIdx <= 0){
+    return [token];
+  }
+  const left = token.slice(0, bestIdx).trim();
+  const right = token.slice(bestIdx).trim();
+  if(!left || !right){
+    return [token];
+  }
+  return [left, right];
+}
+
+function parseEmailLocalWords(local){
+  const cleaned = String(local || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, " ")
+    .replace(/[._-]+/g, " ")
+    .replace(/\d+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if(!cleaned){
+    return "";
+  }
+  const out = [];
+  cleaned.split(/\s+/).forEach(piece => {
+    splitCompactToken(piece).forEach(token => {
+      const next = String(token || "").trim();
+      if(next) out.push(next);
+    });
+  });
+  return out.join(" ").trim().slice(0, 80);
+}
+
 function deriveIdentity(user){
   const email = String(user?.email || "").trim().toLowerCase();
   const local = String((email.split("@")[0] || "")).trim();
-  const words = local.replace(/[._-]+/g, " ").replace(/\d+/g, " ").replace(/\s+/g, " ").trim();
+  const words = parseEmailLocalWords(local);
   const displayName = toTitleCaseWords(
     String(user?.user_metadata?.full_name || user?.user_metadata?.name || words || local || "Member")
   ) || "Member";
@@ -283,7 +342,7 @@ async function signup(){
   }
 
   const local = String((email.split("@")[0] || "")).trim();
-  const suggestedName = toTitleCaseWords(local.replace(/[._-]+/g, " ").replace(/\d+/g, " ")) || "Member";
+  const suggestedName = toTitleCaseWords(parseEmailLocalWords(local) || local) || "Member";
 
   const { data, error } = await supa.auth.signUp({
     email,

@@ -18,104 +18,254 @@
   --orange:#ff7a00;
   --bg:#0d0f14;
   --card:#151925;
+  --line:rgba(255,255,255,.12);
+  --muted:#aeb4c0;
+  --ok:#11c26d;
 }
+*{box-sizing:border-box}
 body{
   margin:0;
   font-family:Inter,system-ui;
-  background:var(--bg);
+  background:radial-gradient(circle at top,#192337 0%,#0d0f14 45%);
   color:#fff;
 }
 .header{
   background:var(--orange);
-  padding:16px;
+  color:#111;
+  padding:14px 18px;
   font-size:20px;
-  font-weight:800;
+  font-weight:900;
 }
-.container{
-  max-width:1100px;
-  margin:auto;
-  padding:20px;
+.page{
+  max-width:1120px;
+  margin:0 auto;
+  padding:18px;
+}
+.status-card{
+  background:linear-gradient(120deg,#1c2333,#121825);
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:14px;
+  margin-bottom:16px;
+}
+.status-title{
+  font-size:13px;
+  letter-spacing:.4px;
+  color:var(--muted);
+  margin-bottom:8px;
+}
+.status-grid{
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
-  gap:24px;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:8px;
+}
+.status-item{
+  background:#0f1420;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:10px;
+  padding:9px 10px;
+}
+.status-item small{display:block;color:var(--muted);font-size:11px;margin-bottom:3px}
+.status-item strong{font-size:13px}
+#premiumBadge{
+  display:none;
+  margin-top:10px;
+  background:#ffd76a;
+  color:#3b2c00;
+  font-size:11px;
+  font-weight:800;
+  border-radius:12px;
+  padding:6px 10px;
+  width:max-content;
+}
+.auto-msg{
+  margin:12px 0 16px;
+  border:1px solid rgba(17,194,109,.35);
+  background:rgba(17,194,109,.11);
+  color:#b9ffd9;
+  border-radius:12px;
+  padding:10px 12px;
+  font-size:13px;
+}
+.auto-msg.warn{
+  border-color:rgba(255,122,0,.35);
+  background:rgba(255,122,0,.12);
+  color:#ffd6b2;
+}
+.plan-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  gap:16px;
+  margin-bottom:18px;
 }
 .plan{
   background:var(--card);
   border-radius:16px;
-  padding:26px;
-  box-shadow:0 15px 40px rgba(0,0,0,.5);
+  padding:20px;
+  border:1px solid var(--line);
+  box-shadow:0 10px 35px rgba(0,0,0,.35);
   position:relative;
 }
-.price{font-size:32px;font-weight:900}
+.plan h3{margin:0 0 6px}
+.plan .price{font-size:34px;font-weight:900;margin-bottom:10px}
+.plan ul{margin:0;padding-left:18px;line-height:1.8}
+.plan li{font-size:14px}
+.plan-badge{
+  position:absolute;
+  top:-10px;
+  right:14px;
+  background:var(--orange);
+  color:#111;
+  padding:4px 9px;
+  border-radius:9px;
+  font-size:11px;
+  font-weight:800;
+}
 button{
   width:100%;
-  padding:14px;
-  margin-top:18px;
+  padding:12px;
+  margin-top:14px;
   border:none;
-  border-radius:12px;
-  font-size:15px;
+  border-radius:11px;
+  font-size:14px;
   font-weight:800;
   cursor:pointer;
 }
-.buy{background:var(--orange);color:#000}
-.current{background:#333;color:#aaa}
-.badge{
-  position:absolute;
-  top:-12px;right:-12px;
-  background:var(--orange);
-  color:#000;
-  padding:6px 12px;
-  border-radius:10px;
-  font-size:12px;
-  font-weight:900;
+.buy{background:var(--orange);color:#111}
+.current{background:#273042;color:#8f9ab0;cursor:not-allowed}
+.section{
+  background:#121826;
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:14px;
+  margin-bottom:16px;
+}
+.section h4{margin:0 0 10px;font-size:15px}
+.section p,
+.section li{
+  color:#d8dbe3;
+  font-size:13px;
+}
+.table-wrap{overflow:auto}
+table{
+  width:100%;
+  border-collapse:collapse;
+  min-width:620px;
+}
+th,td{
+  border:1px solid rgba(255,255,255,.12);
+  padding:9px;
+  text-align:left;
+  font-size:13px;
+}
+th{background:#1a2235}
+@media (max-width:700px){
+  .page{padding:12px}
+  .plan .price{font-size:30px}
 }
 </style>
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9977276800228616"
      crossorigin="anonymous"></script>
 </head>
-
 <body>
 
-<div class="header">Plans</div>
+<div class="header">Subscription Plans</div>
 
-<div class="container">
+<div class="page">
+  <div class="status-card" id="statusCard">
+    <div class="status-title">PLAN ACTIVE INDICATOR</div>
+    <div class="status-grid">
+      <div class="status-item">
+        <small>Active Plan</small>
+        <strong id="activePlanText">FREE</strong>
+      </div>
+      <div class="status-item">
+        <small>Feature Gates</small>
+        <strong id="featureGateText">Standard access</strong>
+      </div>
+      <div class="status-item">
+        <small>Queue Routing</small>
+        <strong id="queueLaneText">Standard</strong>
+      </div>
+      <div class="status-item">
+        <small>Expiry Timer</small>
+        <strong id="expiryText">Not active</strong>
+      </div>
+    </div>
+    <div id="premiumBadge">Premium Badge Active</div>
+  </div>
 
-<!-- FREE -->
-<div class="plan" id="plan-free">
-  <h3>FREE</h3>
-  <div class="price"><span class="money" data-money="0" data-currency="USD">$0</span></div>
-  <ul>
-    <li>2 previews / day</li>
-    <li>Normal speed</li>
-  </ul>
-  <button class="current">Default</button>
-</div>
+  <div id="autoActivationMessage" class="auto-msg warn">Auto activation check running...</div>
 
-<!-- PRO -->
-<div class="plan" id="plan-pro">
-  <h3>PRO</h3>
-  <div class="price"><span class="money" data-money="40" data-currency="USD">$40</span> / month</div>
-  <ul>
-    <li>20 previews / day</li>
-    <li>Fast processing</li>
-    <li>Analytics</li>
-  </ul>
-  <button class="buy" onclick="pay(40,'PRO','USD')">Upgrade</button>
-</div>
+  <div class="plan-grid">
+    <div class="plan" id="plan-40">
+      <h3>$40 Plan</h3>
+      <div class="price"><span class="money" data-money="40" data-currency="USD">$40</span> / month</div>
+      <ul>
+        <li>AI Try-On (30 per day )</li>
+        <li>Standard queue</li>
+        <li>Conversion analytics</li>
+        <li>Smart DM assistant</li>
+        <li>Auto follow-up</li>
+        <li>Monthly report</li>
+        <li>Priority support</li>
+      </ul>
+      <button class="buy" onclick="pay(40,'40','USD')">Activate $40</button>
+    </div>
 
-<!-- ENTERPRISE -->
-<div class="plan enterprise" id="plan-enterprise">
-  <div class="badge">MOST RECOMMENDED</div>
-  <h3>ENTERPRISE</h3>
-  <div class="price"><span class="money" data-money="4000" data-currency="USD">$4000</span> / month</div>
-  <ul>
-    <li>Unlimited previews</li>
-    <li>Branding off</li>
-    <li>Priority queue</li>
-  </ul>
-  <button class="buy" onclick="pay(4000,'ENTERPRISE','USD')">Upgrade</button>
-</div>
+    <div class="plan" id="plan-4000">
+      <div class="plan-badge">PREMIUM</div>
+      <h3>$4000 Plan</h3>
+      <div class="price"><span class="money" data-money="4000" data-currency="USD">$4000</span> / month</div>
+      <ul>
+        <li>Dedicated priority AI lane</li>
+        <li>Advanced analytics</li>
+        <li>AI Revenue Assistant</li>
+        <li>Behavioral insights</li>
+        <li>Elite badge</li>
+        <li>Limited seats logic</li>
+        <li>Premium visibility boost</li>
+      </ul>
+      <button class="buy" onclick="pay(4000,'4000','USD')">Activate $4000</button>
+    </div>
+  </div>
 
+  <div class="section">
+    <h4>Feature Comparison Table</h4>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th>$40</th>
+            <th>$4000</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>AI Try-On Capacity</td><td>30/day</td><td>Dedicated priority AI lane</td></tr>
+          <tr><td>Processing Queue</td><td>Standard queue</td><td>Dedicated high-priority queue</td></tr>
+          <tr><td>Analytics</td><td>Conversion analytics</td><td>Advanced analytics</td></tr>
+          <tr><td>Assistant</td><td>Smart DM assistant</td><td>AI Revenue Assistant</td></tr>
+          <tr><td>Follow-up</td><td>Auto follow-up</td><td>Behavioral insights + premium automation</td></tr>
+          <tr><td>Reports</td><td>Monthly report</td><td>Elite intelligence reporting</td></tr>
+          <tr><td>Support/Visibility</td><td>Priority support</td><td>Elite badge + Premium visibility boost</td></tr>
+          <tr><td>Seat Logic</td><td>Single seat</td><td>Limited seats logic + invite workflow</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h4>After Payment Behavior</h4>
+    <ul>
+      <li>Plan auto activate</li>
+      <li>Feature gates auto update</li>
+      <li>Premium badge show (paid plans)</li>
+      <li>Queue routing change to dedicated priority lane for $4000</li>
+      <li>Expiry timer visible</li>
+      <li>No manual activation</li>
+    </ul>
+  </div>
 </div>
 
 <script>
@@ -125,42 +275,51 @@ if(!supaClient){
   location.href = "login.html";
   throw new Error("supabase_client_unavailable");
 }
+
 let currentUser = null;
 let activePlan = "FREE";
+let activeGate = null;
 let razorpayKeyId = String(window.NOVA_PUBLIC_CONFIG?.razorpayKeyId || "").trim();
 let paymentBusy = false;
+let expiryTimer = null;
 
 function normalizeDesktopPlan(planInput){
   const raw = String(planInput || "").trim().toUpperCase();
   const digits = raw.replace(/[^0-9]/g, "");
   if(
+    raw === "4000" ||
     raw === "ENTERPRISE" ||
     raw === "BUSINESS" ||
-    raw === "BUSINESS_999" ||
     raw === "ENTERPRISE_4000" ||
     digits === "4000"
   ){
-    return "ENTERPRISE";
+    return "4000";
   }
   if(
+    raw === "40" ||
     raw === "PRO" ||
     raw === "PLUS" ||
     raw === "CREATOR" ||
-    raw === "PLUS_99" ||
-    raw === "CREATOR_299" ||
     raw === "PRO_40" ||
     digits === "40"
   ){
-    return "PRO";
+    return "40";
   }
   return "FREE";
 }
 
 function getBackendPlanCode(planInput){
   const normalized = normalizeDesktopPlan(planInput);
-  if(normalized === "ENTERPRISE") return "4000";
-  if(normalized === "PRO") return "40";
+  if(normalized === "4000") return "4000";
+  if(normalized === "40") return "40";
   return "free";
+}
+
+function getPlanLabel(planCode){
+  const p = normalizeDesktopPlan(planCode);
+  if(p === "4000") return "$4000 Plan";
+  if(p === "40") return "$40 Plan";
+  return "FREE";
 }
 
 function buildApiBases(){
@@ -207,94 +366,107 @@ async function callAutomationApi(path, options){
   return null;
 }
 
-function extractMissingColumnName(error){
-  const text = `${error?.message || ""} ${error?.details || ""}`;
-  const pgMatch = text.match(/column\s+\"?([a-zA-Z0-9_.]+)\"?\s+does not exist/i);
-  if(pgMatch && pgMatch[1]){
-    return String(pgMatch[1]).split(".").pop().toLowerCase();
-  }
-  const quotedMatch = text.match(/'([a-zA-Z0-9_]+)'/);
-  if(quotedMatch && quotedMatch[1]){
-    return String(quotedMatch[1]).toLowerCase();
-  }
-  return "";
+function setAutoActivationMessage(message, warn){
+  const box = document.getElementById("autoActivationMessage");
+  if(!box) return;
+  box.textContent = String(message || "").trim() || "Auto activation ready.";
+  box.classList.toggle("warn", !!warn);
 }
 
-/* ======================
-   AUTH + CURRENT PLAN
-====================== */
-(async ()=>{
-  const { data } = await supaClient.auth.getUser();
-  if(!data?.user){
-    alert("Login required");
-    location.href="login.html";
-    return;
-  }
-  currentUser = data.user;
-  await Promise.all([loadPlan(), loadRazorpayConfig()]);
-  markCurrent();
-})();
-
-async function loadPlan(){
-  const automated = await callAutomationApi(`/api/subscription/status?user_id=${encodeURIComponent(currentUser.id)}`, { method:"GET" });
-  const automatedPlan = normalizeDesktopPlan(automated?.subscription?.plan || "");
-  if(automated?.ok && automatedPlan){
-    activePlan = automatedPlan;
-    try{
-      localStorage.setItem("userPlan", getBackendPlanCode(activePlan));
-    }catch(_){ }
-    return;
-  }
-
-  let query = supaClient
-    .from("subscription")
-    .select("plan")
-    .eq("user_id", currentUser.id)
-    .order("created_at",{ascending:false})
-    .limit(1)
-    .maybeSingle();
-
-  let { data, error } = await query;
-  if(error && missingColumnError(error)){
-    query = supaClient
-      .from("subscription")
-      .select("plan")
-      .eq("user_id", currentUser.id)
-      .limit(1)
-      .maybeSingle();
-    ({ data, error } = await query);
-  }
-
-  if(error){
-    console.error("subscription_load_plan_failed", error);
-    return;
-  }
-  if(data?.plan){
-    activePlan = normalizeDesktopPlan(data.plan);
-    try{
-      localStorage.setItem("userPlan", getBackendPlanCode(activePlan));
-    }catch(_){ }
-  }
+function setPaymentButtonsBusy(state){
+  document.querySelectorAll(".plan .buy").forEach(btn => {
+    btn.disabled = !!state;
+  });
 }
 
 function markCurrent(){
-  document.querySelectorAll(".plan").forEach(p=>{
-    const btn = p.querySelector("button");
+  const activeId = activePlan === "4000" ? "plan-4000" : (activePlan === "40" ? "plan-40" : "");
+  document.querySelectorAll(".plan").forEach(card => {
+    const btn = card.querySelector("button");
     if(!btn) return;
-    btn.disabled=false;
-    btn.className="buy";
-    if(p.id === "plan-" + activePlan.toLowerCase()){
-      btn.innerText="Current";
-      btn.className="current";
-      btn.disabled=true;
+    btn.disabled = false;
+    btn.className = "buy";
+    if(card.id === activeId){
+      btn.textContent = "Current";
+      btn.className = "current";
+      btn.disabled = true;
+    }else if(card.id === "plan-40"){
+      btn.textContent = "Activate $40";
+    }else if(card.id === "plan-4000"){
+      btn.textContent = "Activate $4000";
     }
   });
 }
 
-function setPaymentButtonsBusy(state){
-  document.querySelectorAll(".plan .buy").forEach(btn=>{
-    btn.disabled = !!state;
-  });
+function formatCountdown(ms){
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  return `${days}d ${hours}h ${mins}m`;
+}
+
+function applyGateState(gate){
+  activeGate = gate && typeof gate === "object" ? gate : null;
+  try{
+    const backendPlan = getBackendPlanCode(activeGate?.plan || activePlan);
+    localStorage.setItem("userPlan", backendPlan);
+    localStorage.setItem("subscription_gate", JSON.stringify(activeGate || {}));
+    localStorage.setItem("premium_badge", activeGate?.premium_badge ? "1" : "0");
+    localStorage.setItem("tryon_lane", String(activeGate?.tryon_lane || "standard"));
+    localStorage.setItem("feature_gates_last_sync", new Date().toISOString());
+  }catch(_){ }
+  updateStatusPanel();
+}
+
+function updateStatusPanel(){
+  const planText = document.getElementById("activePlanText");
+  const gateText = document.getElementById("featureGateText");
+  const laneText = document.getElementById("queueLaneText");
+  const expiryText = document.getElementById("expiryText");
+  const premiumBadge = document.getElementById("premiumBadge");
+
+  const gate = activeGate || {};
+  planText.textContent = getPlanLabel(gate.plan || activePlan);
+  gateText.textContent = gate.plan_active ? "Auto-updated" : "Standard access";
+  laneText.textContent = gate.tryon_lane === "priority" ? "Dedicated Priority" : "Standard";
+
+  if(expiryTimer){
+    clearInterval(expiryTimer);
+    expiryTimer = null;
+  }
+
+  const expiryIso = String(gate.expires_at || "").trim();
+  if(expiryIso){
+    const expiryTs = new Date(expiryIso).getTime();
+    const render = () => {
+      const diff = expiryTs - Date.now();
+      if(diff <= 0){
+        expiryText.textContent = "Expired - auto downgrade active";
+        if(expiryTimer){
+          clearInterval(expiryTimer);
+          expiryTimer = null;
+        }
+        return;
+      }
+      expiryText.textContent = formatCountdown(diff);
+    };
+    render();
+    expiryTimer = setInterval(render, 1000);
+  }else{
+    expiryText.textContent = gate.plan_active ? "No expiry returned" : "Not active";
+  }
+
+  if(gate.premium_badge){
+    premiumBadge.style.display = "inline-block";
+  }else{
+    premiumBadge.style.display = "none";
+  }
+}
+
+function missingColumnError(error){
+  const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+  return text.includes("column") && text.includes("does not exist");
 }
 
 async function loadRazorpayConfig(){
@@ -305,15 +477,8 @@ async function loadRazorpayConfig(){
       razorpayKeyId = String(payload.key_id || "").trim();
       return true;
     }
-  }catch(_){}
+  }catch(_){ }
   return !!razorpayKeyId;
-}
-
-function missingColumnError(error){
-  const msg = String(error?.message || "").toLowerCase();
-  const details = String(error?.details || "").toLowerCase();
-  const all = `${msg} ${details}`;
-  return all.includes("column") && all.includes("does not exist");
 }
 
 function convertPlanAmountToInr(amount, currency){
@@ -333,6 +498,62 @@ function convertPlanAmountToInr(amount, currency){
     throw new Error("Unable to convert plan amount to INR.");
   }
   return Math.round(converted * 100) / 100;
+}
+
+async function loadPlan(){
+  const automated = await callAutomationApi(`/api/subscription/status?user_id=${encodeURIComponent(currentUser.id)}`, { method:"GET" });
+  const automatedPlan = normalizeDesktopPlan(automated?.subscription?.plan || "");
+  if(automated?.ok && automatedPlan){
+    activePlan = automatedPlan;
+    applyGateState(automated.subscription || null);
+    return;
+  }
+
+  let query = supaClient
+    .from("subscription")
+    .select("plan")
+    .eq("user_id", currentUser.id)
+    .order("created_at", { ascending:false })
+    .limit(1)
+    .maybeSingle();
+
+  let { data, error } = await query;
+  if(error && missingColumnError(error)){
+    query = supaClient
+      .from("subscription")
+      .select("plan")
+      .eq("user_id", currentUser.id)
+      .limit(1)
+      .maybeSingle();
+    ({ data, error } = await query);
+  }
+
+  if(error){
+    console.error("subscription_load_plan_failed", error);
+    return;
+  }
+
+  if(data?.plan){
+    activePlan = normalizeDesktopPlan(data.plan);
+  }
+  applyGateState({
+    plan: getBackendPlanCode(activePlan),
+    plan_active: activePlan !== "FREE",
+    tryon_lane: activePlan === "4000" ? "priority" : "standard",
+    premium_badge: activePlan !== "FREE",
+    expires_at: null
+  });
+}
+
+async function refreshAutomationState(){
+  const status = await callAutomationApi(`/api/subscription/status?user_id=${encodeURIComponent(currentUser.id)}`, { method:"GET" });
+  if(status?.ok && status?.subscription){
+    activePlan = normalizeDesktopPlan(status.subscription.plan || activePlan);
+    applyGateState(status.subscription);
+    markCurrent();
+    return status.subscription;
+  }
+  return null;
 }
 
 async function createPaymentOrder(amountInr, plan, baseAmount, baseCurrency){
@@ -401,27 +622,20 @@ async function activateSubscriptionAutomation(plan, amountInr, verifyPayload){
       currency: "INR",
       payment_id: String(verifyPayload?.razorpay_payment_id || ""),
       order_id: String(verifyPayload?.razorpay_order_id || ""),
-      metadata: {
-        ui_plan: normalizeDesktopPlan(plan)
-      }
+      metadata: { ui_plan: normalizeDesktopPlan(plan) }
     }
   });
   if(payload?.ok){
     const normalized = normalizeDesktopPlan(payload?.subscription?.plan || plan);
     activePlan = normalized;
-    try{
-      localStorage.setItem("userPlan", getBackendPlanCode(normalized));
-    }catch(_){ }
+    applyGateState(payload.subscription || null);
     return normalized;
   }
 
-  const status = await callAutomationApi(`/api/subscription/status?user_id=${encodeURIComponent(currentUser.id)}`, { method:"GET" });
-  if(status?.ok && status?.subscription?.plan){
-    const normalized = normalizeDesktopPlan(status.subscription.plan);
+  const status = await refreshAutomationState();
+  if(status?.plan){
+    const normalized = normalizeDesktopPlan(status.plan);
     activePlan = normalized;
-    try{
-      localStorage.setItem("userPlan", getBackendPlanCode(normalized));
-    }catch(_){ }
     return normalized;
   }
 
@@ -445,7 +659,7 @@ async function openCheckout(order, amountInr, plan){
       currency: "INR",
       order_id: String(order?.razorpay_order_id || ""),
       name: "NOVAGAPP",
-      description: `${String(plan || "FREE").toUpperCase()} Subscription`,
+      description: `${getPlanLabel(plan)} Subscription`,
       prefill: {
         email: String(currentUser?.email || ""),
         name: String(
@@ -471,9 +685,6 @@ async function openCheckout(order, amountInr, plan){
   });
 }
 
-/* ======================
-   PAYMENT (RAZORPAY)
-====================== */
 async function pay(amount, plan, currency){
   if(!currentUser){
     alert("Login required");
@@ -488,8 +699,10 @@ async function pay(amount, plan, currency){
   if(paymentBusy){
     return;
   }
+
   paymentBusy = true;
   setPaymentButtonsBusy(true);
+  setAutoActivationMessage("Payment in progress. Auto activation will run immediately after success.", true);
 
   try{
     const ready = await loadRazorpayConfig();
@@ -507,12 +720,17 @@ async function pay(amount, plan, currency){
     const activatedPlan = await activateSubscriptionAutomation(nextPlan, amountInr, verified);
 
     activePlan = activatedPlan || nextPlan;
+    await refreshAutomationState();
     markCurrent();
+    setAutoActivationMessage("Payment verified. Plan auto activated, feature gates updated, queue routing synced, no manual activation required.", false);
     alert("Plan activated");
   }catch(err){
     const message = String(err?.message || "Payment failed. Please try again.");
     if(message !== "Payment cancelled."){
       alert(message);
+      setAutoActivationMessage(message, true);
+    }else{
+      setAutoActivationMessage("Payment cancelled. No subscription change applied.", true);
     }
   }finally{
     paymentBusy = false;
@@ -520,8 +738,26 @@ async function pay(amount, plan, currency){
     markCurrent();
   }
 }
+
+(async ()=>{
+  const { data } = await supaClient.auth.getUser();
+  if(!data?.user){
+    alert("Login required");
+    location.href = "login.html";
+    return;
+  }
+  currentUser = data.user;
+  await Promise.all([loadPlan(), loadRazorpayConfig()]);
+  await refreshAutomationState();
+  markCurrent();
+
+  if(activeGate?.plan_active){
+    setAutoActivationMessage(activeGate.auto_activation_message || "Auto activation already active for your plan.", false);
+  }else{
+    setAutoActivationMessage("Choose a plan. Payment success will auto activate instantly.", true);
+  }
+})();
 </script>
 
 </body>
 </html>
-

@@ -74,7 +74,18 @@ body{background:#fff;color:#111;min-height:100vh}
 
 /* NAME + BIO */
 .profile-text{padding:0 16px 6px}
+.name-row{display:flex;align-items:center;gap:8px}
 .profile-text .name{font-weight:bold;font-size:16px;margin-bottom:3px}
+.verified-profile-badge{
+  display:inline-block;
+  background:#0b57d0;
+  color:#fff;
+  font-size:10px;
+  padding:3px 8px;
+  border-radius:10px;
+  font-weight:700;
+  letter-spacing:.2px;
+}
 .profile-text .bio{font-size:13px;color:#555}
 
 /* DASHBOARD */
@@ -82,6 +93,28 @@ body{background:#fff;color:#111;min-height:100vh}
   margin:10px 16px 8px;padding:12px;border-radius:10px;background:#f4f4f4;color:#333
 }
 .dashboard small{color:#777}
+.verification-box{
+  margin:0 16px 10px;
+  border:1px solid #ececec;
+  border-radius:10px;
+  padding:10px;
+  background:#fafafa;
+}
+.verification-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
+.verification-head small{color:#666;font-size:11px}
+.verification-check{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:12px;
+  color:#444;
+  margin-bottom:8px;
+}
+.verification-status{
+  font-size:12px;
+  color:#444;
+  line-height:1.35;
+}
 
 /* ACTIONS */
 .actions-row{
@@ -346,13 +379,31 @@ body{background:#fff;color:#111;min-height:100vh}
 </div>
 
 <div class="profile-text">
-  <div class="name" id="displayName">User</div>
+  <div class="name-row">
+    <div class="name" id="displayName">User</div>
+    <span id="verifiedProfileBadge" class="verified-profile-badge" style="display:none">Verified</span>
+  </div>
   <div class="bio" id="bioText">Welcome to NOVAGAPP</div>
 </div>
 
 <div class="dashboard">
   <div><b>Professional dashboard</b></div>
   <small>1 view in the last 30 days.</small>
+</div>
+
+<div class="verification-box" id="verificationBox">
+  <div class="verification-head">
+    <b>Verification</b>
+    <small>Condition: 5000+ followers + proper KYC complete</small>
+  </div>
+  <label class="verification-check" id="kycCheckWrap">
+    <input type="checkbox" id="kycCompleteCheck">
+    <span>I confirm my KYC is complete</span>
+  </label>
+  <div class="actions-row" style="padding:0 0 8px">
+    <button class="action-btn" id="requestVerificationBtn" type="button">Request Verification</button>
+  </div>
+  <div class="verification-status" id="verificationStatusText">Verification not requested.</div>
 </div>
 
 <div class="actions-row">
@@ -529,6 +580,12 @@ const menuBtn = document.querySelector(".right .icon-btn[title='Menu']");
 const avatarPlus = document.querySelector(".avatar-plus");
 const bubble = document.querySelector(".bubble");
 const dashboard = document.querySelector(".dashboard");
+const verifiedProfileBadge = document.getElementById("verifiedProfileBadge");
+const verificationBox = document.getElementById("verificationBox");
+const requestVerificationBtn = document.getElementById("requestVerificationBtn");
+const verificationStatusText = document.getElementById("verificationStatusText");
+const kycCompleteCheck = document.getElementById("kycCompleteCheck");
+const kycCheckWrap = document.getElementById("kycCheckWrap");
 const mediaModalBackdrop = document.getElementById("mediaModalBackdrop");
 const mediaEditModal = document.getElementById("mediaEditModal");
 const mediaEditTitle = document.getElementById("mediaEditTitle");
@@ -541,6 +598,7 @@ const mediaViewerModal = document.getElementById("mediaViewerModal");
 const mediaViewerBody = document.getElementById("mediaViewerBody");
 const mediaViewerClose = document.getElementById("mediaViewerClose");
 let mediaViewerVideo = null;
+let verificationState = null;
 
 editProfileBtn.onclick = openEdit;
 modalBackdrop.addEventListener("click", closeEdit);
@@ -549,6 +607,9 @@ mediaEditCancel.addEventListener("click", closeMediaEdit);
 mediaEditSave.addEventListener("click", saveMediaEdit);
 mediaViewerBackdrop.addEventListener("click", closeMediaViewer);
 mediaViewerClose.addEventListener("click", closeMediaViewer);
+if(requestVerificationBtn){
+  requestVerificationBtn.addEventListener("click", requestVerification);
+}
 document.addEventListener("keydown", (e) => {
   if(e.key === "Escape"){
     closeMediaViewer();
@@ -633,31 +694,270 @@ async function reportMediaUploadEvent(payload){
   return false;
 }
 
+function isPlaceholderName(value){
+  const text = String(value || "").trim().toLowerCase();
+  if(!text) return true;
+  if(text === "user" || text === "u" || text === "guest" || text === "unknown" || text === "member" || text === "unique"){
+    return true;
+  }
+  if(/^member[\s._-]*[a-z0-9]{4,}$/i.test(text)) return true;
+  if(/^user[\s._-]*[a-z0-9]{4,}$/i.test(text)) return true;
+  if(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)){
+    return true;
+  }
+  return false;
+}
+
+function toTitleWords(value){
+  return String(value || "")
+    .split(/\s+/)
+    .map(part => {
+      const token = String(part || "").trim();
+      if(!token) return "";
+      return token.slice(0, 1).toUpperCase() + token.slice(1).toLowerCase();
+    })
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 64);
+}
+
+function splitCompactToken(value){
+  const token = String(value || "").toLowerCase().replace(/[^a-z]+/g, "");
+  if(token.length < 9){
+    return token ? [token] : [];
+  }
+  const mid = Math.floor(token.length / 2);
+  const minSide = 3;
+  let bestIdx = -1;
+  let bestWeight = -Infinity;
+  for(let i = minSide; i <= token.length - minSide; i += 1){
+    const prev = token[i - 1];
+    const next = token[i];
+    const prevVowel = /[aeiou]/.test(prev);
+    const nextVowel = /[aeiou]/.test(next);
+    const dist = Math.abs(i - mid);
+    let weight = 0;
+    if(prevVowel && !nextVowel) weight += 4;
+    if(!prevVowel && nextVowel) weight += 3;
+    if(dist <= 1) weight += 3;
+    else if(dist <= 2) weight += 2;
+    else if(dist <= 4) weight += 1;
+    if(i >= 4 && token.length - i >= 4) weight += 1;
+    if(weight > bestWeight){
+      bestWeight = weight;
+      bestIdx = i;
+    }
+  }
+  if(bestIdx <= 0){
+    return [token];
+  }
+  const left = token.slice(0, bestIdx).trim();
+  const right = token.slice(bestIdx).trim();
+  if(!left || !right){
+    return [token];
+  }
+  return [left, right];
+}
+
+function parseEmailLocalWords(emailLike){
+  const local = String(String(emailLike || "").split("@")[0] || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, " ")
+    .replace(/[._-]+/g, " ")
+    .replace(/\d+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if(!local){
+    return "";
+  }
+  const out = [];
+  local.split(/\s+/).forEach(piece => {
+    splitCompactToken(piece).forEach(token => {
+      const next = String(token || "").trim();
+      if(next) out.push(next);
+    });
+  });
+  return out.join(" ").trim().slice(0, 80);
+}
+
+function normalizeProfileUsername(value, fallbackSeed){
+  const fallback = String(fallbackSeed || "").trim();
+  const source = isPlaceholderName(value) ? fallback : String(value || "").trim();
+  const normalized = source
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 24);
+  return normalized || "member";
+}
+
+function safeProfileName(nameLike, emailLike, userId){
+  const raw = String(nameLike || "").trim();
+  if(raw && !isPlaceholderName(raw)){
+    return toTitleWords(raw) || raw;
+  }
+  const parsed = parseEmailLocalWords(emailLike);
+  if(parsed){
+    return toTitleWords(parsed) || parsed;
+  }
+  const shortId = String(userId || "").replace(/[^a-z0-9]/gi, "").slice(0, 6).toUpperCase();
+  return shortId ? `Member ${shortId}` : "Member";
+}
+
+async function fetchBackendUserSummary(uid){
+  const userId = String(uid || "").trim();
+  if(!userId) return null;
+  const bases = buildAutomationApiBases();
+  for(const base of bases){
+    try{
+      const res = await fetch(`${base}/api/users/summary?ids=${encodeURIComponent(userId)}`, { cache:"no-store" });
+      if(!res.ok) continue;
+      const payload = await res.json().catch(() => null);
+      if(payload?.ok && payload?.users?.[userId]){
+        return payload.users[userId];
+      }
+    }catch(_){ }
+  }
+  return null;
+}
+
+async function callAutomationApi(path, options){
+  const req = options || {};
+  const method = req.method || "GET";
+  const body = req.body;
+  const bases = buildAutomationApiBases();
+  for(const base of bases){
+    try{
+      const res = await fetch(`${base}${path}`, {
+        method,
+        headers: body ? { "Content-Type":"application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+        cache: "no-store"
+      });
+      const payload = await res.json().catch(() => null);
+      if(res.ok && payload){
+        return payload;
+      }
+    }catch(_){ }
+  }
+  return null;
+}
+
+function renderVerificationStatus(){
+  if(!verificationStatusText) return;
+  const followers = Number(followersCount?.textContent || 0) || 0;
+  const verified = !!verificationState?.verified;
+  const status = String(verificationState?.status || "not_requested");
+  const trustScore = Math.max(0, Number(verificationState?.trust_score || 0));
+  const badgeInfo = verified ? "Verified badge active." : "Verified badge not active.";
+  const followerInfo = `Followers: ${followers} / 5000.`;
+  const trustInfo = trustScore ? `Trust score: ${Math.round(trustScore)}.` : "";
+
+  if(verifiedProfileBadge){
+    verifiedProfileBadge.style.display = verified ? "inline-block" : "none";
+  }
+
+  let statusLine = "Verification not requested.";
+  if(status === "pending_admin"){
+    statusLine = "Verification request submitted. Waiting for admin approval.";
+  }else if(status === "approved" && verified){
+    statusLine = "Verification approved.";
+  }else if(status === "requirements_not_met"){
+    statusLine = "Requirements not met. Complete KYC and reach 5000+ followers.";
+  }else if(status === "rejected"){
+    statusLine = "Verification rejected by admin.";
+  }
+
+  verificationStatusText.textContent = `${statusLine} ${followerInfo} ${badgeInfo} ${trustInfo}`.trim();
+  if(requestVerificationBtn){
+    requestVerificationBtn.style.display = viewingOwnProfile ? "block" : "none";
+    requestVerificationBtn.disabled = !viewingOwnProfile;
+  }
+  if(kycCheckWrap){
+    kycCheckWrap.style.display = viewingOwnProfile ? "flex" : "none";
+  }
+}
+
+async function loadVerificationStatus(){
+  if(!profileUserId) return;
+  const payload = await callAutomationApi(`/api/verification/status?user_id=${encodeURIComponent(profileUserId)}`, { method:"GET" });
+  if(payload?.ok && payload?.verification){
+    verificationState = payload.verification;
+  }else if(!verificationState){
+    verificationState = { verified:false, status:"not_requested", trust_score:0 };
+  }
+  renderVerificationStatus();
+}
+
+async function requestVerification(){
+  if(!viewingOwnProfile || !user?.id) return;
+  const kycCompleted = !!kycCompleteCheck?.checked;
+  const followerCount = Number(followersCount?.textContent || 0) || 0;
+  if(!kycCompleted){
+    alert("KYC complete checkbox required.");
+    return;
+  }
+  if(requestVerificationBtn){
+    requestVerificationBtn.disabled = true;
+    requestVerificationBtn.textContent = "Submitting...";
+  }
+  try{
+    const payload = await callAutomationApi("/api/verification/request", {
+      method: "POST",
+      body: {
+        user_id: user.id,
+        followers_count: followerCount,
+        kyc_completed: kycCompleted
+      }
+    });
+    if(payload?.ok){
+      verificationState = payload.verification || verificationState;
+      renderVerificationStatus();
+      alert(payload?.eligible ? "Verification request submitted." : "Requirements not met yet.");
+      return;
+    }
+    alert("Unable to submit verification request.");
+  }finally{
+    if(requestVerificationBtn){
+      requestVerificationBtn.disabled = false;
+      requestVerificationBtn.textContent = "Request Verification";
+    }
+  }
+}
+
 function persistProfile(data){
+  const normalizedUsername = normalizeProfileUsername(data.username, user?.email || "member");
+  const normalizedDisplayName = safeProfileName(data.displayName, user?.email || "", user?.id || profileUserId);
+  const normalized = {
+    ...data,
+    username: normalizedUsername,
+    displayName: normalizedDisplayName
+  };
   const key = "m_profile_" + user.id;
-  localStorage.setItem(key, JSON.stringify(data));
-  profileOverride = data;
-  applyProfile(data);
+  localStorage.setItem(key, JSON.stringify(normalized));
+  profileOverride = normalized;
+  applyProfile(normalized);
   try{
     window.NOVA.supa.from("users")
       .update({
-        username: data.username,
-        full_name: data.displayName,
-        bio: data.bio || "",
-        photo: data.avatarData || null
+        username: normalized.username,
+        full_name: normalized.displayName,
+        bio: normalized.bio || "",
+        photo: normalized.avatarData || null
       })
       .eq("user_id", user.id);
   }catch(_){}
   try{
-    if(data.avatarData){
+    if(normalized.avatarData){
       reportMediaUploadEvent({
         user_id: user.id,
         type: "profile_photo_upload",
         source: "m_account_edit",
         file_name: "profile-photo",
         mime: "image/data-url",
-        size: Number(String(data.avatarData || "").length || 0),
-        url: String(data.avatarData || "").slice(0, 3000),
+        size: Number(String(normalized.avatarData || "").length || 0),
+        url: String(normalized.avatarData || "").slice(0, 3000),
         bucket: "profile",
         path: `users/${user.id}/profile-photo`
       }).catch(()=>{});
@@ -667,15 +967,17 @@ function persistProfile(data){
 }
 
 function applyProfile(data){
-  username.textContent = data.username;
-  displayName.textContent = data.displayName;
+  const safeHandle = normalizeProfileUsername(data.username, user?.email || "member");
+  const safeName = safeProfileName(data.displayName, user?.email || "", profileUserId || user?.id || "");
+  username.textContent = safeHandle;
+  displayName.textContent = safeName;
   bioText.textContent = data.bio || "";
   if(data.avatarData){
     avatar.style.backgroundImage = `url('${data.avatarData}')`;
     avatar.textContent = "";
   }else{
     avatar.style.backgroundImage = "";
-    avatar.textContent = (data.username || "U")[0].toUpperCase();
+    avatar.textContent = (safeHandle || "U")[0].toUpperCase();
   }
 }
 
@@ -687,14 +989,16 @@ function applyProfile(data){
   profileUserId = requestedId || user.id;
   viewingOwnProfile = profileUserId === user.id;
 
-  let handle = "user";
-  let name = "User";
+  let identityEmail = String(user?.email || "").trim().toLowerCase();
+  let handle = normalizeProfileUsername("", identityEmail || "member");
+  let name = safeProfileName("", identityEmail, profileUserId);
   let bio = "Welcome to NOVAGAPP";
   let avatarData = "";
   if(viewingOwnProfile){
-    const email = user.email || "User";
-    handle = email.split("@")[0];
-    name = user.user_metadata?.full_name || handle;
+    const email = String(user.email || "").trim().toLowerCase();
+    identityEmail = email || identityEmail;
+    handle = normalizeProfileUsername(email.split("@")[0] || "", email || "member");
+    name = safeProfileName(user.user_metadata?.full_name || "", email, profileUserId);
   }
 
   const { data: profile } = await window.NOVA.supa
@@ -703,28 +1007,50 @@ function applyProfile(data){
     .eq("user_id", profileUserId)
     .maybeSingle();
 
-  if(profile?.username) handle = profile.username;
-  if(profile?.full_name) name = profile.full_name;
+  if(profile?.username){
+    handle = normalizeProfileUsername(profile.username, identityEmail || handle);
+  }
+  if(profile?.full_name){
+    name = safeProfileName(profile.full_name, identityEmail, profileUserId);
+  }
   if(profile?.bio) bio = profile.bio;
   if(profile?.photo) avatarData = profile.photo;
 
+  const backendSummary = await fetchBackendUserSummary(profileUserId);
+  if(backendSummary?.username){
+    handle = normalizeProfileUsername(handle, backendSummary.username);
+  }
+  if(backendSummary?.display_name){
+    name = safeProfileName(name, identityEmail, profileUserId);
+    if(isPlaceholderName(name)){
+      name = safeProfileName(backendSummary.display_name, identityEmail, profileUserId);
+    }
+  }
+  if(backendSummary){
+    verificationState = {
+      verified: !!backendSummary.verified,
+      trust_score: Math.max(0, Number(backendSummary.trust_score || 0)),
+      status: backendSummary.verified ? "approved" : "not_requested"
+    };
+  }
+
   const localOther = getLocalProfileOverride(profileUserId);
   if(localOther){
-    handle = localOther.username || handle;
-    name = localOther.displayName || name;
+    handle = normalizeProfileUsername(localOther.username || handle, identityEmail || handle);
+    name = safeProfileName(localOther.displayName || name, identityEmail, profileUserId);
     bio = localOther.bio || bio;
     avatarData = localOther.avatarData || avatarData;
   }
 
-  username.textContent = handle;
-  displayName.textContent = name;
+  username.textContent = normalizeProfileUsername(handle, identityEmail || "member");
+  displayName.textContent = safeProfileName(name, identityEmail, profileUserId);
   bioText.textContent = bio || "Welcome to NOVAGAPP";
   if(avatarData){
     avatar.style.backgroundImage = `url('${avatarData}')`;
     avatar.textContent = "";
   }else{
     avatar.style.backgroundImage = "";
-    avatar.textContent = (handle || "U")[0].toUpperCase();
+    avatar.textContent = (username.textContent || "U")[0].toUpperCase();
   }
 
   if(viewingOwnProfile){
@@ -736,7 +1062,8 @@ function applyProfile(data){
     }
   }
 
-  loadStats();
+  await loadStats();
+  await loadVerificationStatus();
   loadUploads();
   configureProfileView();
 })();
@@ -757,6 +1084,7 @@ async function loadStats(){
   postsCount.innerText = totalPosts;
   followersCount.innerText = followersRes.count || 0;
   followingCount.innerText = followingRes.count || 0;
+  renderVerificationStatus();
 }
 
 function getSupabaseErrorText(error){

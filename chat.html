@@ -984,22 +984,123 @@ function looksLikeRawUserId(text){
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
 }
 
-function safeIdentityName(nameLike, userId){
+function isPlaceholderIdentityName(value){
+  const text = String(value || "").trim().toLowerCase();
+  if(!text) return true;
+  if(text === "user" || text === "u" || text === "guest" || text === "unknown" || text === "member" || text === "unique"){
+    return true;
+  }
+  if(/^member[\s._-]*[a-z0-9]{4,}$/i.test(text)) return true;
+  if(/^user[\s._-]*[a-z0-9]{4,}$/i.test(text)) return true;
+  return false;
+}
+
+function toTitleWords(text){
+  return String(text || "")
+    .split(/\s+/)
+    .map(part => {
+      const token = String(part || "").trim();
+      if(!token) return "";
+      return token.slice(0, 1).toUpperCase() + token.slice(1).toLowerCase();
+    })
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 64);
+}
+
+function splitCompactToken(value){
+  const token = String(value || "").toLowerCase().replace(/[^a-z]+/g, "");
+  if(token.length < 9){
+    return token ? [token] : [];
+  }
+  const mid = Math.floor(token.length / 2);
+  const minSide = 3;
+  let bestIdx = -1;
+  let bestWeight = -Infinity;
+  for(let i = minSide; i <= token.length - minSide; i += 1){
+    const prev = token[i - 1];
+    const next = token[i];
+    const prevVowel = /[aeiou]/.test(prev);
+    const nextVowel = /[aeiou]/.test(next);
+    const dist = Math.abs(i - mid);
+    let weight = 0;
+    if(prevVowel && !nextVowel) weight += 4;
+    if(!prevVowel && nextVowel) weight += 3;
+    if(dist <= 1) weight += 3;
+    else if(dist <= 2) weight += 2;
+    else if(dist <= 4) weight += 1;
+    if(i >= 4 && token.length - i >= 4) weight += 1;
+    if(weight > bestWeight){
+      bestWeight = weight;
+      bestIdx = i;
+    }
+  }
+  if(bestIdx <= 0){
+    return [token];
+  }
+  const left = token.slice(0, bestIdx).trim();
+  const right = token.slice(bestIdx).trim();
+  if(!left || !right){
+    return [token];
+  }
+  return [left, right];
+}
+
+function parseEmailLocalWords(emailLike){
+  const local = String(String(emailLike || "").split("@")[0] || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, " ")
+    .replace(/[._-]+/g, " ")
+    .replace(/\d+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if(!local){
+    return "";
+  }
+  const out = [];
+  local.split(/\s+/).forEach(piece => {
+    splitCompactToken(piece).forEach(token => {
+      const next = String(token || "").trim();
+      if(next) out.push(next);
+    });
+  });
+  return out.join(" ").trim().slice(0, 80);
+}
+
+function safeIdentityName(nameLike, userId, emailLike){
   const raw = String(nameLike || "").trim();
-  if(!raw) return fallbackNameFromUserId(userId);
-  if(looksLikeRawUserId(raw)) return fallbackNameFromUserId(userId);
-  return raw;
+  if(raw && !looksLikeRawUserId(raw) && !isPlaceholderIdentityName(raw)){
+    return toTitleWords(raw) || raw;
+  }
+  const fromEmail = parseEmailLocalWords(emailLike);
+  if(fromEmail){
+    return toTitleWords(fromEmail) || fromEmail;
+  }
+  return fallbackNameFromUserId(userId);
 }
 
 function safeIdentityUsername(usernameLike){
   const raw = String(usernameLike || "").trim();
-  if(!raw || looksLikeRawUserId(raw)) return "";
+  if(!raw || looksLikeRawUserId(raw) || isPlaceholderIdentityName(raw)) return "";
   return raw;
 }
 
 async function fetchBackendSummary(userId){
+  const map = await fetchBackendSummaries([userId]);
   const id = String(userId || "").trim();
-  if(!id) return null;
+  return map?.[id] || null;
+}
+
+async function fetchBackendSummaries(userIds){
+  const ids = Array.from(new Set(
+    (Array.isArray(userIds) ? userIds : [])
+      .map(id => String(id || "").trim())
+      .filter(Boolean)
+  )).slice(0, 100);
+  if(!ids.length){
+    return {};
+  }
+  const joined = ids.join(",");
   const bases = [""];
   const push = (value) => {
     const clean = String(value || "").trim().replace(/\/+$/g, "");
@@ -1016,13 +1117,47 @@ async function fetchBackendSummary(userId){
   push("https://novagapp-mart.onrender.com");
 
   for(const base of bases){
-    const url = `${base}/api/users/summary?ids=${encodeURIComponent(id)}`;
+    const url = `${base}/api/users/summary?ids=${encodeURIComponent(joined)}`;
     try{
       const res = await fetch(url, { cache:"no-store" });
       if(!res.ok) continue;
       const payload = await res.json().catch(() => null);
-      const row = payload?.users?.[id];
-      if(row) return row;
+      if(payload?.ok && payload?.users && typeof payload.users === "object"){
+        return payload.users;
+      }
+    }catch(_){ }
+  }
+  return {};
+}
+
+function isMissingColumnError(error){
+  const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+  return text.includes("column") && text.includes("does not exist");
+}
+
+async function readUserRowFlexible(userId){
+  const id = String(userId || "").trim();
+  if(!id || !supa) return null;
+  const selects = [
+    "username,full_name,display_name,email,photo",
+    "username,full_name,email,photo",
+    "username,full_name,display_name,photo",
+    "username,full_name,photo"
+  ];
+  for(const fields of selects){
+    try{
+      const { data, error } = await supa
+        .from("users")
+        .select(fields)
+        .eq("user_id", id)
+        .maybeSingle();
+      if(!error){
+        return data || null;
+      }
+      if(isMissingColumnError(error)){
+        continue;
+      }
+      return null;
     }catch(_){ }
   }
   return null;
@@ -1068,35 +1203,32 @@ async function trackAutomationStep(step, meta){
 }
 
 async function getUserSummary(userId){
-  if(!userId) return { name:"Member", photo:"", username:"" };
+  if(!userId) return { name:"Member", photo:"", username:"", verified:false, trust_score:0 };
   if(userCache.has(userId)) return userCache.get(userId);
-  let data = null;
-  try{
-    const result = await supa
-      .from("users")
-      .select("username,full_name,photo")
-      .eq("user_id", userId)
-      .maybeSingle();
-    data = result?.data || null;
-  }catch(_){
-    data = null;
-  }
+  const data = await readUserRowFlexible(userId);
   let backend = null;
-  if(!data?.full_name && !data?.username){
+  const shouldLoadBackend = !data ||
+    isPlaceholderIdentityName(data?.display_name || data?.full_name || data?.username || "") ||
+    !String(data?.display_name || data?.full_name || "").trim();
+  if(shouldLoadBackend){
     backend = await fetchBackendSummary(userId);
   }
   const rawUsername = data?.username || backend?.username || "";
   const safeUsername = safeIdentityUsername(rawUsername);
-  const safeName = String(
+  const rawName = String(
+    data?.display_name ||
     data?.full_name ||
     backend?.display_name ||
     safeUsername ||
     ""
   ).trim();
+  const safeName = safeIdentityName(rawName, userId, data?.email || "");
   const summary = {
-    name: safeIdentityName(safeName, userId),
+    name: safeName,
     photo: data?.photo || backend?.photo || "",
-    username: safeUsername
+    username: safeUsername,
+    verified: !!backend?.verified,
+    trust_score: Math.max(0, Number(backend?.trust_score || 0))
   };
   userCache.set(userId, summary);
   return summary;
@@ -1556,18 +1688,11 @@ async function upsertChatListEntry(m){
   await loadChatDeletions();
   listenRealtime();
 
-  // load my profile (public users table)
-  const { data: me } = await supa
-    .from("users")
-    .select("username,full_name,photo")
-    .eq("user_id", myUid)
-    .maybeSingle();
-
-  myName = me?.full_name || me?.username || "User";
-  myPhoto = me?.photo || "";
+  const mySummary = await getUserSummary(myUid);
+  myName = mySummary?.name || "User";
+  myPhoto = mySummary?.photo || "";
   applyAvatar(chatAvatar, myPhoto, myName);
 
-  // load other user profile (public users table)
   if(otherUid){
     loadSeenState();
     loadSentReadState();
@@ -1575,16 +1700,11 @@ async function upsertChatListEntry(m){
     if(chatMenuBtn) chatMenuBtn.style.display = "inline-flex";
     setContactsVisible(false);
     setChatListVisible(false);
-    const { data: other } = await supa
-      .from("users")
-      .select("username,full_name,photo")
-      .eq("user_id", otherUid)
-      .maybeSingle();
-
-    const otherName = other?.full_name || other?.username || "Chat";
-    otherUsername = other?.username || "";
+    const otherSummary = await getUserSummary(otherUid);
+    const otherName = otherSummary?.name || "Chat";
+    otherUsername = otherSummary?.username || "";
     chatName.innerText = otherName;
-    applyAvatar(chatAvatar, other?.photo || "", otherName);
+    applyAvatar(chatAvatar, otherSummary?.photo || "", otherName);
     updateChatSub("Offline");
     await initPresenceStatus();
     await loadContacts();
@@ -3038,19 +3158,26 @@ async function loadContacts(){
     return;
   }
 
+  const backendMap = await fetchBackendSummaries((data || []).map(item => item.user_id));
   allContacts = (data || [])
     .filter(u => u.user_id !== myUid)
     .map(u => {
       const normalizedPhone = normalizePhoneNumber(u.phone_number);
       const contactName = phoneMap.get(normalizedPhone);
-      const safeName = safeIdentityName(contactName || u.full_name || u.username || "", u.user_id);
-      const safeUsername = safeIdentityUsername(u.username || "");
+      const backend = backendMap?.[u.user_id] || {};
+      const safeName = safeIdentityName(
+        contactName || u.full_name || backend.display_name || u.username || backend.username || "",
+        u.user_id,
+        u.email || ""
+      );
+      const safeUsername = safeIdentityUsername(u.username || backend.username || "");
       return {
         id: u.user_id,
         username: safeUsername,
         name: safeName,
         phone: u.phone_number || "",
-        photo: u.photo || ""
+        photo: u.photo || backend.photo || "",
+        verified: !!backend.verified
       };
     })
     .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
@@ -3114,28 +3241,41 @@ async function loadChatList(){
     console.error("loadChatList users error", userError);
   }
 
+  const backendMap = await fetchBackendSummaries(ids);
   const userMap = new Map();
   (users || []).forEach(u => {
-    const safeName = safeIdentityName(u.full_name || u.username || "", u.user_id);
-    const safeUsername = safeIdentityUsername(u.username || "");
+    const backend = backendMap?.[u.user_id] || {};
+    const safeName = safeIdentityName(
+      u.full_name || backend.display_name || u.username || backend.username || "",
+      u.user_id,
+      u.email || ""
+    );
+    const safeUsername = safeIdentityUsername(u.username || backend.username || "");
     userMap.set(u.user_id, u);
     userCache.set(u.user_id, {
       name: safeName,
-      photo: u.photo || "",
-      username: safeUsername
+      photo: u.photo || backend.photo || "",
+      username: safeUsername,
+      verified: !!backend.verified,
+      trust_score: Math.max(0, Number(backend.trust_score || 0))
     });
   });
 
   allChats = ids.map(id => {
     const m = convoMap.get(id);
     const u = userMap.get(id) || {};
-    const safeName = safeIdentityName(u.full_name || u.username || "", id);
-    const safeUsername = safeIdentityUsername(u.username || "");
+    const backend = backendMap?.[id] || {};
+    const safeName = safeIdentityName(
+      u.full_name || backend.display_name || u.username || backend.username || "",
+      id,
+      u.email || ""
+    );
+    const safeUsername = safeIdentityUsername(u.username || backend.username || "");
     return {
       id,
       name: safeName,
       username: safeUsername,
-      photo: u.photo || "",
+      photo: u.photo || backend.photo || "",
       lastMessage: getMessagePreview(m),
       created_at: m.created_at
     };

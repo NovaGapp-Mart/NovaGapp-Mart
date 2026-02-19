@@ -94,6 +94,26 @@ button.secondary{
     <div class="muted" id="statusText">Loading...</div>
   </div>
 
+  <div class="panel">
+    <h3>Verification Admin</h3>
+    <div class="row">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px">
+        <input id="verificationKyc" type="checkbox" checked>
+        KYC complete
+      </label>
+      <button onclick="submitVerificationRequest()">Create Request</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="verificationRequestId" placeholder="Request ID for approve/reject" style="min-width:280px">
+      <input id="verificationAdminId" placeholder="Admin ID" style="width:140px">
+      <input id="verificationAdminToken" placeholder="Admin token (if enabled)" style="min-width:200px">
+      <input id="verificationAdminNote" placeholder="Admin note" style="min-width:200px">
+      <button onclick="decideVerification('approve')">Approve</button>
+      <button class="secondary" onclick="decideVerification('reject')">Reject</button>
+    </div>
+    <div id="verificationBox" class="mono" style="margin-top:10px;max-height:220px"></div>
+  </div>
+
   <div class="grid">
     <div class="panel">
       <h3>Media Upload Events</h3>
@@ -172,6 +192,23 @@ async function apiGet(path){
   return null;
 }
 
+async function apiSend(path, body, method){
+  const bases = getApiBases();
+  const verb = String(method || "POST").toUpperCase();
+  for(const base of bases){
+    try{
+      const res = await fetch(`${base}${path}`, {
+        method: verb,
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify(body || {})
+      });
+      const payload = await res.json().catch(()=>null);
+      if(payload) return payload;
+    }catch(_){ }
+  }
+  return null;
+}
+
 async function refreshEvents(){
   const payload = await apiGet("/api/admin/events?limit=40");
   document.getElementById("mediaEvents").textContent = fmtJson(payload?.events?.media_uploads || []);
@@ -195,11 +232,68 @@ async function refreshReportAndGrowth(){
   document.getElementById("growthBox").textContent = fmtJson(growth || { ok:false });
 }
 
+async function refreshVerificationPanel(){
+  const userId = String(document.getElementById("userIdInput").value || "").trim();
+  if(!userId){
+    document.getElementById("verificationBox").textContent = "Enter user id to view verification status.";
+    return;
+  }
+  const payload = await apiGet(`/api/verification/status?user_id=${encodeURIComponent(userId)}`);
+  document.getElementById("verificationBox").textContent = fmtJson(payload || { ok:false });
+  const requestId = String(payload?.verification?.request_id || "").trim();
+  if(requestId && !document.getElementById("verificationRequestId").value){
+    document.getElementById("verificationRequestId").value = requestId;
+  }
+}
+
+async function submitVerificationRequest(){
+  const userId = String(document.getElementById("userIdInput").value || "").trim();
+  if(!userId){
+    alert("Enter user id first.");
+    return;
+  }
+  const kycCompleted = !!document.getElementById("verificationKyc").checked;
+  const payload = await apiSend("/api/verification/request", {
+    user_id: userId,
+    followers_count: 0,
+    kyc_completed: kycCompleted
+  }, "POST");
+  document.getElementById("verificationBox").textContent = fmtJson(payload || { ok:false });
+  const requestId = String(payload?.verification?.request_id || "").trim();
+  if(requestId){
+    document.getElementById("verificationRequestId").value = requestId;
+  }
+}
+
+async function decideVerification(decision){
+  const requestId = String(document.getElementById("verificationRequestId").value || "").trim();
+  if(!requestId){
+    alert("Enter request id first.");
+    return;
+  }
+  const adminId = String(document.getElementById("verificationAdminId").value || "").trim() || "admin";
+  const adminNote = String(document.getElementById("verificationAdminNote").value || "").trim();
+  const adminToken = String(document.getElementById("verificationAdminToken").value || "").trim();
+  const body = {
+    request_id: requestId,
+    decision: String(decision || "").trim().toLowerCase(),
+    admin_id: adminId,
+    admin_note: adminNote
+  };
+  if(adminToken){
+    body.admin_token = adminToken;
+  }
+  const payload = await apiSend("/api/admin/verification/decision", body, "POST");
+  document.getElementById("verificationBox").textContent = fmtJson(payload || { ok:false });
+  await refreshVerificationPanel();
+}
+
 async function refreshAll(){
   setStatus("Refreshing...");
   await Promise.all([
     refreshEvents(),
-    refreshReportAndGrowth()
+    refreshReportAndGrowth(),
+    refreshVerificationPanel()
   ]);
   setStatus(`Updated at ${new Date().toLocaleString()}`);
 }
