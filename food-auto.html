@@ -7,8 +7,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="global.js"></script>
 <script src="public-config.js"></script>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   body{
     margin:0;
@@ -98,7 +96,7 @@
   }
   .ride-form .input{margin-top:6px}
   .ride-form .btn{margin-top:8px}
-  #rideMap{width:100%;height:420px;border-radius:12px;border:1px solid #e5e5e5;margin-top:8px}
+  #rideMap{width:100%;height:520px;border-radius:12px;border:1px solid #e5e5e5;margin-top:8px}
   .bottom-nav{
     position:fixed;
     left:0;right:0;bottom:0;
@@ -174,7 +172,7 @@
     <strong>Book Ride</strong>
     <div class="muted" style="margin-top:6px">Pickup is auto-set from your current GPS location.</div>
     <input id="dropTextInput" class="input" placeholder="Drop location text (e.g. Hinjewadi Phase 1)">
-    <button class="btn" id="dropGeoBtn" type="button">Auto Fill Drop Lat/Lng</button>
+    <button class="btn" id="dropGeoBtn" type="button">Find Drop On Map</button>
     <div id="rideMap"></div>
     <input id="dropLatInput" class="input hide" type="number" step="0.000001" placeholder="Drop latitude">
     <input id="dropLngInput" class="input hide" type="number" step="0.000001" placeholder="Drop longitude">
@@ -227,9 +225,12 @@ let user = null;
 let rideMap = null;
 let ridePickupMarker = null;
 let rideDropMarker = null;
-let pickupCircle = null;
 let rideTrackTimer = null;
 let geoWatchId = null;
+let googleGeocoder = null;
+let googleMapsReady = false;
+let googleMapLoading = false;
+let ridePickupCircle = null;
 
 function moneyInr(value){
   return "INR " + Number(value || 0).toFixed(2);
@@ -329,68 +330,150 @@ async function loadListings(){
   renderRows(rows);
 }
 
-function initRideMap(){
-  if(rideMap || typeof window.L === "undefined") return;
-  rideMap = window.L.map("rideMap", { zoomControl:true }).setView([18.5204, 73.8567], 13);
-  window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors"
-  }).addTo(rideMap);
-  rideMap.on("click", (e) => {
-    const lat = Number(e.latlng?.lat);
-    const lng = Number(e.latlng?.lng);
-    if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    document.getElementById("dropLatInput").value = lat.toFixed(6);
-    document.getElementById("dropLngInput").value = lng.toFixed(6);
-    resolvePlaceName(lat, lng).then((name) => {
-      if(name){
-        document.getElementById("dropTextInput").value = name;
-      }
-    }).catch(()=>{});
-    if(rideDropMarker){
-      rideDropMarker.setLatLng([lat, lng]);
-    }else{
-      rideDropMarker = window.L.marker([lat, lng], { draggable:true }).addTo(rideMap);
-      rideDropMarker.on("dragend", () => {
-        const p = rideDropMarker.getLatLng();
-        document.getElementById("dropLatInput").value = Number(p.lat).toFixed(6);
-        document.getElementById("dropLngInput").value = Number(p.lng).toFixed(6);
-      });
-    }
+function getGoogleMapsKey(){
+  return String(window.NOVA_PUBLIC_CONFIG?.googleMapsApiKey || "").trim();
+}
+
+function loadGoogleMapsSdk(){
+  if(googleMapsReady && window.google?.maps) return Promise.resolve(true);
+  if(googleMapLoading){
+    return new Promise((resolve) => {
+      const timer = setInterval(() => {
+        if(googleMapsReady && window.google?.maps){
+          clearInterval(timer);
+          resolve(true);
+        }
+      }, 120);
+      setTimeout(() => {
+        clearInterval(timer);
+        resolve(false);
+      }, 12000);
+    });
+  }
+  const key = getGoogleMapsKey();
+  if(!key) return Promise.resolve(false);
+  googleMapLoading = true;
+  return new Promise((resolve) => {
+    const cbName = "__novaMapsInit_" + Date.now();
+    window[cbName] = () => {
+      googleMapsReady = true;
+      googleMapLoading = false;
+      googleGeocoder = new google.maps.Geocoder();
+      try{ delete window[cbName]; }catch(_){ }
+      resolve(true);
+    };
+    const script = document.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=places&callback=${cbName}`;
+    script.async = true;
+    script.defer = true;
+    script.onerror = () => {
+      googleMapLoading = false;
+      try{ delete window[cbName]; }catch(_){ }
+      resolve(false);
+    };
+    document.head.appendChild(script);
   });
 }
 
+async function setDropPoint(lat, lng, resolveName){
+  document.getElementById("dropLatInput").value = lat.toFixed(6);
+  document.getElementById("dropLngInput").value = lng.toFixed(6);
+  if(rideMap && window.google?.maps){
+    if(rideDropMarker){
+      rideDropMarker.setPosition({ lat, lng });
+    }else{
+      rideDropMarker = new google.maps.Marker({
+        map: rideMap,
+        position: { lat, lng },
+        draggable: true,
+        title: "Drop"
+      });
+      rideDropMarker.addListener("dragend", async (event) => {
+        const dlat = Number(event?.latLng?.lat?.());
+        const dlng = Number(event?.latLng?.lng?.());
+        if(!Number.isFinite(dlat) || !Number.isFinite(dlng)) return;
+        await setDropPoint(dlat, dlng, true);
+      });
+    }
+    rideMap.panTo({ lat, lng });
+  }
+  if(resolveName){
+    const place = await resolvePlaceName(lat, lng);
+    if(place){
+      document.getElementById("dropTextInput").value = place;
+    }
+  }
+}
+
+async function initRideMap(){
+  if(rideMap) return;
+  const ok = await loadGoogleMapsSdk();
+  if(!ok || !window.google?.maps){
+    const mapWrap = document.getElementById("rideMap");
+    if(mapWrap){
+      mapWrap.innerHTML = '<div class="muted" style="padding:14px">Map unavailable. Add `GOOGLE_MAPS_API_KEY` in backend env and redeploy.</div>';
+    }
+    return;
+  }
+  const center = { lat: myLat ?? 18.5204, lng: myLng ?? 73.8567 };
+  rideMap = new google.maps.Map(document.getElementById("rideMap"), {
+    center,
+    zoom: 15,
+    mapTypeControl: false,
+    fullscreenControl: false,
+    streetViewControl: false
+  });
+  rideMap.addListener("click", async (event) => {
+    const lat = Number(event?.latLng?.lat?.());
+    const lng = Number(event?.latLng?.lng?.());
+    if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    await setDropPoint(lat, lng, true);
+  });
+  updateRideMapMarkers();
+}
+
 function updateRideMapMarkers(){
-  if(!rideMap || myLat == null || myLng == null) return;
-  const pickup = [myLat, myLng];
+  if(!rideMap || !window.google?.maps || myLat == null || myLng == null) return;
+  const pickup = { lat: myLat, lng: myLng };
   if(ridePickupMarker){
-    ridePickupMarker.setLatLng(pickup);
+    ridePickupMarker.setPosition(pickup);
   }else{
-    ridePickupMarker = window.L.marker(pickup).addTo(rideMap).bindPopup("Pickup (Current Location)");
+    ridePickupMarker = new google.maps.Marker({
+      map: rideMap,
+      position: pickup,
+      title: "Pickup (Current Location)"
+    });
   }
-  if(pickupCircle){
-    pickupCircle.setLatLng(pickup);
+  if(ridePickupCircle){
+    ridePickupCircle.setCenter(pickup);
   }else{
-    pickupCircle = window.L.circle(pickup, { radius: 120, color:"#1d5cff", fillColor:"#1d5cff", fillOpacity:0.15 }).addTo(rideMap);
+    ridePickupCircle = new google.maps.Circle({
+      map: rideMap,
+      center: pickup,
+      radius: 120,
+      strokeColor: "#1d5cff",
+      strokeOpacity: 0.9,
+      strokeWeight: 2,
+      fillColor: "#1d5cff",
+      fillOpacity: 0.12
+    });
   }
-  rideMap.setView(pickup, 15);
+  rideMap.setCenter(pickup);
 }
 
 async function resolvePlaceName(lat, lng){
-  try{
-    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}`;
-    const res = await fetch(url, { headers:{ "Accept":"application/json" } });
-    const json = await res.json().catch(()=>null);
-    const addr = json?.address || {};
-    const name = [
-      addr.road || addr.neighbourhood || addr.suburb || addr.village || addr.town || addr.city || "",
-      addr.state || "",
-      addr.country || ""
-    ].filter(Boolean).join(", ").slice(0, 140);
-    return name || String(json?.display_name || "").slice(0, 140);
-  }catch(_){
-    return "";
+  if(googleGeocoder && window.google?.maps){
+    return new Promise((resolve) => {
+      googleGeocoder.geocode({ location: { lat, lng } }, (results, status) => {
+        if(status === "OK" && Array.isArray(results) && results[0]?.formatted_address){
+          resolve(String(results[0].formatted_address).slice(0, 140));
+          return;
+        }
+        resolve("");
+      });
+    });
   }
+  return "";
 }
 
 async function detectLocation(){
@@ -399,10 +482,11 @@ async function detectLocation(){
     return;
   }
   locText.textContent = "Detecting location...";
-  navigator.geolocation.getCurrentPosition((pos) => {
+  navigator.geolocation.getCurrentPosition(async (pos) => {
     myLat = Number(pos.coords.latitude);
     myLng = Number(pos.coords.longitude);
-    locText.textContent = "Current location detected.";
+    const acc = Number(pos.coords.accuracy || 0);
+    locText.textContent = `Live location detected. Accuracy ~${Math.round(acc)}m`;
     const dropLatInput = document.getElementById("dropLatInput");
     const dropLngInput = document.getElementById("dropLngInput");
     if(dropLatInput && !String(dropLatInput.value || "").trim()){
@@ -411,11 +495,11 @@ async function detectLocation(){
     if(dropLngInput && !String(dropLngInput.value || "").trim()){
       dropLngInput.value = (myLng + 0.02).toFixed(6);
     }
-    initRideMap();
+    await initRideMap();
     updateRideMapMarkers();
     resolvePlaceName(myLat, myLng).then((place) => {
       if(place){
-        locText.textContent = `Current location: ${place}`;
+        locText.textContent = `Live current location: ${place}${acc ? ` (~${Math.round(acc)}m)` : ""}`;
       }
     }).catch(()=>{});
     loadListings();
@@ -424,7 +508,7 @@ async function detectLocation(){
     initRideMap();
     resultsInfo.textContent = "Location permission is required for nearby services.";
     listingBox.innerHTML = '<div class="muted">Location blocked. Turn on location permission and refresh GPS.</div>';
-  }, { enableHighAccuracy:true, timeout:10000, maximumAge:10000 });
+  }, { enableHighAccuracy:true, timeout:15000, maximumAge:0 });
 }
 
 function startLiveLocationWatch(){
@@ -433,7 +517,7 @@ function startLiveLocationWatch(){
     try{ navigator.geolocation.clearWatch(geoWatchId); }catch(_){ }
     geoWatchId = null;
   }
-  geoWatchId = navigator.geolocation.watchPosition((pos) => {
+  geoWatchId = navigator.geolocation.watchPosition(async (pos) => {
     const lat = Number(pos.coords.latitude);
     const lng = Number(pos.coords.longitude);
     if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
@@ -442,17 +526,18 @@ function startLiveLocationWatch(){
       : (Math.abs(myLat - lat) > 0.0003 || Math.abs(myLng - lng) > 0.0003);
     myLat = lat;
     myLng = lng;
-    initRideMap();
+    await initRideMap();
     updateRideMapMarkers();
+    const acc = Number(pos.coords.accuracy || 0);
     if(changed){
       resolvePlaceName(myLat, myLng).then((place) => {
         if(place){
-          locText.textContent = `Current location: ${place}`;
+          locText.textContent = `Live current location: ${place}${acc ? ` (~${Math.round(acc)}m)` : ""}`;
         }
       }).catch(()=>{});
       loadListings();
     }
-  }, () => {}, { enableHighAccuracy:true, maximumAge:5000, timeout:12000 });
+  }, () => {}, { enableHighAccuracy:true, maximumAge:0, timeout:15000 });
 }
 
 async function ensureUser(){
@@ -643,9 +728,11 @@ async function trackRide(){
         const otpVerified = json?.ride_request?.otp_verified ? "Yes" : "No";
         const dlat = Number(json?.driver_location?.lat);
         const dlng = Number(json?.driver_location?.lng);
-        const loc = (Number.isFinite(dlat) && Number.isFinite(dlng))
-          ? `Driver ${dlat.toFixed(5)}, ${dlng.toFixed(5)}`
-          : "Driver location unavailable";
+        let loc = "Driver location unavailable";
+        if(Number.isFinite(dlat) && Number.isFinite(dlng)){
+          const place = await resolvePlaceName(dlat, dlng);
+          if(place) loc = `Driver near ${place}`;
+        }
         const rideTrackText = document.getElementById("rideTrackText");
         if(rideTrackText){
           rideTrackText.textContent = `Status: ${json?.ride_request?.status || "-"} | Driver phone: ${phone || "-"} | OTP verified: ${otpVerified} | ${loc}`;
@@ -674,28 +761,22 @@ async function fillDropCoordinatesFromText(){
     alert("Enter drop text first.");
     return;
   }
-  try{
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(dropText)}`;
-    const res = await fetch(url, { headers:{ "Accept":"application/json" } });
-    const rows = await res.json().catch(()=>[]);
-    const first = Array.isArray(rows) ? rows[0] : null;
-    const lat = Number(first?.lat);
-    const lng = Number(first?.lon);
-    if(Number.isFinite(lat) && Number.isFinite(lng)){
-      document.getElementById("dropLatInput").value = lat.toFixed(6);
-      document.getElementById("dropLngInput").value = lng.toFixed(6);
-      if(rideMap){
-        if(rideDropMarker){
-          rideDropMarker.setLatLng([lat, lng]);
-        }else{
-          rideDropMarker = window.L.marker([lat, lng], { draggable:true }).addTo(rideMap);
-        }
-        rideMap.setView([lat, lng], 15);
+  await initRideMap();
+  if(!googleGeocoder){
+    alert("Map not ready. Check Google Maps API key.");
+    return;
+  }
+  googleGeocoder.geocode({ address: dropText }, async (results, status) => {
+    if(status === "OK" && Array.isArray(results) && results[0]?.geometry?.location){
+      const lat = Number(results[0].geometry.location.lat());
+      const lng = Number(results[0].geometry.location.lng());
+      if(Number.isFinite(lat) && Number.isFinite(lng)){
+        await setDropPoint(lat, lng, true);
+        return;
       }
-      return;
     }
-  }catch(_){ }
-  alert("Drop geocode failed. Please enter lat/lng manually.");
+    alert("Could not find drop location on map. Try a clearer area/locality name.");
+  });
 }
 
 async function verifyRideOtp(){

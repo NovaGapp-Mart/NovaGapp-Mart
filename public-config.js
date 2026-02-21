@@ -25,7 +25,8 @@
     firebaseMessagingSenderId: "",
     firebaseAppId: "",
     firebaseMeasurementId: "",
-    firebaseVapidKey: ""
+    firebaseVapidKey: "",
+    googleMapsApiKey: ""
   });
   const FALLBACK_CONFIG = Object.freeze({
     // Keep empty in source. Runtime values should come from /api/public/config.
@@ -39,7 +40,8 @@
     firebaseMessagingSenderId: "",
     firebaseAppId: "",
     firebaseMeasurementId: "",
-    firebaseVapidKey: ""
+    firebaseVapidKey: "",
+    googleMapsApiKey: ""
   });
   const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
 
@@ -90,7 +92,8 @@
       firebaseMessagingSenderId: String(raw?.firebaseMessagingSenderId || "").trim(),
       firebaseAppId: String(raw?.firebaseAppId || "").trim(),
       firebaseMeasurementId: String(raw?.firebaseMeasurementId || "").trim(),
-      firebaseVapidKey: String(raw?.firebaseVapidKey || "").trim()
+      firebaseVapidKey: String(raw?.firebaseVapidKey || "").trim(),
+      googleMapsApiKey: String(raw?.googleMapsApiKey || "").trim()
     };
     return next;
   }
@@ -130,7 +133,8 @@
       firebaseMessagingSenderId: p.firebaseMessagingSenderId || s.firebaseMessagingSenderId,
       firebaseAppId: p.firebaseAppId || s.firebaseAppId,
       firebaseMeasurementId: p.firebaseMeasurementId || s.firebaseMeasurementId,
-      firebaseVapidKey: p.firebaseVapidKey || s.firebaseVapidKey
+      firebaseVapidKey: p.firebaseVapidKey || s.firebaseVapidKey,
+      googleMapsApiKey: p.googleMapsApiKey || s.googleMapsApiKey
     });
   }
 

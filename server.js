@@ -129,6 +129,11 @@ const PUBLIC_FIREBASE_APP_ID = String(process.env.FIREBASE_APP_ID || "").trim();
 const PUBLIC_FIREBASE_MEASUREMENT_ID = String(process.env.FIREBASE_MEASUREMENT_ID || "").trim();
 const PUBLIC_FIREBASE_VAPID_KEY = String(process.env.FIREBASE_VAPID_KEY || "").trim();
 const FIREBASE_SERVER_KEY = String(process.env.FIREBASE_SERVER_KEY || "").trim();
+const PUBLIC_GOOGLE_MAPS_API_KEY = String(
+  process.env.GOOGLE_MAPS_API_KEY ||
+  process.env.GMAPS_API_KEY ||
+  ""
+).trim();
 
 app.get("/api/public/config", (req, res) => {
   res.setHeader("Cache-Control", "public, max-age=120");
@@ -143,7 +148,8 @@ app.get("/api/public/config", (req, res) => {
     firebaseMessagingSenderId: PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
     firebaseAppId: PUBLIC_FIREBASE_APP_ID,
     firebaseMeasurementId: PUBLIC_FIREBASE_MEASUREMENT_ID,
-    firebaseVapidKey: PUBLIC_FIREBASE_VAPID_KEY
+    firebaseVapidKey: PUBLIC_FIREBASE_VAPID_KEY,
+    googleMapsApiKey: PUBLIC_GOOGLE_MAPS_API_KEY
   });
 });
 
