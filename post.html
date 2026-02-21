@@ -1685,6 +1685,7 @@ const params = new URLSearchParams(location.search);
 const feedUserId = params.get("uid") || "";
 const focusPostId = params.get("focus") || "";
 const renderedPostIds = new Set();
+const boostedOwnPostIds = new Set();
 const storyProfileCache = {};
 const commentUserCache = {};
 const DEFAULT_AVATAR_DATA_URI = "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
@@ -2489,6 +2490,45 @@ function resetFeedAndReload(){
   feed.innerHTML = "";
   if(!feedReady) return;
   ensureFocusPostLoaded().then(() => loadMore());
+}
+
+function shuffleItems(items){
+  const list = Array.isArray(items) ? items.slice() : [];
+  for(let i = list.length - 1; i > 0; i -= 1){
+    const j = Math.floor(Math.random() * (i + 1));
+    const temp = list[i];
+    list[i] = list[j];
+    list[j] = temp;
+  }
+  return list;
+}
+
+function toEpochMs(value){
+  const ts = Date.parse(String(value || ""));
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function orderPostBatchForFeed(items, currentUserId){
+  const shuffled = shuffleItems(items);
+  const me = String(currentUserId || "");
+  if(!me) return shuffled;
+  let ownTopIndex = -1;
+  let ownTopTs = -1;
+  for(let i = 0; i < shuffled.length; i += 1){
+    const row = shuffled[i];
+    if(String(row?.user_id || "") !== me) continue;
+    if(boostedOwnPostIds.has(String(row?.id || ""))) continue;
+    const ts = toEpochMs(row?.created_at);
+    if(ts >= ownTopTs){
+      ownTopTs = ts;
+      ownTopIndex = i;
+    }
+  }
+  if(ownTopIndex <= -1) return shuffled;
+  const [ownTopItem] = shuffled.splice(ownTopIndex, 1);
+  boostedOwnPostIds.add(String(ownTopItem?.id || ""));
+  shuffled.unshift(ownTopItem);
+  return shuffled;
 }
 
 function scheduleFeedReload(){
@@ -4309,7 +4349,8 @@ async function loadMore(){
     }
   }
 
-  await Promise.all((data || []).map(item => renderPost(item)));
+  const orderedBatch = orderPostBatchForFeed(data || [], user?.id || "");
+  await Promise.all(orderedBatch.map(item => renderPost(item)));
   if(requestVersion !== feedVersion){
     loading = false;
     return;

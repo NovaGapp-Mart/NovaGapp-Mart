@@ -518,6 +518,7 @@ const renderedIds = new Set();
 const LAST_REEL_KEY = "nova_last_reel_upload";
 const REEL_SHARE_KEY = "nova_reel_share_count_";
 const viewedInSession = new Set();
+const boostedOwnReelIds = new Set();
 let activeCommentReelId = null;
 let activeCommentCountEl = null;
 let activeCommentOwnerId = "";
@@ -611,6 +612,45 @@ function resetFeedCursor(){
   loading = false;
   done = false;
   focusApplied = false;
+}
+
+function shuffleItems(items){
+  const list = Array.isArray(items) ? items.slice() : [];
+  for(let i = list.length - 1; i > 0; i -= 1){
+    const j = Math.floor(Math.random() * (i + 1));
+    const temp = list[i];
+    list[i] = list[j];
+    list[j] = temp;
+  }
+  return list;
+}
+
+function toEpochMs(value){
+  const ts = Date.parse(String(value || ""));
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function orderReelBatchForFeed(items, currentUserId){
+  const shuffled = shuffleItems(items);
+  const me = String(currentUserId || "");
+  if(!me) return shuffled;
+  let ownTopIndex = -1;
+  let ownTopTs = -1;
+  for(let i = 0; i < shuffled.length; i += 1){
+    const row = shuffled[i];
+    if(String(row?.user_id || "") !== me) continue;
+    if(boostedOwnReelIds.has(String(row?.id || ""))) continue;
+    const ts = toEpochMs(row?.created_at);
+    if(ts >= ownTopTs){
+      ownTopTs = ts;
+      ownTopIndex = i;
+    }
+  }
+  if(ownTopIndex <= -1) return shuffled;
+  const [ownTopItem] = shuffled.splice(ownTopIndex, 1);
+  boostedOwnReelIds.add(String(ownTopItem?.id || ""));
+  shuffled.unshift(ownTopItem);
+  return shuffled;
 }
 
 function matchReelSearch(item, needle){
@@ -1186,7 +1226,9 @@ async function loadMore(){
 
   if(emptyState) emptyState.style.display = "none";
 
-  data.forEach(item => renderReel(item));
+  const currentUser = await currentUserPromise;
+  const orderedBatch = orderReelBatchForFeed(data, currentUser?.id || "");
+  orderedBatch.forEach(item => renderReel(item));
   page += 1;
   loading = false;
 }
