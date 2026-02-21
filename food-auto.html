@@ -7,6 +7,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="global.js"></script>
 <script src="public-config.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   body{
     margin:0;
@@ -174,8 +176,8 @@
     <input id="dropTextInput" class="input" placeholder="Drop location text (e.g. Hinjewadi Phase 1)">
     <button class="btn" id="dropGeoBtn" type="button">Find Drop On Map</button>
     <div id="rideMap"></div>
-    <input id="dropLatInput" class="input hide" type="number" step="0.000001" placeholder="Drop latitude">
-    <input id="dropLngInput" class="input hide" type="number" step="0.000001" placeholder="Drop longitude">
+    <input id="dropLatInput" type="hidden">
+    <input id="dropLngInput" type="hidden">
     <button class="btn orange" id="rideRequestBtn" type="button">Request Ride Now</button>
     <div id="rideTrackText" class="muted" style="margin-top:8px"></div>
     <div class="row">
@@ -227,9 +229,6 @@ let ridePickupMarker = null;
 let rideDropMarker = null;
 let rideTrackTimer = null;
 let geoWatchId = null;
-let googleGeocoder = null;
-let googleMapsReady = false;
-let googleMapLoading = false;
 let ridePickupCircle = null;
 
 function moneyInr(value){
@@ -330,72 +329,23 @@ async function loadListings(){
   renderRows(rows);
 }
 
-function getGoogleMapsKey(){
-  return String(window.NOVA_PUBLIC_CONFIG?.googleMapsApiKey || "").trim();
-}
-
-function loadGoogleMapsSdk(){
-  if(googleMapsReady && window.google?.maps) return Promise.resolve(true);
-  if(googleMapLoading){
-    return new Promise((resolve) => {
-      const timer = setInterval(() => {
-        if(googleMapsReady && window.google?.maps){
-          clearInterval(timer);
-          resolve(true);
-        }
-      }, 120);
-      setTimeout(() => {
-        clearInterval(timer);
-        resolve(false);
-      }, 12000);
-    });
-  }
-  const key = getGoogleMapsKey();
-  if(!key) return Promise.resolve(false);
-  googleMapLoading = true;
-  return new Promise((resolve) => {
-    const cbName = "__novaMapsInit_" + Date.now();
-    window[cbName] = () => {
-      googleMapsReady = true;
-      googleMapLoading = false;
-      googleGeocoder = new google.maps.Geocoder();
-      try{ delete window[cbName]; }catch(_){ }
-      resolve(true);
-    };
-    const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=places&callback=${cbName}`;
-    script.async = true;
-    script.defer = true;
-    script.onerror = () => {
-      googleMapLoading = false;
-      try{ delete window[cbName]; }catch(_){ }
-      resolve(false);
-    };
-    document.head.appendChild(script);
-  });
-}
-
 async function setDropPoint(lat, lng, resolveName){
   document.getElementById("dropLatInput").value = lat.toFixed(6);
   document.getElementById("dropLngInput").value = lng.toFixed(6);
-  if(rideMap && window.google?.maps){
+  if(rideMap && window.L){
     if(rideDropMarker){
-      rideDropMarker.setPosition({ lat, lng });
+      rideDropMarker.setLatLng([lat, lng]);
     }else{
-      rideDropMarker = new google.maps.Marker({
-        map: rideMap,
-        position: { lat, lng },
-        draggable: true,
-        title: "Drop"
-      });
-      rideDropMarker.addListener("dragend", async (event) => {
-        const dlat = Number(event?.latLng?.lat?.());
-        const dlng = Number(event?.latLng?.lng?.());
+      rideDropMarker = window.L.marker([lat, lng], { draggable:true }).addTo(rideMap);
+      rideDropMarker.on("dragend", async () => {
+        const p = rideDropMarker.getLatLng();
+        const dlat = Number(p?.lat);
+        const dlng = Number(p?.lng);
         if(!Number.isFinite(dlat) || !Number.isFinite(dlng)) return;
         await setDropPoint(dlat, dlng, true);
       });
     }
-    rideMap.panTo({ lat, lng });
+    rideMap.panTo([lat, lng], { animate:true });
   }
   if(resolveName){
     const place = await resolvePlaceName(lat, lng);
@@ -407,25 +357,22 @@ async function setDropPoint(lat, lng, resolveName){
 
 async function initRideMap(){
   if(rideMap) return;
-  const ok = await loadGoogleMapsSdk();
-  if(!ok || !window.google?.maps){
+  if(typeof window.L === "undefined"){
     const mapWrap = document.getElementById("rideMap");
     if(mapWrap){
-      mapWrap.innerHTML = '<div class="muted" style="padding:14px">Map unavailable. Add `GOOGLE_MAPS_API_KEY` in backend env and redeploy.</div>';
+      mapWrap.innerHTML = '<div class="muted" style="padding:14px">Map unavailable on this device right now.</div>';
     }
     return;
   }
-  const center = { lat: myLat ?? 18.5204, lng: myLng ?? 73.8567 };
-  rideMap = new google.maps.Map(document.getElementById("rideMap"), {
-    center,
-    zoom: 15,
-    mapTypeControl: false,
-    fullscreenControl: false,
-    streetViewControl: false
-  });
-  rideMap.addListener("click", async (event) => {
-    const lat = Number(event?.latLng?.lat?.());
-    const lng = Number(event?.latLng?.lng?.());
+  const center = [myLat ?? 18.5204, myLng ?? 73.8567];
+  rideMap = window.L.map("rideMap", { zoomControl:true }).setView(center, 15);
+  window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(rideMap);
+  rideMap.on("click", async (event) => {
+    const lat = Number(event?.latlng?.lat);
+    const lng = Number(event?.latlng?.lng);
     if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     await setDropPoint(lat, lng, true);
   });
@@ -433,46 +380,55 @@ async function initRideMap(){
 }
 
 function updateRideMapMarkers(){
-  if(!rideMap || !window.google?.maps || myLat == null || myLng == null) return;
-  const pickup = { lat: myLat, lng: myLng };
+  if(!rideMap || typeof window.L === "undefined" || myLat == null || myLng == null) return;
+  const pickup = [myLat, myLng];
   if(ridePickupMarker){
-    ridePickupMarker.setPosition(pickup);
+    ridePickupMarker.setLatLng(pickup);
   }else{
-    ridePickupMarker = new google.maps.Marker({
-      map: rideMap,
-      position: pickup,
-      title: "Pickup (Current Location)"
-    });
+    ridePickupMarker = window.L.marker(pickup).addTo(rideMap);
+    ridePickupMarker.bindPopup("Pickup (Current Location)");
   }
   if(ridePickupCircle){
-    ridePickupCircle.setCenter(pickup);
+    ridePickupCircle.setLatLng(pickup);
   }else{
-    ridePickupCircle = new google.maps.Circle({
-      map: rideMap,
-      center: pickup,
+    ridePickupCircle = window.L.circle(pickup, {
       radius: 120,
-      strokeColor: "#1d5cff",
-      strokeOpacity: 0.9,
-      strokeWeight: 2,
+      color: "#1d5cff",
       fillColor: "#1d5cff",
       fillOpacity: 0.12
-    });
+    }).addTo(rideMap);
   }
-  rideMap.setCenter(pickup);
+  rideMap.setView(pickup, Math.max(rideMap.getZoom(), 15));
 }
 
 async function resolvePlaceName(lat, lng){
-  if(googleGeocoder && window.google?.maps){
-    return new Promise((resolve) => {
-      googleGeocoder.geocode({ location: { lat, lng } }, (results, status) => {
-        if(status === "OK" && Array.isArray(results) && results[0]?.formatted_address){
-          resolve(String(results[0].formatted_address).slice(0, 140));
-          return;
-        }
-        resolve("");
-      });
-    });
-  }
+  try{
+    const bdc = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(String(lat))}&longitude=${encodeURIComponent(String(lng))}&localityLanguage=en`;
+    const bdcRes = await fetch(bdc, { cache:"no-store" });
+    if(bdcRes.ok){
+      const data = await bdcRes.json().catch(() => null);
+      const parts = [
+        data?.locality || data?.city || data?.principalSubdivision || "",
+        data?.principalSubdivision || "",
+        data?.countryName || ""
+      ].filter(Boolean);
+      if(parts.length) return parts.join(", ").slice(0, 140);
+    }
+  }catch(_){ }
+  try{
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}`;
+    const res = await fetch(url, { headers:{ "Accept":"application/json" }, cache:"no-store" });
+    if(res.ok){
+      const json = await res.json().catch(() => null);
+      const addr = json?.address || {};
+      const name = [
+        addr.road || addr.suburb || addr.neighbourhood || addr.village || addr.town || addr.city || "",
+        addr.state || "",
+        addr.country || ""
+      ].filter(Boolean).join(", ").slice(0, 140);
+      if(name) return name;
+    }
+  }catch(_){ }
   return "";
 }
 
@@ -490,10 +446,10 @@ async function detectLocation(){
     const dropLatInput = document.getElementById("dropLatInput");
     const dropLngInput = document.getElementById("dropLngInput");
     if(dropLatInput && !String(dropLatInput.value || "").trim()){
-      dropLatInput.value = (myLat + 0.02).toFixed(6);
+      dropLatInput.value = myLat.toFixed(6);
     }
     if(dropLngInput && !String(dropLngInput.value || "").trim()){
-      dropLngInput.value = (myLng + 0.02).toFixed(6);
+      dropLngInput.value = myLng.toFixed(6);
     }
     await initRideMap();
     updateRideMapMarkers();
@@ -684,7 +640,7 @@ async function createRideRequest(){
   const dropLat = Number(document.getElementById("dropLatInput")?.value || 0);
   const dropLng = Number(document.getElementById("dropLngInput")?.value || 0);
   if(!Number.isFinite(dropLat) || !Number.isFinite(dropLng) || Math.abs(dropLat) > 90 || Math.abs(dropLng) > 180){
-    alert("Enter valid drop latitude/longitude.");
+    alert("Please select drop location from map.");
     return;
   }
   for(const base of buildApiBases()){
@@ -762,21 +718,31 @@ async function fillDropCoordinatesFromText(){
     return;
   }
   await initRideMap();
-  if(!googleGeocoder){
-    alert("Map not ready. Check Google Maps API key.");
-    return;
-  }
-  googleGeocoder.geocode({ address: dropText }, async (results, status) => {
-    if(status === "OK" && Array.isArray(results) && results[0]?.geometry?.location){
-      const lat = Number(results[0].geometry.location.lat());
-      const lng = Number(results[0].geometry.location.lng());
-      if(Number.isFinite(lat) && Number.isFinite(lng)){
-        await setDropPoint(lat, lng, true);
-        return;
-      }
+  try{
+    const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(dropText)}&limit=1`;
+    const pRes = await fetch(photonUrl, { cache:"no-store" });
+    const pJson = await pRes.json().catch(() => null);
+    const coords = pJson?.features?.[0]?.geometry?.coordinates;
+    const lng = Number(Array.isArray(coords) ? coords[0] : NaN);
+    const lat = Number(Array.isArray(coords) ? coords[1] : NaN);
+    if(Number.isFinite(lat) && Number.isFinite(lng)){
+      await setDropPoint(lat, lng, true);
+      return;
     }
-    alert("Could not find drop location on map. Try a clearer area/locality name.");
-  });
+  }catch(_){ }
+  try{
+    const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(dropText)}&limit=1`;
+    const nRes = await fetch(nominatimUrl, { cache:"no-store" });
+    const nJson = await nRes.json().catch(() => []);
+    const first = Array.isArray(nJson) ? nJson[0] : null;
+    const lat = Number(first?.lat);
+    const lng = Number(first?.lon);
+    if(Number.isFinite(lat) && Number.isFinite(lng)){
+      await setDropPoint(lat, lng, true);
+      return;
+    }
+  }catch(_){ }
+  alert("Location name not found. Try area + city (example: Hinjewadi Pune).");
 }
 
 async function verifyRideOtp(){
