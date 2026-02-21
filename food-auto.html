@@ -229,6 +229,7 @@ let ridePickupMarker = null;
 let rideDropMarker = null;
 let pickupCircle = null;
 let rideTrackTimer = null;
+let geoWatchId = null;
 
 function moneyInr(value){
   return "INR " + Number(value || 0).toFixed(2);
@@ -281,14 +282,19 @@ function renderRows(rows){
 }
 
 async function loadListings(){
+  if(myLat == null || myLng == null){
+    resultsInfo.textContent = "Getting your live location...";
+    listingBox.innerHTML = '<div class="muted">Please allow location access to see nearby services.</div>';
+    return;
+  }
   let rows = [];
   const bases = buildApiBases();
   const endpoint = activeType === "agent" ? "/api/local/agents/nearby" : "/api/local/nearby";
   for(const base of bases){
     try{
       const url = activeType === "agent"
-        ? `${base}${endpoint}?service_category=&lat=${encodeURIComponent(String(myLat ?? 0))}&lng=${encodeURIComponent(String(myLng ?? 0))}&radius_km=${encodeURIComponent(String(radiusKm))}`
-        : `${base}${endpoint}?type=${encodeURIComponent(activeType)}&lat=${encodeURIComponent(String(myLat ?? 0))}&lng=${encodeURIComponent(String(myLng ?? 0))}&radius_km=${encodeURIComponent(String(radiusKm))}&limit=80`;
+        ? `${base}${endpoint}?service_category=&lat=${encodeURIComponent(String(myLat))}&lng=${encodeURIComponent(String(myLng))}&radius_km=${encodeURIComponent(String(radiusKm))}`
+        : `${base}${endpoint}?type=${encodeURIComponent(activeType)}&lat=${encodeURIComponent(String(myLat))}&lng=${encodeURIComponent(String(myLng))}&radius_km=${encodeURIComponent(String(radiusKm))}&limit=80`;
       const res = await fetch(url, { cache:"no-store" });
       if(!res.ok) continue;
       const payload = await res.json().catch(() => null);
@@ -367,7 +373,7 @@ function updateRideMapMarkers(){
   }else{
     pickupCircle = window.L.circle(pickup, { radius: 120, color:"#1d5cff", fillColor:"#1d5cff", fillOpacity:0.15 }).addTo(rideMap);
   }
-  rideMap.setView(pickup, 14);
+  rideMap.setView(pickup, 15);
 }
 
 async function resolvePlaceName(lat, lng){
@@ -414,10 +420,39 @@ async function detectLocation(){
     }).catch(()=>{});
     loadListings();
   }, () => {
-    locText.textContent = "Location permission denied.";
+    locText.textContent = "Location permission denied. Enable location in browser/app settings.";
     initRideMap();
-    loadListings();
+    resultsInfo.textContent = "Location permission is required for nearby services.";
+    listingBox.innerHTML = '<div class="muted">Location blocked. Turn on location permission and refresh GPS.</div>';
   }, { enableHighAccuracy:true, timeout:10000, maximumAge:10000 });
+}
+
+function startLiveLocationWatch(){
+  if(!navigator.geolocation) return;
+  if(geoWatchId != null){
+    try{ navigator.geolocation.clearWatch(geoWatchId); }catch(_){ }
+    geoWatchId = null;
+  }
+  geoWatchId = navigator.geolocation.watchPosition((pos) => {
+    const lat = Number(pos.coords.latitude);
+    const lng = Number(pos.coords.longitude);
+    if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const changed = (myLat == null || myLng == null)
+      ? true
+      : (Math.abs(myLat - lat) > 0.0003 || Math.abs(myLng - lng) > 0.0003);
+    myLat = lat;
+    myLng = lng;
+    initRideMap();
+    updateRideMapMarkers();
+    if(changed){
+      resolvePlaceName(myLat, myLng).then((place) => {
+        if(place){
+          locText.textContent = `Current location: ${place}`;
+        }
+      }).catch(()=>{});
+      loadListings();
+    }
+  }, () => {}, { enableHighAccuracy:true, maximumAge:5000, timeout:12000 });
 }
 
 async function ensureUser(){
@@ -785,6 +820,7 @@ document.getElementById("dropGeoBtn").addEventListener("click", fillDropCoordina
 
 detectLocation();
 initRideMap();
+startLiveLocationWatch();
 loadListings();
 </script>
 </body>
