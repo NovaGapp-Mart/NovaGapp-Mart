@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>F-Account - NovaGapp Local</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script src="global.js"></script>
+<script src="public-config.js"></script>
+<style>
+body{margin:0;font-family:Arial,sans-serif;background:#f5f5f5;padding-bottom:90px}
+.top{background:#111;color:#fff;padding:12px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+.section{background:#fff;margin:10px;border-radius:12px;padding:12px;box-shadow:0 4px 12px rgba(0,0,0,.06)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.card{border:1px solid #ececec;border-radius:10px;padding:10px}
+.btn{border:none;border-radius:8px;padding:9px 12px;background:#ff6a00;color:#fff;cursor:pointer}
+.btn.dark{background:#111}
+.muted{font-size:12px;color:#666}
+.input{width:100%;box-sizing:border-box;padding:9px;border:1px solid #ddd;border-radius:8px;margin-top:8px}
+.roles{display:flex;gap:8px;flex-wrap:wrap}
+.pill{padding:6px 10px;border-radius:999px;background:#eef3ff;color:#1a3ea6;font-size:12px;font-weight:700}
+</style>
+</head>
+<body>
+<div class="top">
+  <span>F-Account (Local Services)</span>
+  <button class="btn dark" onclick="location.href='food-auto.html'">Services</button>
+</div>
+
+<div class="section">
+  <strong>Profile</strong>
+  <div id="userText" class="muted" style="margin-top:8px">Checking login...</div>
+  <input id="displayName" class="input" placeholder="Display name">
+  <input id="phone" class="input" placeholder="Phone number">
+</div>
+
+<div class="section">
+  <strong>Select Role</strong>
+  <div class="muted" style="margin-top:6px">Consumer free. Seller and Rider require INR 500 onboarding fee.</div>
+  <div class="grid" style="margin-top:8px">
+    <div class="card">
+      <b>Consumer</b>
+      <div class="muted">Order rides, food, grocery, agents.</div>
+      <button class="btn" style="margin-top:8px" onclick="enroll('consumer', false)">Activate Free</button>
+    </div>
+    <div class="card">
+      <b>Seller</b>
+      <div class="muted">List food/grocery store and receive orders.</div>
+      <button class="btn" style="margin-top:8px" onclick="enroll('seller', true)">Activate INR 500</button>
+    </div>
+    <div class="card">
+      <b>Rider</b>
+      <div class="muted">Receive ride requests near your location.</div>
+      <button class="btn" style="margin-top:8px" onclick="enroll('rider', true)">Activate INR 500</button>
+    </div>
+    <div class="card">
+      <b>Agent</b>
+      <div class="muted">List services (plumber, electrician, etc).</div>
+      <button class="btn" style="margin-top:8px" onclick="enroll('agent', false)">Activate Free</button>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <strong>Active Roles</strong>
+  <div id="roleBox" class="roles" style="margin-top:8px"></div>
+  <div class="roles" style="margin-top:10px">
+    <button class="btn" onclick="location.href='local-seller.html'">Seller Panel</button>
+    <button class="btn" onclick="location.href='local-rider.html'">Rider Panel</button>
+    <button class="btn" onclick="location.href='local-agent.html'">Agent Panel</button>
+    <button class="btn dark" onclick="location.href='local-admin.html'">Admin Panel</button>
+  </div>
+</div>
+
+<script>
+const supa = window.supa || window.novaCreateSupabaseClient();
+let me = null;
+
+function apiBases(){
+  const out = [];
+  const push = (v) => {
+    const clean = String(v || "").trim().replace(/\/+$/g, "");
+    if(!clean || !/^https?:\/\//i.test(clean) || out.includes(clean)) return;
+    out.push(clean);
+  };
+  push(window.CONTEST_API_BASE || window.API_BASE || "");
+  try{ push(localStorage.getItem("contest_api_base")); push(localStorage.getItem("api_base")); }catch(_){}
+  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+  push("https://novagapp-mart.onrender.com");
+  return out;
+}
+
+async function apiPost(path, payload){
+  for(const base of apiBases()){
+    try{
+      const res = await fetch(base + path, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify(payload || {})
+      });
+      const json = await res.json().catch(()=>null);
+      if(res.ok && json?.ok) return json;
+    }catch(_){}
+  }
+  return null;
+}
+
+async function apiGet(path){
+  for(const base of apiBases()){
+    try{
+      const res = await fetch(base + path, { cache:"no-store" });
+      const json = await res.json().catch(()=>null);
+      if(res.ok && json?.ok) return json;
+    }catch(_){}
+  }
+  return null;
+}
+
+async function loadUser(){
+  if(!supa?.auth){
+    location.href = "login.html";
+    return;
+  }
+  const { data } = await supa.auth.getSession();
+  me = data?.session?.user || null;
+  if(!me){
+    location.href = "login.html";
+    return;
+  }
+  document.getElementById("userText").textContent = `${me.email || "Logged in"} (${me.id})`;
+  document.getElementById("displayName").value = (me.user_metadata?.full_name || me.user_metadata?.name || "").slice(0, 48);
+}
+
+async function loadRoles(){
+  if(!me) return;
+  const out = await apiGet(`/api/local/roles?user_id=${encodeURIComponent(me.id)}`);
+  const roleBox = document.getElementById("roleBox");
+  roleBox.innerHTML = "";
+  const roles = Array.isArray(out?.roles) ? out.roles : [];
+  if(!roles.length){
+    roleBox.innerHTML = `<span class="muted">No active role yet.</span>`;
+    return;
+  }
+  roles.forEach(r => {
+    const el = document.createElement("span");
+    el.className = "pill";
+    el.textContent = `${String(r.role || "").toUpperCase()}${r.fee_required_inr > 0 ? " (Paid)" : ""}`;
+    roleBox.appendChild(el);
+  });
+}
+
+async function enroll(role, paidRequired){
+  if(!me) return;
+  const displayName = document.getElementById("displayName").value.trim();
+  const phone = document.getElementById("phone").value.trim();
+  if(!displayName || !phone){
+    alert("Display name and phone are required.");
+    return;
+  }
+  let paymentRef = "";
+  if(paidRequired){
+    const feeOrder = await apiPost("/api/local/role/fee/order", {
+      user_id: me.id,
+      role
+    });
+    if(!feeOrder?.order?.razorpay_order_id){
+      alert("Unable to create fee order.");
+      return;
+    }
+    if(typeof window.Razorpay !== "function"){
+      alert("Razorpay SDK not loaded.");
+      return;
+    }
+    const paid = await new Promise((resolve) => {
+      const rz = new window.Razorpay({
+        key: feeOrder.order.key_id,
+        amount: feeOrder.order.amount_paise,
+        currency: "INR",
+        name: "NovaGapp Local",
+        description: `${role.toUpperCase()} onboarding fee`,
+        order_id: feeOrder.order.razorpay_order_id,
+        handler: async (resp) => {
+          const verify = await apiPost("/api/local/role/fee/verify", {
+            user_id: me.id,
+            role,
+            razorpay_order_id: resp.razorpay_order_id,
+            razorpay_payment_id: resp.razorpay_payment_id,
+            razorpay_signature: resp.razorpay_signature
+          });
+          resolve(!!verify?.ok);
+        },
+        modal: {
+          ondismiss: () => resolve(false)
+        },
+        prefill: {
+          name: displayName,
+          email: me.email || "",
+          contact: phone
+        }
+      });
+      rz.open();
+    });
+    if(!paid){
+      alert("Fee payment not completed.");
+      return;
+    }
+    paymentRef = `rzp_${Date.now()}`;
+  }
+  const out = await apiPost("/api/local/role/enroll", {
+    user_id: me.id,
+    role,
+    display_name: displayName,
+    phone,
+    fee_paid: true,
+    payment_ref: paymentRef
+  });
+  if(!out){
+    alert("Role activation failed.");
+    return;
+  }
+  alert(`${role.toUpperCase()} role activated.`);
+  loadRoles();
+}
+
+loadUser().then(loadRoles);
+</script>
+</body>
+</html>

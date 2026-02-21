@@ -110,7 +110,10 @@
 <body>
   <div class="top">
     <span>Food / Auto Nearby</span>
-    <button class="btn" onclick="location.href='index.html'">Home</button>
+    <div class="row">
+      <button class="btn" onclick="location.href='F-account.html'">F-Account</button>
+      <button class="btn" onclick="location.href='index.html'">Home</button>
+    </div>
   </div>
 
   <div class="section">
@@ -131,6 +134,7 @@
       <button class="chip active" data-type="food">Food</button>
       <button class="chip" data-type="grocery">Grocery</button>
       <button class="chip" data-type="ride">Ride / Auto</button>
+      <button class="chip" data-type="agent">Agent</button>
     </div>
     <div class="fee" style="margin-top:10px">
       Listing fee: <strong>INR 500</strong>. Commission per order: <strong>0%</strong>. Month-end platform share: <strong>5%</strong>.
@@ -157,6 +161,7 @@
         <option value="food">Food</option>
         <option value="grocery">Grocery</option>
         <option value="ride">Ride / Auto</option>
+        <option value="agent">Agent (Plumber/Electrician)</option>
       </select>
     </div>
     <div class="row" style="margin-top:8px">
@@ -232,6 +237,9 @@ function renderRows(rows){
     const distance = (myLat != null && myLng != null && Number.isFinite(row.lat) && Number.isFinite(row.lng))
       ? haversineKm(myLat, myLng, Number(row.lat), Number(row.lng))
       : null;
+    const actionLabel = row.listing_type === "ride"
+      ? "Request Ride"
+      : (row.listing_type === "agent" ? "Book Agent" : "Order Now");
     const div = document.createElement("div");
     div.className = "card";
     div.innerHTML = `
@@ -242,7 +250,12 @@ function renderRows(rows){
         <div class="muted">Phone: ${row.phone || "-"}</div>
         <div class="muted">${distance == null ? "Distance unknown" : ("Distance: " + distance.toFixed(1) + " km")}</div>
         <div class="row" style="margin-top:8px">
-          <button class="btn orange" onclick="alert('Booking started for ${String(row.store_name || "").replace(/'/g, "")}.')">${row.listing_type === "ride" ? "Book Auto" : "Order Now"}</button>
+          <button
+            class="btn orange action-btn"
+            data-id="${String(row.id || "")}"
+            data-type="${String(row.listing_type || "")}"
+            data-name="${String(row.store_name || "").replace(/"/g, "&quot;")}"
+          >${actionLabel}</button>
         </div>
       </div>
     `;
@@ -253,14 +266,29 @@ function renderRows(rows){
 async function loadListings(){
   let rows = [];
   const bases = buildApiBases();
+  const endpoint = activeType === "agent" ? "/api/local/agents/nearby" : "/api/local/nearby";
   for(const base of bases){
     try{
-      const url = `${base}/api/local/nearby?type=${encodeURIComponent(activeType)}&lat=${encodeURIComponent(String(myLat ?? 0))}&lng=${encodeURIComponent(String(myLng ?? 0))}&radius_km=${encodeURIComponent(String(radiusKm))}&limit=80`;
+      const url = activeType === "agent"
+        ? `${base}${endpoint}?service_category=&lat=${encodeURIComponent(String(myLat ?? 0))}&lng=${encodeURIComponent(String(myLng ?? 0))}&radius_km=${encodeURIComponent(String(radiusKm))}`
+        : `${base}${endpoint}?type=${encodeURIComponent(activeType)}&lat=${encodeURIComponent(String(myLat ?? 0))}&lng=${encodeURIComponent(String(myLng ?? 0))}&radius_km=${encodeURIComponent(String(radiusKm))}&limit=80`;
       const res = await fetch(url, { cache:"no-store" });
       if(!res.ok) continue;
       const payload = await res.json().catch(() => null);
-      if(payload?.ok && Array.isArray(payload.listings)){
-        rows = payload.listings;
+      if(payload?.ok && Array.isArray(payload.listings || payload.agents)){
+        rows = (payload.listings || payload.agents || []).map((item) => {
+          if(activeType !== "agent") return item;
+          return {
+            id: item.id,
+            store_name: item.title || "Agent",
+            listing_type: "agent",
+            phone: item.phone || "",
+            image_url: item.image_url || "Images/no-image.jpg",
+            lat: item.lat,
+            lng: item.lng,
+            open_now: !!item.available_now
+          };
+        });
         break;
       }
     }catch(_){ }
@@ -350,10 +378,23 @@ async function createListing(){
   let ok = false;
   for(const base of bases){
     try{
-      const res = await fetch(`${base}/api/local/listings/create`, {
+      const endpoint = storeType === "agent" ? "/api/local/agents/create" : "/api/local/listings/create";
+      const body = storeType === "agent"
+        ? {
+          user_id: me.id,
+          service_category: "general",
+          title: storeName,
+          phone,
+          price_per_visit_inr: 199,
+          lat: myLat,
+          lng: myLng,
+          image_url: imageUrl
+        }
+        : payload;
+      const res = await fetch(`${base}${endpoint}`, {
         method: "POST",
         headers: { "Content-Type":"application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(body)
       });
       if(!res.ok) continue;
       const json = await res.json().catch(() => null);
@@ -367,8 +408,116 @@ async function createListing(){
     alert("Listing save failed. Ensure backend + local_listings tables are ready.");
     return;
   }
-  alert("Listing submitted. INR 500 listing fee marked. Awaiting approval.");
+  alert(storeType === "agent"
+    ? "Agent profile submitted."
+    : "Listing submitted. INR 500 listing fee marked. Awaiting approval.");
   listingFormWrap.classList.add("hide");
+}
+
+async function createOrderForListing(listingId, listingName, type){
+  const me = await ensureUser();
+  if(!me){
+    alert("Please login first.");
+    location.href = "login.html";
+    return;
+  }
+  const address = prompt("Enter delivery address");
+  if(!address) return;
+  const amount = Number(prompt("Enter total amount in INR", "120") || 0);
+  if(!amount || amount <= 0) return;
+  for(const base of buildApiBases()){
+    try{
+      const res = await fetch(`${base}/api/local/orders/create`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({
+          user_id: me.id,
+          listing_id: listingId,
+          service_type: type,
+          amount_inr: amount,
+          delivery_address: address,
+          note: `Order from ${listingName || "listing"}`
+        })
+      });
+      const json = await res.json().catch(()=>null);
+      if(res.ok && json?.ok){
+        alert("Order placed successfully.");
+        return;
+      }
+    }catch(_){ }
+  }
+  alert("Order failed.");
+}
+
+async function createRideRequest(){
+  const me = await ensureUser();
+  if(!me){
+    alert("Please login first.");
+    location.href = "login.html";
+    return;
+  }
+  if(myLat == null || myLng == null){
+    alert("Enable GPS first.");
+    return;
+  }
+  const dropText = prompt("Enter drop location text");
+  if(!dropText) return;
+  const dropLat = Number(prompt("Enter drop latitude", String(myLat + 0.02)) || 0);
+  const dropLng = Number(prompt("Enter drop longitude", String(myLng + 0.02)) || 0);
+  for(const base of buildApiBases()){
+    try{
+      const res = await fetch(`${base}/api/local/rides/request`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({
+          user_id: me.id,
+          pickup_lat: myLat,
+          pickup_lng: myLng,
+          drop_lat: dropLat,
+          drop_lng: dropLng,
+          pickup_text: "Current location",
+          drop_text: dropText
+        })
+      });
+      const json = await res.json().catch(()=>null);
+      if(res.ok && json?.ok){
+        alert(`Ride request created. Offered riders: ${Number(json.offered_driver_count || 0)}`);
+        return;
+      }
+    }catch(_){ }
+  }
+  alert("Ride request failed.");
+}
+
+async function createAgentBooking(agentId){
+  const me = await ensureUser();
+  if(!me){
+    alert("Please login first.");
+    location.href = "login.html";
+    return;
+  }
+  const address = prompt("Enter service address");
+  if(!address) return;
+  for(const base of buildApiBases()){
+    try{
+      const res = await fetch(`${base}/api/local/agents/book`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({
+          customer_user_id: me.id,
+          agent_id: agentId,
+          service_address: address,
+          note: "Booked from Food/Auto section"
+        })
+      });
+      const json = await res.json().catch(()=>null);
+      if(res.ok && json?.ok){
+        alert("Agent booking created.");
+        return;
+      }
+    }catch(_){ }
+  }
+  alert("Agent booking failed.");
 }
 
 function buildApiBases(){
@@ -402,6 +551,22 @@ chips.forEach(chip => {
     activeType = chip.dataset.type || "food";
     loadListings();
   });
+});
+listingBox.addEventListener("click", (e) => {
+  const btn = e.target.closest(".action-btn");
+  if(!btn) return;
+  const id = String(btn.dataset.id || "");
+  const type = String(btn.dataset.type || "");
+  const name = String(btn.dataset.name || "");
+  if(type === "ride"){
+    createRideRequest();
+    return;
+  }
+  if(type === "agent"){
+    createAgentBooking(id);
+    return;
+  }
+  createOrderForListing(id, name, type);
 });
 document.getElementById("openListingBtn").addEventListener("click", () => {
   listingFormWrap.classList.toggle("hide");

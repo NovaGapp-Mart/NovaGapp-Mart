@@ -1099,6 +1099,53 @@ function parseMonthRange(monthInput){
   return { month, fromIso: from.toISOString(), toIso: to.toISOString() };
 }
 
+function sanitizeLocalRole(value){
+  const raw = String(value || "").trim().toLowerCase();
+  if(raw === "consumer" || raw === "seller" || raw === "rider" || raw === "agent") return raw;
+  return "";
+}
+
+const localRateLimitStore = new Map();
+function localRateLimitHit(key, max, windowMs){
+  const now = Date.now();
+  const safeMax = Math.max(1, Math.floor(safeNumber(max) || 1));
+  const safeWindow = Math.max(1000, Math.floor(safeNumber(windowMs) || 60000));
+  const raw = localRateLimitStore.get(key);
+  const stamps = Array.isArray(raw) ? raw.filter(ts => now - ts < safeWindow) : [];
+  stamps.push(now);
+  localRateLimitStore.set(key, stamps);
+  return stamps.length > safeMax;
+}
+
+function canTransitionStatus(current, next, flowMap){
+  const from = String(current || "").trim().toLowerCase();
+  const to = String(next || "").trim().toLowerCase();
+  const allowed = flowMap[from];
+  if(!Array.isArray(allowed)) return false;
+  return allowed.includes(to);
+}
+
+async function hasActiveLocalRole(userIdInput, roleInput){
+  const userId = sanitizeUserId(userIdInput);
+  const role = sanitizeLocalRole(roleInput);
+  if(!userId || !role) return false;
+  try{
+    const rows = await localServicesSupabaseRequest("local_roles", "GET", {
+      query: {
+        select: "id",
+        user_id: `eq.${userId}`,
+        role: `eq.${role}`,
+        status: "eq.active",
+        fee_paid: "eq.true",
+        limit: "1"
+      }
+    });
+    return Array.isArray(rows) && !!rows[0];
+  }catch(_){
+    return false;
+  }
+}
+
 async function readSystemState(){
   try{
     const raw = await fs.readFile(SYSTEM_STATE_PATH, "utf8");
@@ -5783,7 +5830,17 @@ app.post("/api/local/listings/create", async (req, res) => {
   if(!userId || !listingType || !storeName || !phone || lat === null || lng === null){
     return res.status(400).json({ ok:false, error:"invalid_listing_payload" });
   }
+  if(localRateLimitHit(`local_listing_create:${userId}`, 12, 10 * 60 * 1000)){
+    return res.status(429).json({ ok:false, error:"rate_limited" });
+  }
   try{
+    if(["food","grocery"].includes(listingType)){
+      const allowed = await hasActiveLocalRole(userId, "seller");
+      if(!allowed) return res.status(403).json({ ok:false, error:"seller_role_required" });
+    }else if(listingType === "ride"){
+      const allowed = await hasActiveLocalRole(userId, "rider");
+      if(!allowed) return res.status(403).json({ ok:false, error:"rider_role_required" });
+    }
     const rows = await localServicesSupabaseRequest("local_listings", "POST", {
       body: [{
         user_id: userId,
@@ -5888,7 +5945,14 @@ app.post("/api/local/orders/create", async (req, res) => {
   if(!userId || !listingId || !deliveryAddress){
     return res.status(400).json({ ok:false, error:"invalid_order_payload" });
   }
+  if(localRateLimitHit(`local_order_create:${userId}`, 40, 10 * 60 * 1000)){
+    return res.status(429).json({ ok:false, error:"rate_limited" });
+  }
   try{
+    const consumerAllowed = await hasActiveLocalRole(userId, "consumer");
+    if(!consumerAllowed){
+      return res.status(403).json({ ok:false, error:"consumer_role_required" });
+    }
     const listingRows = await localServicesSupabaseRequest("local_listings", "GET", {
       query: {
         select: "id,user_id,store_name,listing_type,status",
@@ -5951,6 +6015,17 @@ app.post("/api/local/orders/status", async (req, res) => {
     if(!isAdmin && actorUserId && actorUserId !== sanitizeUserId(order.seller_user_id) && actorUserId !== sanitizeUserId(order.buyer_user_id)){
       return res.status(403).json({ ok:false, error:"order_update_forbidden" });
     }
+    const orderFlow = {
+      placed: ["accepted", "rejected", "cancelled"],
+      accepted: ["out_for_delivery", "cancelled"],
+      out_for_delivery: ["completed", "cancelled"],
+      completed: [],
+      rejected: [],
+      cancelled: []
+    };
+    if(!isAdmin && !canTransitionStatus(order.status, status, orderFlow)){
+      return res.status(409).json({ ok:false, error:"invalid_order_status_transition" });
+    }
     const patched = await localServicesSupabaseRequest("local_orders", "PATCH", {
       query: { id: `eq.${orderId}` },
       body: { status, updated_at: new Date().toISOString() },
@@ -5973,7 +6048,14 @@ app.post("/api/local/rides/request", async (req, res) => {
   if(!riderUserId || pickupLat === null || pickupLng === null || dropLat === null || dropLng === null){
     return res.status(400).json({ ok:false, error:"invalid_ride_payload" });
   }
+  if(localRateLimitHit(`ride_request:${riderUserId}`, 30, 10 * 60 * 1000)){
+    return res.status(429).json({ ok:false, error:"rate_limited" });
+  }
   try{
+    const consumerAllowed = await hasActiveLocalRole(riderUserId, "consumer");
+    if(!consumerAllowed){
+      return res.status(403).json({ ok:false, error:"consumer_role_required" });
+    }
     const nearbyRes = await localServicesSupabaseRequest("local_listings", "GET", {
       query: {
         select: "id,user_id,store_name,lat,lng,open_now,status,listing_type",
@@ -6037,6 +6119,10 @@ app.post("/api/local/rides/accept", async (req, res) => {
     return res.status(400).json({ ok:false, error:"request_id_and_driver_user_id_required" });
   }
   try{
+    const riderAllowed = await hasActiveLocalRole(driverUserId, "rider");
+    if(!riderAllowed){
+      return res.status(403).json({ ok:false, error:"rider_role_required" });
+    }
     const rows = await localServicesSupabaseRequest("local_ride_requests", "GET", {
       query: {
         select: "id,rider_user_id,status,offered_driver_ids,driver_user_id",
@@ -6108,6 +6194,775 @@ app.get("/api/local/settlement/monthly", async (req, res) => {
     });
   }catch(err){
     return res.status(500).json({ ok:false, error:"local_settlement_failed", message:String(err?.message || "") });
+  }
+});
+
+app.get("/api/local/admin/settlement/overview", async (req, res) => {
+  if(!isAdminAutomationRequest(req)){
+    return res.status(403).json({ ok:false, error:"forbidden" });
+  }
+  const range = parseMonthRange(req.query?.month);
+  try{
+    const rows = await localServicesSupabaseRequest("local_orders", "GET", {
+      query: {
+        select: "seller_user_id,amount_inr,status,created_at",
+        created_at: `gte.${range.fromIso}`,
+        order: "created_at.desc",
+        limit: "8000"
+      }
+    });
+    const bySeller = {};
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+      if(String(row?.status || "") !== "completed") return;
+      const createdAt = String(row?.created_at || "");
+      if(!createdAt || createdAt >= range.toIso) return;
+      const seller = sanitizeUserId(row?.seller_user_id);
+      if(!seller) return;
+      if(!bySeller[seller]){
+        bySeller[seller] = { seller_user_id: seller, completed_orders: 0, gross_inr: 0 };
+      }
+      bySeller[seller].completed_orders += 1;
+      bySeller[seller].gross_inr += Math.max(0, safeNumber(row?.amount_inr));
+    });
+    const sellers = Object.values(bySeller).map((item) => {
+      const gross = Math.round(item.gross_inr * 100) / 100;
+      const due = Math.round(gross * 0.05 * 100) / 100;
+      return {
+        seller_user_id: item.seller_user_id,
+        completed_orders: item.completed_orders,
+        gross_inr: gross,
+        platform_due_inr: due
+      };
+    }).sort((a, b) => b.platform_due_inr - a.platform_due_inr);
+    const totalGross = sellers.reduce((sum, s) => sum + s.gross_inr, 0);
+    const totalDue = sellers.reduce((sum, s) => sum + s.platform_due_inr, 0);
+    return res.json({
+      ok:true,
+      month: range.month,
+      seller_count: sellers.length,
+      total_gross_inr: Math.round(totalGross * 100) / 100,
+      total_platform_due_inr: Math.round(totalDue * 100) / 100,
+      sellers
+    });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_admin_settlement_overview_failed", message:String(err?.message || "") });
+  }
+});
+
+app.post("/api/local/admin/settlement/mark-paid", async (req, res) => {
+  if(!isAdminAutomationRequest(req)){
+    return res.status(403).json({ ok:false, error:"forbidden" });
+  }
+  const sellerUserId = sanitizeUserId(req.body?.seller_user_id);
+  const month = String(req.body?.month || "").trim();
+  const paidRef = String(req.body?.paid_ref || "").trim().slice(0, 120);
+  const paidAmountInr = Math.max(0, safeNumber(req.body?.paid_amount_inr));
+  if(!sellerUserId || !month || !/^\d{4}-\d{2}$/.test(month)){
+    return res.status(400).json({ ok:false, error:"invalid_settlement_mark_paid_payload" });
+  }
+  try{
+    const rows = await localServicesSupabaseRequest("local_settlements", "POST", {
+      body: [{
+        seller_user_id: sellerUserId,
+        month,
+        paid_amount_inr: Math.round(paidAmountInr * 100) / 100,
+        paid_ref: paidRef || null,
+        status: "paid",
+        paid_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }],
+      query: { on_conflict: "seller_user_id,month" },
+      prefer: "resolution=merge-duplicates,return=representation"
+    });
+    return res.json({ ok:true, settlement: Array.isArray(rows) ? rows[0] || null : null });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_settlement_mark_paid_failed", message:String(err?.message || "") });
+  }
+});
+
+app.get("/api/local/admin/health", async (req, res) => {
+  if(!isAdminAutomationRequest(req)){
+    return res.status(403).json({ ok:false, error:"forbidden" });
+  }
+  try{
+    const [searchingRides, placedOrders, requestedBookings] = await Promise.all([
+      localServicesSupabaseRequest("local_ride_requests", "GET", {
+        query: {
+          select: "id,created_at,status",
+          status: "eq.searching",
+          order: "created_at.asc",
+          limit: "500"
+        }
+      }),
+      localServicesSupabaseRequest("local_orders", "GET", {
+        query: {
+          select: "id,created_at,status",
+          status: "eq.placed",
+          order: "created_at.asc",
+          limit: "500"
+        }
+      }),
+      localServicesSupabaseRequest("local_agent_bookings", "GET", {
+        query: {
+          select: "id,created_at,status",
+          status: "eq.requested",
+          order: "created_at.asc",
+          limit: "500"
+        }
+      })
+    ]);
+
+    const now = Date.now();
+    const staleMinutes = (rows, min) => (Array.isArray(rows) ? rows : []).filter((r) => {
+      const ts = Date.parse(String(r?.created_at || ""));
+      if(!Number.isFinite(ts)) return false;
+      return (now - ts) > (min * 60 * 1000);
+    }).length;
+
+    return res.json({
+      ok:true,
+      metrics: {
+        searching_rides: Array.isArray(searchingRides) ? searchingRides.length : 0,
+        placed_orders: Array.isArray(placedOrders) ? placedOrders.length : 0,
+        requested_agent_bookings: Array.isArray(requestedBookings) ? requestedBookings.length : 0
+      },
+      stale: {
+        rides_over_10m: staleMinutes(searchingRides, 10),
+        orders_over_30m: staleMinutes(placedOrders, 30),
+        bookings_over_30m: staleMinutes(requestedBookings, 30)
+      }
+    });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_admin_health_failed", message:String(err?.message || "") });
+  }
+});
+
+app.get("/api/local/admin/listings/pending", async (req, res) => {
+  if(!isAdminAutomationRequest(req)){
+    return res.status(403).json({ ok:false, error:"forbidden" });
+  }
+  try{
+    const rows = await localServicesSupabaseRequest("local_listings", "GET", {
+      query: {
+        select: "id,user_id,store_name,listing_type,phone,image_url,status,created_at",
+        status: "eq.pending_approval",
+        order: "created_at.asc",
+        limit: "500"
+      }
+    });
+    return res.json({ ok:true, listings: Array.isArray(rows) ? rows : [] });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_admin_pending_listings_failed", message:String(err?.message || "") });
+  }
+});
+
+app.get("/api/local/orders/for-seller", async (req, res) => {
+  const userId = sanitizeUserId(req.query?.user_id);
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  try{
+    const sellerAllowed = await hasActiveLocalRole(userId, "seller");
+    if(!sellerAllowed) return res.status(403).json({ ok:false, error:"seller_role_required" });
+    const rows = await localServicesSupabaseRequest("local_orders", "GET", {
+      query: {
+        select: "id,buyer_user_id,seller_user_id,listing_id,service_type,amount_inr,delivery_address,note,status,created_at,updated_at",
+        seller_user_id: `eq.${userId}`,
+        order: "created_at.desc",
+        limit: "500"
+      }
+    });
+    return res.json({ ok:true, orders: Array.isArray(rows) ? rows : [] });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_orders_for_seller_failed", message:String(err?.message || "") });
+  }
+});
+
+app.get("/api/local/orders/for-buyer", async (req, res) => {
+  const userId = sanitizeUserId(req.query?.user_id);
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  try{
+    const consumerAllowed = await hasActiveLocalRole(userId, "consumer");
+    if(!consumerAllowed) return res.status(403).json({ ok:false, error:"consumer_role_required" });
+    const rows = await localServicesSupabaseRequest("local_orders", "GET", {
+      query: {
+        select: "id,buyer_user_id,seller_user_id,listing_id,service_type,amount_inr,delivery_address,note,status,created_at,updated_at",
+        buyer_user_id: `eq.${userId}`,
+        order: "created_at.desc",
+        limit: "500"
+      }
+    });
+    return res.json({ ok:true, orders: Array.isArray(rows) ? rows : [] });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_orders_for_buyer_failed", message:String(err?.message || "") });
+  }
+});
+
+app.get("/api/local/rides/for-rider", async (req, res) => {
+  const userId = sanitizeUserId(req.query?.user_id);
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  try{
+    const riderAllowed = await hasActiveLocalRole(userId, "rider");
+    if(!riderAllowed){
+      return res.status(403).json({ ok:false, error:"rider_role_required" });
+    }
+    const rows = await localServicesSupabaseRequest("local_ride_requests", "GET", {
+      query: {
+        select: "id,rider_user_id,driver_user_id,pickup_lat,pickup_lng,drop_lat,drop_lng,pickup_text,drop_text,status,offered_driver_ids,created_at,updated_at",
+        order: "created_at.desc",
+        limit: "500"
+      }
+    });
+    const filtered = (Array.isArray(rows) ? rows : []).filter((row) => {
+      const status = String(row?.status || "");
+      const driver = sanitizeUserId(row?.driver_user_id);
+      if(driver && driver === userId) return true;
+      if(status !== "searching") return false;
+      const offered = Array.isArray(row?.offered_driver_ids) ? row.offered_driver_ids.map(sanitizeUserId) : [];
+      return offered.includes(userId);
+    });
+    return res.json({ ok:true, rides: filtered });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_rides_for_rider_failed", message:String(err?.message || "") });
+  }
+});
+
+app.post("/api/local/rides/status", async (req, res) => {
+  const requestId = String(req.body?.request_id || "").trim();
+  const userId = sanitizeUserId(req.body?.user_id);
+  const status = String(req.body?.status || "").trim().toLowerCase();
+  const allowed = new Set(["arriving","on_trip","completed","cancelled"]);
+  if(!requestId || !userId || !allowed.has(status)){
+    return res.status(400).json({ ok:false, error:"invalid_ride_status_payload" });
+  }
+  try{
+    const rows = await localServicesSupabaseRequest("local_ride_requests", "GET", {
+      query: { select:"id,rider_user_id,driver_user_id,status", id:`eq.${requestId}`, limit:"1" }
+    });
+    const ride = Array.isArray(rows) ? rows[0] : null;
+    if(!ride){
+      return res.status(404).json({ ok:false, error:"ride_not_found" });
+    }
+    if(sanitizeUserId(ride.driver_user_id) !== userId){
+      return res.status(403).json({ ok:false, error:"ride_status_forbidden" });
+    }
+    const flow = {
+      accepted: ["arriving", "on_trip", "cancelled"],
+      arriving: ["on_trip", "cancelled"],
+      on_trip: ["completed", "cancelled"],
+      completed: [],
+      cancelled: []
+    };
+    if(!canTransitionStatus(ride.status, status, flow)){
+      return res.status(409).json({ ok:false, error:"invalid_ride_status_transition" });
+    }
+    const patched = await localServicesSupabaseRequest("local_ride_requests", "PATCH", {
+      query: { id: `eq.${requestId}` },
+      body: { status, updated_at: new Date().toISOString() },
+      prefer: "return=representation"
+    });
+    return res.json({ ok:true, ride_request: Array.isArray(patched) ? patched[0] || null : null });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_ride_status_failed", message:String(err?.message || "") });
+  }
+});
+
+app.get("/api/local/agent/bookings", async (req, res) => {
+  const userId = sanitizeUserId(req.query?.user_id);
+  const side = String(req.query?.side || "agent").trim().toLowerCase();
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  try{
+    if(side === "customer"){
+      const consumerAllowed = await hasActiveLocalRole(userId, "consumer");
+      if(!consumerAllowed) return res.status(403).json({ ok:false, error:"consumer_role_required" });
+    }else{
+      const agentAllowed = await hasActiveLocalRole(userId, "agent");
+      if(!agentAllowed) return res.status(403).json({ ok:false, error:"agent_role_required" });
+    }
+    const query = {
+      select: "id,customer_user_id,agent_user_id,agent_id,service_address,note,status,created_at,updated_at",
+      order: "created_at.desc",
+      limit: "500"
+    };
+    if(side === "customer"){
+      query.customer_user_id = `eq.${userId}`;
+    }else{
+      query.agent_user_id = `eq.${userId}`;
+    }
+    const rows = await localServicesSupabaseRequest("local_agent_bookings", "GET", { query });
+    return res.json({ ok:true, bookings: Array.isArray(rows) ? rows : [] });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_agent_bookings_fetch_failed", message:String(err?.message || "") });
+  }
+});
+
+app.post("/api/local/agent/bookings/status", async (req, res) => {
+  const bookingId = String(req.body?.booking_id || "").trim();
+  const userId = sanitizeUserId(req.body?.user_id);
+  const status = String(req.body?.status || "").trim().toLowerCase();
+  const allowed = new Set(["accepted","on_the_way","completed","cancelled"]);
+  if(!bookingId || !userId || !allowed.has(status)){
+    return res.status(400).json({ ok:false, error:"invalid_booking_status_payload" });
+  }
+  try{
+    const rows = await localServicesSupabaseRequest("local_agent_bookings", "GET", {
+      query: { select:"id,customer_user_id,agent_user_id,status", id:`eq.${bookingId}`, limit:"1" }
+    });
+    const booking = Array.isArray(rows) ? rows[0] : null;
+    if(!booking){
+      return res.status(404).json({ ok:false, error:"booking_not_found" });
+    }
+    if(sanitizeUserId(booking.agent_user_id) !== userId){
+      return res.status(403).json({ ok:false, error:"booking_status_forbidden" });
+    }
+    const flow = {
+      requested: ["accepted", "cancelled"],
+      accepted: ["on_the_way", "cancelled"],
+      on_the_way: ["completed", "cancelled"],
+      completed: [],
+      cancelled: []
+    };
+    if(!canTransitionStatus(booking.status, status, flow)){
+      return res.status(409).json({ ok:false, error:"invalid_booking_status_transition" });
+    }
+    const patched = await localServicesSupabaseRequest("local_agent_bookings", "PATCH", {
+      query: { id: `eq.${bookingId}` },
+      body: { status, updated_at: new Date().toISOString() },
+      prefer: "return=representation"
+    });
+    return res.json({ ok:true, booking: Array.isArray(patched) ? patched[0] || null : null });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_booking_status_failed", message:String(err?.message || "") });
+  }
+});
+
+app.post("/api/local/role/fee/order", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  const role = sanitizeLocalRole(req.body?.role);
+  if(!userId || !role){
+    return res.status(400).json({ ok:false, error:"user_id_and_role_required" });
+  }
+  if(!["seller","rider"].includes(role)){
+    return res.status(400).json({ ok:false, error:"fee_not_required_for_role" });
+  }
+  if(!isContestRazorpayConfigured()){
+    return res.status(503).json({ ok:false, error:"razorpay_not_configured", message:getContestRazorpaySetupMessage() });
+  }
+  try{
+    const receipt = `local_role_${role}_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+    const razorpayOrder = await createContestRazorpayOrder({
+      amount_paise: 50000,
+      receipt,
+      notes: {
+        module: "local_role",
+        user_id: userId,
+        role
+      }
+    });
+    return res.json({
+      ok:true,
+      order: {
+        key_id: CONTEST_RAZORPAY_KEY_ID,
+        razorpay_order_id: razorpayOrder.id,
+        amount_paise: 50000,
+        amount_inr: 500,
+        currency: "INR",
+        role
+      }
+    });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_role_fee_order_failed", message:String(err?.message || "") });
+  }
+});
+
+app.post("/api/local/role/fee/verify", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  const role = sanitizeLocalRole(req.body?.role);
+  const orderId = String(req.body?.razorpay_order_id || "").trim();
+  const paymentId = String(req.body?.razorpay_payment_id || "").trim();
+  const signature = String(req.body?.razorpay_signature || "").trim();
+  if(!userId || !role || !orderId || !paymentId || !signature){
+    return res.status(400).json({ ok:false, error:"missing_fee_verify_fields" });
+  }
+  if(!verifyContestPaymentSignature(orderId, paymentId, signature)){
+    return res.status(400).json({ ok:false, error:"invalid_payment_signature" });
+  }
+  try{
+    const paymentSnapshot = await fetchRazorpayPaymentSnapshot(paymentId);
+    if(String(paymentSnapshot?.order_id || "").trim() !== orderId){
+      return res.status(400).json({ ok:false, error:"order_payment_mismatch" });
+    }
+    const status = String(paymentSnapshot?.status || "").trim().toLowerCase();
+    const captured = Boolean(paymentSnapshot?.captured) || status === "captured";
+    const amountPaise = Math.round(safeNumber(paymentSnapshot?.amount));
+    if(!captured || !isRazorpayPaymentStatusAcceptable(status) || amountPaise < 50000){
+      return res.status(400).json({ ok:false, error:"payment_not_captured_or_invalid_amount" });
+    }
+    const rows = await localServicesSupabaseRequest("local_role_payments", "POST", {
+      body: [{
+        user_id: userId,
+        role,
+        razorpay_order_id: orderId,
+        razorpay_payment_id: paymentId,
+        amount_inr: 500,
+        status: "captured",
+        verified_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }],
+      query: { on_conflict: "razorpay_order_id" },
+      prefer: "resolution=merge-duplicates,return=representation"
+    });
+    return res.json({ ok:true, payment: Array.isArray(rows) ? rows[0] || null : null });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_role_fee_verify_failed", message:String(err?.message || "") });
+  }
+});
+
+app.post("/api/local/role/enroll", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  const role = sanitizeLocalRole(req.body?.role);
+  const displayName = sanitizeDisplayName(req.body?.display_name || "");
+  const phone = String(req.body?.phone || "").trim().slice(0, 30);
+  const paymentRef = String(req.body?.payment_ref || "").trim().slice(0, 120);
+  const feePaid = Boolean(req.body?.fee_paid);
+  if(!userId || !role){
+    return res.status(400).json({ ok:false, error:"user_id_and_role_required" });
+  }
+  const feeRequired = role === "seller" || role === "rider";
+  if(feeRequired && !feePaid && !paymentRef){
+    return res.status(402).json({ ok:false, error:"listing_fee_required", amount_inr:500 });
+  }
+  try{
+    if(feeRequired){
+      const paymentRows = await localServicesSupabaseRequest("local_role_payments", "GET", {
+        query: {
+          select: "id",
+          user_id: `eq.${userId}`,
+          role: `eq.${role}`,
+          status: "eq.captured",
+          order: "verified_at.desc",
+          limit: "1"
+        }
+      });
+      const hasVerifiedFee = Array.isArray(paymentRows) && !!paymentRows[0];
+      if(!hasVerifiedFee && !paymentRef){
+        return res.status(402).json({ ok:false, error:"listing_fee_not_verified" });
+      }
+    }
+    const rows = await localServicesSupabaseRequest("local_roles", "POST", {
+      body: [{
+        user_id: userId,
+        role,
+        display_name: displayName || null,
+        phone: phone || null,
+        fee_required_inr: feeRequired ? 500 : 0,
+        fee_paid: true,
+        payment_ref: paymentRef || null,
+        status: "active",
+        updated_at: new Date().toISOString()
+      }],
+      query: { on_conflict: "user_id,role" },
+      prefer: "resolution=merge-duplicates,return=representation"
+    });
+    return res.json({ ok:true, role: Array.isArray(rows) ? rows[0] || null : null });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_role_enroll_failed", message:String(err?.message || "") });
+  }
+});
+
+app.get("/api/local/roles", async (req, res) => {
+  const userId = sanitizeUserId(req.query?.user_id);
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  try{
+    const rows = await localServicesSupabaseRequest("local_roles", "GET", {
+      query: {
+        select: "id,user_id,role,status,fee_required_inr,fee_paid,display_name,phone,updated_at",
+        user_id: `eq.${userId}`,
+        status: "eq.active",
+        limit: "10"
+      }
+    });
+    return res.json({ ok:true, roles: Array.isArray(rows) ? rows : [] });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_roles_fetch_failed", message:String(err?.message || "") });
+  }
+});
+
+app.post("/api/local/listings/item", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  const listingId = String(req.body?.listing_id || "").trim();
+  const name = String(req.body?.name || "").trim().slice(0, 120);
+  const priceInr = Math.max(0, safeNumber(req.body?.price_inr));
+  const stockQty = Math.max(0, Math.floor(safeNumber(req.body?.stock_qty)));
+  const imageUrl = String(req.body?.image_url || "").trim().slice(0, 3000);
+  const category = String(req.body?.category || "").trim().slice(0, 80);
+  if(!userId || !listingId || !name || priceInr <= 0){
+    return res.status(400).json({ ok:false, error:"invalid_item_payload" });
+  }
+  if(localRateLimitHit(`local_listing_item:${userId}`, 80, 10 * 60 * 1000)){
+    return res.status(429).json({ ok:false, error:"rate_limited" });
+  }
+  try{
+    const sellerAllowed = await hasActiveLocalRole(userId, "seller");
+    if(!sellerAllowed){
+      return res.status(403).json({ ok:false, error:"seller_role_required" });
+    }
+    const listingRows = await localServicesSupabaseRequest("local_listings", "GET", {
+      query: { select:"id,user_id,listing_type,status", id:`eq.${listingId}`, limit:"1" }
+    });
+    const listing = Array.isArray(listingRows) ? listingRows[0] : null;
+    if(!listing || sanitizeUserId(listing.user_id) !== userId){
+      return res.status(403).json({ ok:false, error:"listing_owner_required" });
+    }
+    if(String(listing.status || "") !== "approved"){
+      return res.status(409).json({ ok:false, error:"listing_not_approved" });
+    }
+    if(!["food","grocery"].includes(String(listing.listing_type || ""))){
+      return res.status(400).json({ ok:false, error:"items_only_for_food_or_grocery" });
+    }
+    const rows = await localServicesSupabaseRequest("local_listing_items", "POST", {
+      body: [{
+        listing_id: listingId,
+        seller_user_id: userId,
+        name,
+        category: category || null,
+        price_inr: Math.round(priceInr * 100) / 100,
+        stock_qty: stockQty,
+        image_url: imageUrl || null,
+        is_active: true,
+        updated_at: new Date().toISOString()
+      }],
+      query: { on_conflict: "listing_id,name" },
+      prefer: "resolution=merge-duplicates,return=representation"
+    });
+    return res.json({ ok:true, item: Array.isArray(rows) ? rows[0] || null : null });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_item_upsert_failed", message:String(err?.message || "") });
+  }
+});
+
+app.get("/api/local/listings/items", async (req, res) => {
+  const listingId = String(req.query?.listing_id || "").trim();
+  if(!listingId){
+    return res.status(400).json({ ok:false, error:"listing_id_required" });
+  }
+  try{
+    const rows = await localServicesSupabaseRequest("local_listing_items", "GET", {
+      query: {
+        select: "id,listing_id,name,category,price_inr,stock_qty,image_url,is_active,updated_at",
+        listing_id: `eq.${listingId}`,
+        is_active: "eq.true",
+        order: "updated_at.desc",
+        limit: "200"
+      }
+    });
+    return res.json({ ok:true, items: Array.isArray(rows) ? rows : [] });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_items_fetch_failed", message:String(err?.message || "") });
+  }
+});
+
+app.post("/api/local/agents/create", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  const serviceCategory = String(req.body?.service_category || "").trim().toLowerCase().slice(0, 60);
+  const title = String(req.body?.title || "").trim().slice(0, 120);
+  const phone = String(req.body?.phone || "").trim().slice(0, 30);
+  const pricePerVisitInr = Math.max(0, safeNumber(req.body?.price_per_visit_inr));
+  const lat = sanitizeGeoNumber(req.body?.lat);
+  const lng = sanitizeGeoNumber(req.body?.lng);
+  const imageUrl = String(req.body?.image_url || "").trim().slice(0, 3000);
+  if(!userId || !serviceCategory || !title || !phone || lat === null || lng === null){
+    return res.status(400).json({ ok:false, error:"invalid_agent_payload" });
+  }
+  if(localRateLimitHit(`local_agent_create:${userId}`, 20, 10 * 60 * 1000)){
+    return res.status(429).json({ ok:false, error:"rate_limited" });
+  }
+  try{
+    const agentAllowed = await hasActiveLocalRole(userId, "agent");
+    if(!agentAllowed){
+      return res.status(403).json({ ok:false, error:"agent_role_required" });
+    }
+    const rows = await localServicesSupabaseRequest("local_agents", "POST", {
+      body: [{
+        user_id: userId,
+        service_category: serviceCategory,
+        title,
+        phone,
+        price_per_visit_inr: Math.round(pricePerVisitInr * 100) / 100,
+        lat,
+        lng,
+        image_url: imageUrl || null,
+        status: "active",
+        available_now: true,
+        updated_at: new Date().toISOString()
+      }],
+      query: { on_conflict: "user_id,service_category" },
+      prefer: "resolution=merge-duplicates,return=representation"
+    });
+    return res.json({ ok:true, agent: Array.isArray(rows) ? rows[0] || null : null });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_agent_upsert_failed", message:String(err?.message || "") });
+  }
+});
+
+app.get("/api/local/agents/nearby", async (req, res) => {
+  const serviceCategory = String(req.query?.service_category || "").trim().toLowerCase().slice(0, 60);
+  const lat = sanitizeGeoNumber(req.query?.lat);
+  const lng = sanitizeGeoNumber(req.query?.lng);
+  const radiusKm = Math.min(50, Math.max(1, Math.round(safeNumber(req.query?.radius_km || 30))));
+  if(lat === null || lng === null){
+    return res.status(400).json({ ok:false, error:"lat_lng_required" });
+  }
+  try{
+    const query = {
+      select: "id,user_id,service_category,title,phone,price_per_visit_inr,lat,lng,image_url,available_now,status",
+      status: "eq.active",
+      available_now: "eq.true",
+      limit: "300"
+    };
+    if(serviceCategory){
+      query.service_category = `eq.${serviceCategory}`;
+    }
+    const rows = await localServicesSupabaseRequest("local_agents", "GET", { query });
+    const agents = (Array.isArray(rows) ? rows : [])
+      .map((row) => {
+        const la = sanitizeGeoNumber(row?.lat);
+        const ln = sanitizeGeoNumber(row?.lng);
+        if(la === null || ln === null) return null;
+        const distance_km = localDistanceKm(lat, lng, la, ln);
+        return { ...row, distance_km: Math.round(distance_km * 100) / 100 };
+      })
+      .filter(Boolean)
+      .filter(row => row.distance_km <= radiusKm)
+      .sort((a, b) => a.distance_km - b.distance_km);
+    return res.json({ ok:true, agents });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_agents_nearby_failed", message:String(err?.message || "") });
+  }
+});
+
+app.post("/api/local/agents/book", async (req, res) => {
+  const customerUserId = sanitizeUserId(req.body?.customer_user_id);
+  const agentId = String(req.body?.agent_id || "").trim();
+  const serviceAddress = String(req.body?.service_address || "").trim().slice(0, 240);
+  const note = String(req.body?.note || "").trim().slice(0, 300);
+  if(!customerUserId || !agentId || !serviceAddress){
+    return res.status(400).json({ ok:false, error:"invalid_agent_booking_payload" });
+  }
+  if(localRateLimitHit(`local_agent_book:${customerUserId}`, 30, 10 * 60 * 1000)){
+    return res.status(429).json({ ok:false, error:"rate_limited" });
+  }
+  try{
+    const consumerAllowed = await hasActiveLocalRole(customerUserId, "consumer");
+    if(!consumerAllowed){
+      return res.status(403).json({ ok:false, error:"consumer_role_required" });
+    }
+    const rows = await localServicesSupabaseRequest("local_agents", "GET", {
+      query: { select:"id,user_id,title,phone,status", id:`eq.${agentId}`, limit:"1" }
+    });
+    const agent = Array.isArray(rows) ? rows[0] : null;
+    if(!agent || String(agent.status || "") !== "active"){
+      return res.status(404).json({ ok:false, error:"agent_not_available" });
+    }
+    const createdRows = await localServicesSupabaseRequest("local_agent_bookings", "POST", {
+      body: [{
+        customer_user_id: customerUserId,
+        agent_user_id: sanitizeUserId(agent.user_id),
+        agent_id: agentId,
+        service_address: serviceAddress,
+        note,
+        status: "requested",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }],
+      prefer: "return=representation"
+    });
+    const created = Array.isArray(createdRows) ? createdRows[0] || null : null;
+    const state = await readSystemState();
+    const tokens = getPushTokensForUser(state, sanitizeUserId(agent.user_id));
+    sendFcmNotificationToTokens(tokens, {
+      title: "New service booking",
+      body: "You have a new customer request.",
+      data: { type:"agent_booking", booking_id:String(created?.id || "") }
+    }).catch(() => {});
+    return res.json({ ok:true, booking: created });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_agent_booking_failed", message:String(err?.message || "") });
+  }
+});
+
+app.post("/api/local/riders/location", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  const lat = sanitizeGeoNumber(req.body?.lat);
+  const lng = sanitizeGeoNumber(req.body?.lng);
+  const isOnline = req.body?.is_online === undefined ? true : Boolean(req.body?.is_online);
+  if(!userId || lat === null || lng === null){
+    return res.status(400).json({ ok:false, error:"invalid_rider_location_payload" });
+  }
+  if(localRateLimitHit(`rider_location:${userId}`, 240, 10 * 60 * 1000)){
+    return res.status(429).json({ ok:false, error:"rate_limited" });
+  }
+  try{
+    const riderAllowed = await hasActiveLocalRole(userId, "rider");
+    if(!riderAllowed){
+      return res.status(403).json({ ok:false, error:"rider_role_required" });
+    }
+    const rows = await localServicesSupabaseRequest("local_rider_locations", "POST", {
+      body: [{
+        user_id: userId,
+        lat,
+        lng,
+        is_online: isOnline,
+        updated_at: new Date().toISOString()
+      }],
+      query: { on_conflict: "user_id" },
+      prefer: "resolution=merge-duplicates,return=representation"
+    });
+    return res.json({ ok:true, rider_location: Array.isArray(rows) ? rows[0] || null : null });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_rider_location_failed", message:String(err?.message || "") });
+  }
+});
+
+app.get("/api/local/rides/track", async (req, res) => {
+  const requestId = String(req.query?.request_id || "").trim();
+  if(!requestId){
+    return res.status(400).json({ ok:false, error:"request_id_required" });
+  }
+  try{
+    const rows = await localServicesSupabaseRequest("local_ride_requests", "GET", {
+      query: {
+        select: "id,rider_user_id,driver_user_id,status,pickup_text,drop_text,updated_at",
+        id: `eq.${requestId}`,
+        limit: "1"
+      }
+    });
+    const request = Array.isArray(rows) ? rows[0] || null : null;
+    if(!request){
+      return res.status(404).json({ ok:false, error:"ride_request_not_found" });
+    }
+    let driverLocation = null;
+    if(request.driver_user_id){
+      const locRows = await localServicesSupabaseRequest("local_rider_locations", "GET", {
+        query: {
+          select: "user_id,lat,lng,is_online,updated_at",
+          user_id: `eq.${sanitizeUserId(request.driver_user_id)}`,
+          limit: "1"
+        }
+      });
+      driverLocation = Array.isArray(locRows) ? locRows[0] || null : null;
+    }
+    return res.json({ ok:true, ride_request: request, driver_location: driverLocation });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_ride_track_failed", message:String(err?.message || "") });
   }
 });
 
@@ -6650,6 +7505,54 @@ const systemMaintenanceTimer = setInterval(() => {
 }, 60 * 1000);
 if(systemMaintenanceTimer && typeof systemMaintenanceTimer.unref === "function"){
   systemMaintenanceTimer.unref();
+}
+
+const localOpsSweepTimer = setInterval(() => {
+  (async () => {
+    if(!isLocalServicesSupabaseConfigured()) return;
+    const now = Date.now();
+    const isoBefore = (minutes) => new Date(now - (minutes * 60 * 1000)).toISOString();
+    try{
+      const staleRideRows = await localServicesSupabaseRequest("local_ride_requests", "GET", {
+        query: {
+          select: "id,status,created_at",
+          status: "eq.searching",
+          created_at: `lt.${isoBefore(15)}`,
+          limit: "200"
+        }
+      });
+      for(const ride of (Array.isArray(staleRideRows) ? staleRideRows : [])){
+        try{
+          await localServicesSupabaseRequest("local_ride_requests", "PATCH", {
+            query: { id: `eq.${String(ride.id || "").trim()}` },
+            body: { status: "cancelled", updated_at: new Date().toISOString() },
+            prefer: "return=minimal"
+          });
+        }catch(_){ }
+      }
+
+      const staleOrderRows = await localServicesSupabaseRequest("local_orders", "GET", {
+        query: {
+          select: "id,status,created_at",
+          status: "eq.placed",
+          created_at: `lt.${isoBefore(60)}`,
+          limit: "300"
+        }
+      });
+      for(const order of (Array.isArray(staleOrderRows) ? staleOrderRows : [])){
+        try{
+          await localServicesSupabaseRequest("local_orders", "PATCH", {
+            query: { id: `eq.${String(order.id || "").trim()}` },
+            body: { status: "cancelled", updated_at: new Date().toISOString() },
+            prefer: "return=minimal"
+          });
+        }catch(_){ }
+      }
+    }catch(_){ }
+  })();
+}, 120 * 1000);
+if(localOpsSweepTimer && typeof localOpsSweepTimer.unref === "function"){
+  localOpsSweepTimer.unref();
 }
 
 function startServer(){
