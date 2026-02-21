@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, viewport-fit=cover">
+<title>Food/Auto - NovaGapp Mart</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="global.js"></script>
+<script src="public-config.js"></script>
+<style>
+  body{
+    margin:0;
+    font-family:Arial,sans-serif;
+    background:#f5f5f5;
+    padding-bottom:90px;
+  }
+  .top{
+    background:#ff6a00;
+    color:#fff;
+    padding:12px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    font-weight:700;
+  }
+  .section{
+    background:#fff;
+    margin:10px;
+    border-radius:12px;
+    padding:12px;
+    box-shadow:0 4px 14px rgba(0,0,0,.06);
+  }
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .btn{
+    border:none;
+    border-radius:10px;
+    padding:10px 12px;
+    background:#111;
+    color:#fff;
+    cursor:pointer;
+  }
+  .btn.orange{background:#ff6a00}
+  .chip{
+    border:none;
+    border-radius:999px;
+    padding:7px 12px;
+    background:#eee;
+    cursor:pointer;
+    font-weight:600;
+  }
+  .chip.active{
+    background:#ff6a00;
+    color:#fff;
+  }
+  .list{
+    display:grid;
+    gap:10px;
+  }
+  .card{
+    border:1px solid #eee;
+    border-radius:12px;
+    overflow:hidden;
+    background:#fff;
+  }
+  .card img{
+    width:100%;
+    height:140px;
+    object-fit:cover;
+    background:#ececec;
+  }
+  .meta{padding:10px}
+  .meta h4{margin:0 0 6px 0;font-size:15px}
+  .muted{color:#666;font-size:12px}
+  .fee{
+    background:#fff7ef;
+    color:#8a4200;
+    border:1px solid #ffd6b3;
+    border-radius:10px;
+    padding:10px;
+    font-size:13px;
+  }
+  .input{
+    width:100%;
+    padding:10px;
+    border:1px solid #ddd;
+    border-radius:8px;
+    box-sizing:border-box;
+  }
+  .hide{display:none}
+  .bottom-nav{
+    position:fixed;
+    left:0;right:0;bottom:0;
+    background:#fff;
+    border-top:1px solid #ddd;
+    display:flex;
+    justify-content:space-around;
+    z-index:99;
+  }
+  .nav-item{
+    flex:1;
+    text-align:center;
+    padding:8px 4px;
+    font-size:11px;
+    color:#444;
+  }
+  .nav-item img{display:block;margin:0 auto 4px auto}
+  .nav-item.active{color:#ff6a00;font-weight:700}
+</style>
+</head>
+<body>
+  <div class="top">
+    <span>Food / Auto Nearby</span>
+    <button class="btn" onclick="location.href='index.html'">Home</button>
+  </div>
+
+  <div class="section">
+    <div class="row" style="justify-content:space-between">
+      <strong>Current Location</strong>
+      <button class="btn orange" id="locBtn">Use GPS</button>
+    </div>
+    <div id="locText" class="muted" style="margin-top:8px">Location not detected yet.</div>
+    <div class="row" style="margin-top:10px">
+      <label for="radiusInput" class="muted">Radius (km)</label>
+      <input id="radiusInput" type="number" min="1" max="50" value="30" style="width:80px" class="input">
+      <button class="btn" id="applyRadiusBtn">Apply</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="row">
+      <button class="chip active" data-type="food">Food</button>
+      <button class="chip" data-type="grocery">Grocery</button>
+      <button class="chip" data-type="ride">Ride / Auto</button>
+    </div>
+    <div class="fee" style="margin-top:10px">
+      Listing fee: <strong>INR 500</strong>. Commission per order: <strong>0%</strong>. Month-end platform share: <strong>5%</strong>.
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="row" style="justify-content:space-between">
+      <strong>Nearby Partners</strong>
+      <button class="btn orange" id="openListingBtn">+ Add Listing</button>
+    </div>
+    <div id="resultsInfo" class="muted" style="margin-top:8px"></div>
+    <div class="list" id="listingBox" style="margin-top:10px"></div>
+  </div>
+
+  <div class="section hide" id="listingFormWrap">
+    <strong>Create Listing</strong>
+    <div class="muted" style="margin:6px 0 10px 0">Upload your own photo, or use quick auto-enhance preview.</div>
+    <div class="row">
+      <input id="storeName" class="input" placeholder="Store / Driver name">
+    </div>
+    <div class="row" style="margin-top:8px">
+      <select id="storeType" class="input">
+        <option value="food">Food</option>
+        <option value="grocery">Grocery</option>
+        <option value="ride">Ride / Auto</option>
+      </select>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="storePhone" class="input" placeholder="Phone number">
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="storeImage" type="file" accept="image/*" class="input">
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn" id="enhanceBtn">Auto Enhance Photo</button>
+      <button class="btn orange" id="saveListingBtn">Pay INR 500 & Submit</button>
+    </div>
+    <div id="enhanceText" class="muted" style="margin-top:8px"></div>
+  </div>
+
+  <div class="bottom-nav">
+    <div class="nav-item" onclick="location.href='index.html'">
+      <img src="https://img.icons8.com/ios-filled/24/000000/home.png" alt="">
+      <span>Home</span>
+    </div>
+    <div class="nav-item active">
+      <img src="https://img.icons8.com/ios-filled/24/ff6a00/marker.png" alt="">
+      <span>Food/Auto</span>
+    </div>
+    <div class="nav-item" onclick="location.href='account.html'">
+      <img src="https://img.icons8.com/ios-filled/24/000000/user.png" alt="">
+      <span>Account</span>
+    </div>
+  </div>
+
+<script>
+const supa = window.supa || window.novaCreateSupabaseClient();
+const listingBox = document.getElementById("listingBox");
+const locText = document.getElementById("locText");
+const resultsInfo = document.getElementById("resultsInfo");
+const listingFormWrap = document.getElementById("listingFormWrap");
+const chips = Array.from(document.querySelectorAll(".chip"));
+let activeType = "food";
+let myLat = null;
+let myLng = null;
+let radiusKm = 30;
+let user = null;
+
+function moneyInr(value){
+  return "INR " + Number(value || 0).toFixed(2);
+}
+
+function haversineKm(lat1, lon1, lat2, lon2){
+  const toRad = d => d * Math.PI / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
+function getDemoRows(){
+  return [
+    { id:"d1", store_name:"City Biryani Hub", listing_type:"food", phone:"+91 99999 11111", image_url:"Images/no-image.jpg", lat:18.5204, lng:73.8567, open_now:true },
+    { id:"d2", store_name:"Fresh Daily Mart", listing_type:"grocery", phone:"+91 99999 22222", image_url:"Images/no-image.jpg", lat:18.5310, lng:73.8440, open_now:true },
+    { id:"d3", store_name:"Quick Auto Service", listing_type:"ride", phone:"+91 99999 33333", image_url:"Images/no-image.jpg", lat:18.5130, lng:73.9050, open_now:true }
+  ];
+}
+
+function renderRows(rows){
+  listingBox.innerHTML = "";
+  if(!rows.length){
+    listingBox.innerHTML = '<div class="muted">No partners found in selected radius.</div>';
+    return;
+  }
+  rows.forEach(row => {
+    const distance = (myLat != null && myLng != null && Number.isFinite(row.lat) && Number.isFinite(row.lng))
+      ? haversineKm(myLat, myLng, Number(row.lat), Number(row.lng))
+      : null;
+    const div = document.createElement("div");
+    div.className = "card";
+    div.innerHTML = `
+      <img src="${row.image_url || "Images/no-image.jpg"}" alt="">
+      <div class="meta">
+        <h4>${row.store_name || "Listing"}</h4>
+        <div class="muted">Type: ${(row.listing_type || "").toUpperCase()} | ${row.open_now ? "Open now" : "Closed"}</div>
+        <div class="muted">Phone: ${row.phone || "-"}</div>
+        <div class="muted">${distance == null ? "Distance unknown" : ("Distance: " + distance.toFixed(1) + " km")}</div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn orange" onclick="alert('Booking started for ${String(row.store_name || "").replace(/'/g, "")}.')">${row.listing_type === "ride" ? "Book Auto" : "Order Now"}</button>
+        </div>
+      </div>
+    `;
+    listingBox.appendChild(div);
+  });
+}
+
+async function loadListings(){
+  let rows = [];
+  const bases = buildApiBases();
+  for(const base of bases){
+    try{
+      const url = `${base}/api/local/nearby?type=${encodeURIComponent(activeType)}&lat=${encodeURIComponent(String(myLat ?? 0))}&lng=${encodeURIComponent(String(myLng ?? 0))}&radius_km=${encodeURIComponent(String(radiusKm))}&limit=80`;
+      const res = await fetch(url, { cache:"no-store" });
+      if(!res.ok) continue;
+      const payload = await res.json().catch(() => null);
+      if(payload?.ok && Array.isArray(payload.listings)){
+        rows = payload.listings;
+        break;
+      }
+    }catch(_){ }
+  }
+  if(!rows.length){
+    rows = getDemoRows().filter(r => r.listing_type === activeType);
+  }
+  if(myLat != null && myLng != null){
+    rows = rows.filter(row => {
+      if(!Number.isFinite(Number(row.lat)) || !Number.isFinite(Number(row.lng))) return false;
+      const d = haversineKm(myLat, myLng, Number(row.lat), Number(row.lng));
+      return d <= radiusKm;
+    });
+  }
+  resultsInfo.textContent = `${rows.length} result(s) in ${radiusKm} km radius`;
+  renderRows(rows);
+}
+
+async function detectLocation(){
+  if(!navigator.geolocation){
+    locText.textContent = "GPS not supported on this device.";
+    return;
+  }
+  locText.textContent = "Detecting location...";
+  navigator.geolocation.getCurrentPosition((pos) => {
+    myLat = Number(pos.coords.latitude);
+    myLng = Number(pos.coords.longitude);
+    locText.textContent = `Lat: ${myLat.toFixed(5)}, Lng: ${myLng.toFixed(5)}`;
+    loadListings();
+  }, () => {
+    locText.textContent = "Location permission denied. Showing default nearby list.";
+    loadListings();
+  }, { enableHighAccuracy:true, timeout:10000, maximumAge:10000 });
+}
+
+async function ensureUser(){
+  if(!supa?.auth) return null;
+  const { data } = await supa.auth.getSession();
+  user = data?.session?.user || null;
+  return user;
+}
+
+async function uploadListingImage(file, uid){
+  if(!file || !supa) return "";
+  const ext = (file.name || "jpg").split(".").pop().toLowerCase();
+  const path = `local-listings/${uid || "guest"}-${Date.now()}.${ext}`;
+  const { error } = await supa.storage.from("chat_media").upload(path, file, { upsert:true });
+  if(error) return "";
+  const { data } = supa.storage.from("chat_media").getPublicUrl(path);
+  return data?.publicUrl || "";
+}
+
+async function createListing(){
+  const me = await ensureUser();
+  if(!me){
+    alert("Please login first.");
+    location.href = "login.html";
+    return;
+  }
+  if(myLat == null || myLng == null){
+    alert("Please enable GPS first.");
+    return;
+  }
+  const storeName = document.getElementById("storeName").value.trim();
+  const storeType = document.getElementById("storeType").value;
+  const phone = document.getElementById("storePhone").value.trim();
+  const imgFile = document.getElementById("storeImage").files[0] || null;
+  if(!storeName || !phone){
+    alert("Store name and phone required.");
+    return;
+  }
+  let imageUrl = "Images/no-image.jpg";
+  if(imgFile){
+    const uploaded = await uploadListingImage(imgFile, me.id);
+    if(uploaded) imageUrl = uploaded;
+  }
+  const payload = {
+    user_id: me.id,
+    store_name: storeName,
+    listing_type: storeType,
+    phone,
+    image_url: imageUrl,
+    lat: myLat,
+    lng: myLng
+  };
+  const bases = buildApiBases();
+  let ok = false;
+  for(const base of bases){
+    try{
+      const res = await fetch(`${base}/api/local/listings/create`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+      if(!res.ok) continue;
+      const json = await res.json().catch(() => null);
+      if(json?.ok){
+        ok = true;
+        break;
+      }
+    }catch(_){ }
+  }
+  if(!ok){
+    alert("Listing save failed. Ensure backend + local_listings tables are ready.");
+    return;
+  }
+  alert("Listing submitted. INR 500 listing fee marked. Awaiting approval.");
+  listingFormWrap.classList.add("hide");
+}
+
+function buildApiBases(){
+  const out = [];
+  const push = (raw) => {
+    const clean = String(raw || "").trim().replace(/\/+$/g, "");
+    if(!clean) return;
+    if(!/^https?:\/\//i.test(clean)) return;
+    if(!out.includes(clean)) out.push(clean);
+  };
+  push(window.CONTEST_API_BASE || window.API_BASE || "");
+  try{
+    push(localStorage.getItem("contest_api_base"));
+    push(localStorage.getItem("api_base"));
+  }catch(_){ }
+  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+  push("https://novagapp-mart.onrender.com");
+  return out;
+}
+
+document.getElementById("locBtn").addEventListener("click", detectLocation);
+document.getElementById("applyRadiusBtn").addEventListener("click", () => {
+  const n = Number(document.getElementById("radiusInput").value || 30);
+  radiusKm = Math.min(50, Math.max(1, n));
+  loadListings();
+});
+chips.forEach(chip => {
+  chip.addEventListener("click", () => {
+    chips.forEach(c => c.classList.remove("active"));
+    chip.classList.add("active");
+    activeType = chip.dataset.type || "food";
+    loadListings();
+  });
+});
+document.getElementById("openListingBtn").addEventListener("click", () => {
+  listingFormWrap.classList.toggle("hide");
+});
+document.getElementById("enhanceBtn").addEventListener("click", () => {
+  document.getElementById("enhanceText").textContent = "Auto-enhance preview ready. (Advanced AI pipeline can be connected next.)";
+});
+document.getElementById("saveListingBtn").addEventListener("click", createListing);
+
+loadListings();
+</script>
+</body>
+</html>
