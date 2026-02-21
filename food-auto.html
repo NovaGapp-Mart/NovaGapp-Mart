@@ -7,6 +7,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="global.js"></script>
 <script src="public-config.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   body{
     margin:0;
@@ -72,12 +74,7 @@
   .meta h4{margin:0 0 6px 0;font-size:15px}
   .muted{color:#666;font-size:12px}
   .fee{
-    background:#fff7ef;
-    color:#8a4200;
-    border:1px solid #ffd6b3;
-    border-radius:10px;
-    padding:10px;
-    font-size:13px;
+    display:none;
   }
   .input{
     width:100%;
@@ -101,6 +98,7 @@
   }
   .ride-form .input{margin-top:6px}
   .ride-form .btn{margin-top:8px}
+  #rideMap{width:100%;height:240px;border-radius:10px;border:1px solid #e5e5e5;margin-top:8px}
   .bottom-nav{
     position:fixed;
     left:0;right:0;bottom:0;
@@ -125,6 +123,7 @@
   <div class="top">
     <span>Food / Auto Nearby</span>
     <div class="row">
+      <button class="btn orange" id="openListingTopBtn">+ Add Listing</button>
       <button class="btn" onclick="location.href='F-account.html'">F-Account</button>
       <button class="btn" onclick="location.href='index.html'">Home</button>
     </div>
@@ -133,27 +132,13 @@
   <div class="section">
     <div class="row" style="justify-content:space-between">
       <strong>Current Location</strong>
-      <button class="btn orange" id="locBtn">Use GPS</button>
+      <button class="btn orange" id="locBtn">Refresh GPS</button>
     </div>
-    <div id="locText" class="muted" style="margin-top:8px">Location not detected yet.</div>
-    <div class="row" style="margin-top:10px">
-      <label for="radiusInput" class="muted">Radius (km)</label>
-      <input id="radiusInput" type="number" min="1" max="50" value="30" style="width:80px" class="input">
-      <button class="btn" id="applyRadiusBtn">Apply</button>
-    </div>
+    <div id="locText" class="muted" style="margin-top:8px">Detecting location...</div>
   </div>
 
   <div class="section">
-    <div class="fee" style="margin-top:2px">
-      Listing fee: <strong>INR 500</strong>. Commission per order: <strong>0%</strong>. Month-end platform share: <strong>5%</strong>.
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="row" style="justify-content:space-between">
-      <strong>Nearby Partners</strong>
-      <button class="btn orange" id="openListingBtn">+ Add Listing</button>
-    </div>
+    <div class="row" style="justify-content:space-between"><strong>Nearby Partners</strong></div>
     <div id="resultsInfo" class="muted" style="margin-top:8px"></div>
     <div class="list" id="listingBox" style="margin-top:10px"></div>
   </div>
@@ -190,6 +175,7 @@
     <div class="muted" style="margin-top:6px">Pickup is auto-set from your current GPS location.</div>
     <input id="dropTextInput" class="input" placeholder="Drop location text (e.g. Hinjewadi Phase 1)">
     <button class="btn" id="dropGeoBtn" type="button">Auto Fill Drop Lat/Lng</button>
+    <div id="rideMap"></div>
     <input id="dropLatInput" class="input" type="number" step="0.000001" placeholder="Drop latitude">
     <input id="dropLngInput" class="input" type="number" step="0.000001" placeholder="Drop longitude">
     <button class="btn orange" id="rideRequestBtn" type="button">Request Ride Now</button>
@@ -236,8 +222,11 @@ const chips = Array.from(document.querySelectorAll("#serviceTabs .chip"));
 let activeType = "food";
 let myLat = null;
 let myLng = null;
-let radiusKm = 30;
+const radiusKm = 30;
 let user = null;
+let rideMap = null;
+let ridePickupMarker = null;
+let rideDropMarker = null;
 let rideTrackTimer = null;
 
 function moneyInr(value){
@@ -333,6 +322,43 @@ async function loadListings(){
   renderRows(rows);
 }
 
+function initRideMap(){
+  if(rideMap || typeof window.L === "undefined") return;
+  rideMap = window.L.map("rideMap", { zoomControl:true }).setView([18.5204, 73.8567], 13);
+  window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(rideMap);
+  rideMap.on("click", (e) => {
+    const lat = Number(e.latlng?.lat);
+    const lng = Number(e.latlng?.lng);
+    if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    document.getElementById("dropLatInput").value = lat.toFixed(6);
+    document.getElementById("dropLngInput").value = lng.toFixed(6);
+    if(rideDropMarker){
+      rideDropMarker.setLatLng([lat, lng]);
+    }else{
+      rideDropMarker = window.L.marker([lat, lng], { draggable:true }).addTo(rideMap);
+      rideDropMarker.on("dragend", () => {
+        const p = rideDropMarker.getLatLng();
+        document.getElementById("dropLatInput").value = Number(p.lat).toFixed(6);
+        document.getElementById("dropLngInput").value = Number(p.lng).toFixed(6);
+      });
+    }
+  });
+}
+
+function updateRideMapMarkers(){
+  if(!rideMap || myLat == null || myLng == null) return;
+  const pickup = [myLat, myLng];
+  if(ridePickupMarker){
+    ridePickupMarker.setLatLng(pickup);
+  }else{
+    ridePickupMarker = window.L.marker(pickup).addTo(rideMap).bindPopup("Pickup (Current Location)");
+  }
+  rideMap.setView(pickup, 14);
+}
+
 async function detectLocation(){
   if(!navigator.geolocation){
     locText.textContent = "GPS not supported on this device.";
@@ -351,9 +377,12 @@ async function detectLocation(){
     if(dropLngInput && !String(dropLngInput.value || "").trim()){
       dropLngInput.value = (myLng + 0.02).toFixed(6);
     }
+    initRideMap();
+    updateRideMapMarkers();
     loadListings();
   }, () => {
     locText.textContent = "Location permission denied.";
+    initRideMap();
     loadListings();
   }, { enableHighAccuracy:true, timeout:10000, maximumAge:10000 });
 }
@@ -677,11 +706,6 @@ function buildApiBases(){
 }
 
 document.getElementById("locBtn").addEventListener("click", detectLocation);
-document.getElementById("applyRadiusBtn").addEventListener("click", () => {
-  const n = Number(document.getElementById("radiusInput").value || 30);
-  radiusKm = Math.min(50, Math.max(1, n));
-  loadListings();
-});
 chips.forEach(chip => {
   chip.addEventListener("click", () => {
     chips.forEach(c => c.classList.remove("active"));
@@ -706,7 +730,7 @@ listingBox.addEventListener("click", (e) => {
   }
   createOrderForListing(id, name, type);
 });
-document.getElementById("openListingBtn").addEventListener("click", () => {
+document.getElementById("openListingTopBtn").addEventListener("click", () => {
   listingFormWrap.classList.toggle("hide");
 });
 document.getElementById("enhanceBtn").addEventListener("click", () => {
@@ -719,6 +743,7 @@ document.getElementById("rideOtpBtn").addEventListener("click", verifyRideOtp);
 document.getElementById("dropGeoBtn").addEventListener("click", fillDropCoordinatesFromText);
 
 detectLocation();
+initRideMap();
 loadListings();
 </script>
 </body>

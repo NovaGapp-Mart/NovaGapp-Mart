@@ -5931,7 +5931,7 @@ app.get("/api/local/nearby", async (req, res) => {
       listings: filtered
     });
   }catch(err){
-    return res.status(500).json({ ok:false, error:"local_nearby_failed", message:String(err?.message || "") });
+    return res.json({ ok:true, radius_km: radiusKm, count: 0, listings: [], warning: "nearby_temporarily_unavailable" });
   }
 });
 
@@ -6411,7 +6411,7 @@ app.get("/api/local/orders/for-seller", async (req, res) => {
   }
   try{
     const sellerAllowed = await hasActiveLocalRole(userId, "seller");
-    if(!sellerAllowed) return res.status(403).json({ ok:false, error:"seller_role_required" });
+    if(!sellerAllowed) return res.json({ ok:true, orders: [], requires_role: "seller" });
     const rows = await localServicesSupabaseRequest("local_orders", "GET", {
       query: {
         select: "id,buyer_user_id,seller_user_id,listing_id,service_type,amount_inr,delivery_address,note,status,created_at,updated_at",
@@ -6422,7 +6422,7 @@ app.get("/api/local/orders/for-seller", async (req, res) => {
     });
     return res.json({ ok:true, orders: Array.isArray(rows) ? rows : [] });
   }catch(err){
-    return res.status(500).json({ ok:false, error:"local_orders_for_seller_failed", message:String(err?.message || "") });
+    return res.json({ ok:true, orders: [], warning: "seller_orders_temporarily_unavailable" });
   }
 });
 
@@ -6433,7 +6433,7 @@ app.get("/api/local/orders/for-buyer", async (req, res) => {
   }
   try{
     const consumerAllowed = await hasActiveLocalRole(userId, "consumer");
-    if(!consumerAllowed) return res.status(403).json({ ok:false, error:"consumer_role_required" });
+    if(!consumerAllowed) return res.json({ ok:true, orders: [], requires_role: "consumer" });
     const rows = await localServicesSupabaseRequest("local_orders", "GET", {
       query: {
         select: "id,buyer_user_id,seller_user_id,listing_id,service_type,amount_inr,delivery_address,note,status,created_at,updated_at",
@@ -6444,7 +6444,7 @@ app.get("/api/local/orders/for-buyer", async (req, res) => {
     });
     return res.json({ ok:true, orders: Array.isArray(rows) ? rows : [] });
   }catch(err){
-    return res.status(500).json({ ok:false, error:"local_orders_for_buyer_failed", message:String(err?.message || "") });
+    return res.json({ ok:true, orders: [], warning: "buyer_orders_temporarily_unavailable" });
   }
 });
 
@@ -6455,9 +6455,7 @@ app.get("/api/local/rides/for-rider", async (req, res) => {
   }
   try{
     const riderAllowed = await hasActiveLocalRole(userId, "rider");
-    if(!riderAllowed){
-      return res.status(403).json({ ok:false, error:"rider_role_required" });
-    }
+    if(!riderAllowed) return res.json({ ok:true, rides: [], requires_role: "rider" });
     const rows = await localServicesSupabaseRequest("local_ride_requests", "GET", {
       query: {
         select: "id,rider_user_id,driver_user_id,pickup_lat,pickup_lng,drop_lat,drop_lng,pickup_text,drop_text,status,offered_driver_ids,created_at,updated_at",
@@ -6475,7 +6473,7 @@ app.get("/api/local/rides/for-rider", async (req, res) => {
     });
     return res.json({ ok:true, rides: filtered });
   }catch(err){
-    return res.status(500).json({ ok:false, error:"local_rides_for_rider_failed", message:String(err?.message || "") });
+    return res.json({ ok:true, rides: [], warning: "rider_feed_temporarily_unavailable" });
   }
 });
 
@@ -6528,10 +6526,10 @@ app.get("/api/local/agent/bookings", async (req, res) => {
   try{
     if(side === "customer"){
       const consumerAllowed = await hasActiveLocalRole(userId, "consumer");
-      if(!consumerAllowed) return res.status(403).json({ ok:false, error:"consumer_role_required" });
+      if(!consumerAllowed) return res.json({ ok:true, bookings: [], requires_role: "consumer" });
     }else{
       const agentAllowed = await hasActiveLocalRole(userId, "agent");
-      if(!agentAllowed) return res.status(403).json({ ok:false, error:"agent_role_required" });
+      if(!agentAllowed) return res.json({ ok:true, bookings: [], requires_role: "agent" });
     }
     const query = {
       select: "id,customer_user_id,agent_user_id,agent_id,service_address,note,status,created_at,updated_at",
@@ -6546,7 +6544,7 @@ app.get("/api/local/agent/bookings", async (req, res) => {
     const rows = await localServicesSupabaseRequest("local_agent_bookings", "GET", { query });
     return res.json({ ok:true, bookings: Array.isArray(rows) ? rows : [] });
   }catch(err){
-    return res.status(500).json({ ok:false, error:"local_agent_bookings_fetch_failed", message:String(err?.message || "") });
+    return res.json({ ok:true, bookings: [], warning: "agent_bookings_temporarily_unavailable" });
   }
 });
 
@@ -6893,7 +6891,7 @@ app.get("/api/local/agents/nearby", async (req, res) => {
       .sort((a, b) => a.distance_km - b.distance_km);
     return res.json({ ok:true, agents });
   }catch(err){
-    return res.status(500).json({ ok:false, error:"local_agents_nearby_failed", message:String(err?.message || "") });
+    return res.json({ ok:true, agents: [], warning: "agents_temporarily_unavailable" });
   }
 });
 
