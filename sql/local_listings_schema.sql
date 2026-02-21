@@ -52,10 +52,17 @@ create table if not exists public.local_ride_requests (
   drop_text text,
   offered_driver_ids jsonb not null default '[]'::jsonb,
   status text not null default 'searching' check (status in ('searching','accepted','arriving','on_trip','completed','cancelled')),
+  ride_start_otp text,
+  otp_verified boolean not null default false,
+  otp_verified_at timestamptz,
   accepted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table if exists public.local_ride_requests add column if not exists ride_start_otp text;
+alter table if exists public.local_ride_requests add column if not exists otp_verified boolean not null default false;
+alter table if exists public.local_ride_requests add column if not exists otp_verified_at timestamptz;
 
 create index if not exists idx_local_ride_requests_status_created_at on public.local_ride_requests (status, created_at desc);
 create index if not exists idx_local_ride_requests_rider_created_at on public.local_ride_requests (rider_user_id, created_at desc);

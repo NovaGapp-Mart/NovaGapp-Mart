@@ -87,6 +87,20 @@
     box-sizing:border-box;
   }
   .hide{display:none}
+  .service-tabs{
+    position:fixed;
+    left:0;right:0;bottom:58px;
+    background:#fff;
+    border-top:1px solid #eee;
+    border-bottom:1px solid #eee;
+    padding:8px 10px;
+    z-index:98;
+    display:flex;
+    gap:8px;
+    overflow-x:auto;
+  }
+  .ride-form .input{margin-top:6px}
+  .ride-form .btn{margin-top:8px}
   .bottom-nav{
     position:fixed;
     left:0;right:0;bottom:0;
@@ -130,13 +144,7 @@
   </div>
 
   <div class="section">
-    <div class="row">
-      <button class="chip active" data-type="food">Food</button>
-      <button class="chip" data-type="grocery">Grocery</button>
-      <button class="chip" data-type="ride">Ride / Auto</button>
-      <button class="chip" data-type="agent">Agent</button>
-    </div>
-    <div class="fee" style="margin-top:10px">
+    <div class="fee" style="margin-top:2px">
       Listing fee: <strong>INR 500</strong>. Commission per order: <strong>0%</strong>. Month-end platform share: <strong>5%</strong>.
     </div>
   </div>
@@ -177,6 +185,32 @@
     <div id="enhanceText" class="muted" style="margin-top:8px"></div>
   </div>
 
+  <div class="section hide ride-form" id="rideFormSection">
+    <strong>Book Ride</strong>
+    <div class="muted" style="margin-top:6px">Pickup is auto-set from your current GPS location.</div>
+    <input id="dropTextInput" class="input" placeholder="Drop location text (e.g. Hinjewadi Phase 1)">
+    <button class="btn" id="dropGeoBtn" type="button">Auto Fill Drop Lat/Lng</button>
+    <input id="dropLatInput" class="input" type="number" step="0.000001" placeholder="Drop latitude">
+    <input id="dropLngInput" class="input" type="number" step="0.000001" placeholder="Drop longitude">
+    <button class="btn orange" id="rideRequestBtn" type="button">Request Ride Now</button>
+    <div id="rideTrackText" class="muted" style="margin-top:8px"></div>
+    <div class="row">
+      <input id="rideTrackIdInput" class="input" placeholder="Ride request id for tracking">
+      <button class="btn" id="rideTrackBtn" type="button">Track</button>
+    </div>
+    <div class="row">
+      <input id="rideOtpInput" class="input" placeholder="Enter start OTP">
+      <button class="btn" id="rideOtpBtn" type="button">Verify OTP</button>
+    </div>
+  </div>
+
+  <div class="service-tabs" id="serviceTabs">
+    <button class="chip active" data-type="food">Food</button>
+    <button class="chip" data-type="grocery">Grocery</button>
+    <button class="chip" data-type="ride">Ride / Auto</button>
+    <button class="chip" data-type="agent">Agent</button>
+  </div>
+
   <div class="bottom-nav">
     <div class="nav-item" onclick="location.href='index.html'">
       <img src="https://img.icons8.com/ios-filled/24/000000/home.png" alt="">
@@ -198,12 +232,13 @@ const listingBox = document.getElementById("listingBox");
 const locText = document.getElementById("locText");
 const resultsInfo = document.getElementById("resultsInfo");
 const listingFormWrap = document.getElementById("listingFormWrap");
-const chips = Array.from(document.querySelectorAll(".chip"));
+const chips = Array.from(document.querySelectorAll("#serviceTabs .chip"));
 let activeType = "food";
 let myLat = null;
 let myLng = null;
 let radiusKm = 30;
 let user = null;
+let rideTrackTimer = null;
 
 function moneyInr(value){
   return "INR " + Number(value || 0).toFixed(2);
@@ -219,14 +254,6 @@ function haversineKm(lat1, lon1, lat2, lon2){
   return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
 
-function getDemoRows(){
-  return [
-    { id:"d1", store_name:"City Biryani Hub", listing_type:"food", phone:"+91 99999 11111", image_url:"Images/no-image.jpg", lat:18.5204, lng:73.8567, open_now:true },
-    { id:"d2", store_name:"Fresh Daily Mart", listing_type:"grocery", phone:"+91 99999 22222", image_url:"Images/no-image.jpg", lat:18.5310, lng:73.8440, open_now:true },
-    { id:"d3", store_name:"Quick Auto Service", listing_type:"ride", phone:"+91 99999 33333", image_url:"Images/no-image.jpg", lat:18.5130, lng:73.9050, open_now:true }
-  ];
-}
-
 function renderRows(rows){
   listingBox.innerHTML = "";
   if(!rows.length){
@@ -234,7 +261,7 @@ function renderRows(rows){
     return;
   }
   rows.forEach(row => {
-    const distance = (myLat != null && myLng != null && Number.isFinite(row.lat) && Number.isFinite(row.lng))
+    const distance = (myLat != null && myLng != null && Number.isFinite(Number(row.lat)) && Number.isFinite(Number(row.lng)))
       ? haversineKm(myLat, myLng, Number(row.lat), Number(row.lng))
       : null;
     const actionLabel = row.listing_type === "ride"
@@ -293,9 +320,6 @@ async function loadListings(){
       }
     }catch(_){ }
   }
-  if(!rows.length){
-    rows = getDemoRows().filter(r => r.listing_type === activeType);
-  }
   if(myLat != null && myLng != null){
     rows = rows.filter(row => {
       if(!Number.isFinite(Number(row.lat)) || !Number.isFinite(Number(row.lng))) return false;
@@ -304,6 +328,8 @@ async function loadListings(){
     });
   }
   resultsInfo.textContent = `${rows.length} result(s) in ${radiusKm} km radius`;
+  const rideForm = document.getElementById("rideFormSection");
+  if(rideForm) rideForm.classList.toggle("hide", activeType !== "ride");
   renderRows(rows);
 }
 
@@ -317,9 +343,17 @@ async function detectLocation(){
     myLat = Number(pos.coords.latitude);
     myLng = Number(pos.coords.longitude);
     locText.textContent = `Lat: ${myLat.toFixed(5)}, Lng: ${myLng.toFixed(5)}`;
+    const dropLatInput = document.getElementById("dropLatInput");
+    const dropLngInput = document.getElementById("dropLngInput");
+    if(dropLatInput && !String(dropLatInput.value || "").trim()){
+      dropLatInput.value = (myLat + 0.02).toFixed(6);
+    }
+    if(dropLngInput && !String(dropLngInput.value || "").trim()){
+      dropLngInput.value = (myLng + 0.02).toFixed(6);
+    }
     loadListings();
   }, () => {
-    locText.textContent = "Location permission denied. Showing default nearby list.";
+    locText.textContent = "Location permission denied.";
     loadListings();
   }, { enableHighAccuracy:true, timeout:10000, maximumAge:10000 });
 }
@@ -460,10 +494,17 @@ async function createRideRequest(){
     alert("Enable GPS first.");
     return;
   }
-  const dropText = prompt("Enter drop location text");
-  if(!dropText) return;
-  const dropLat = Number(prompt("Enter drop latitude", String(myLat + 0.02)) || 0);
-  const dropLng = Number(prompt("Enter drop longitude", String(myLng + 0.02)) || 0);
+  const dropText = String(document.getElementById("dropTextInput")?.value || "").trim();
+  if(!dropText){
+    alert("Enter drop location text.");
+    return;
+  }
+  const dropLat = Number(document.getElementById("dropLatInput")?.value || 0);
+  const dropLng = Number(document.getElementById("dropLngInput")?.value || 0);
+  if(!Number.isFinite(dropLat) || !Number.isFinite(dropLng) || Math.abs(dropLat) > 90 || Math.abs(dropLng) > 180){
+    alert("Enter valid drop latitude/longitude.");
+    return;
+  }
   for(const base of buildApiBases()){
     try{
       const res = await fetch(`${base}/api/local/rides/request`, {
@@ -481,12 +522,109 @@ async function createRideRequest(){
       });
       const json = await res.json().catch(()=>null);
       if(res.ok && json?.ok){
+        const reqId = String(json?.ride_request?.id || "");
+        const rideTrackIdInput = document.getElementById("rideTrackIdInput");
+        if(reqId && rideTrackIdInput) rideTrackIdInput.value = reqId;
         alert(`Ride request created. Offered riders: ${Number(json.offered_driver_count || 0)}`);
+        startRideAutoTrack();
         return;
       }
     }catch(_){ }
   }
   alert("Ride request failed.");
+}
+
+async function trackRide(){
+  const requestId = String(document.getElementById("rideTrackIdInput")?.value || "").trim();
+  if(!requestId) return;
+  for(const base of buildApiBases()){
+    try{
+      const res = await fetch(`${base}/api/local/rides/track?request_id=${encodeURIComponent(requestId)}`, { cache:"no-store" });
+      const json = await res.json().catch(()=>null);
+      if(res.ok && json?.ok){
+        const phone = String(json?.driver_phone || "").trim();
+        const otpVerified = json?.ride_request?.otp_verified ? "Yes" : "No";
+        const dlat = Number(json?.driver_location?.lat);
+        const dlng = Number(json?.driver_location?.lng);
+        const loc = (Number.isFinite(dlat) && Number.isFinite(dlng))
+          ? `Driver ${dlat.toFixed(5)}, ${dlng.toFixed(5)}`
+          : "Driver location unavailable";
+        const rideTrackText = document.getElementById("rideTrackText");
+        if(rideTrackText){
+          rideTrackText.textContent = `Status: ${json?.ride_request?.status || "-"} | Driver phone: ${phone || "-"} | OTP verified: ${otpVerified} | ${loc}`;
+        }
+        return;
+      }
+    }catch(_){ }
+  }
+  const rideTrackText = document.getElementById("rideTrackText");
+  if(rideTrackText) rideTrackText.textContent = "Track failed.";
+}
+
+function startRideAutoTrack(){
+  if(rideTrackTimer){
+    clearInterval(rideTrackTimer);
+    rideTrackTimer = null;
+  }
+  rideTrackTimer = setInterval(() => {
+    trackRide().catch(()=>{});
+  }, 8000);
+}
+
+async function fillDropCoordinatesFromText(){
+  const dropText = String(document.getElementById("dropTextInput")?.value || "").trim();
+  if(!dropText){
+    alert("Enter drop text first.");
+    return;
+  }
+  try{
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(dropText)}`;
+    const res = await fetch(url, { headers:{ "Accept":"application/json" } });
+    const rows = await res.json().catch(()=>[]);
+    const first = Array.isArray(rows) ? rows[0] : null;
+    const lat = Number(first?.lat);
+    const lng = Number(first?.lon);
+    if(Number.isFinite(lat) && Number.isFinite(lng)){
+      document.getElementById("dropLatInput").value = lat.toFixed(6);
+      document.getElementById("dropLngInput").value = lng.toFixed(6);
+      return;
+    }
+  }catch(_){ }
+  alert("Drop geocode failed. Please enter lat/lng manually.");
+}
+
+async function verifyRideOtp(){
+  const me = await ensureUser();
+  if(!me){
+    location.href = "login.html";
+    return;
+  }
+  const requestId = String(document.getElementById("rideTrackIdInput")?.value || "").trim();
+  const otp = String(document.getElementById("rideOtpInput")?.value || "").trim();
+  if(!requestId || !otp){
+    alert("Enter ride request id and OTP.");
+    return;
+  }
+  for(const base of buildApiBases()){
+    try{
+      const res = await fetch(`${base}/api/local/rides/otp/verify`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({
+          request_id: requestId,
+          rider_user_id: me.id,
+          otp
+        })
+      });
+      const json = await res.json().catch(()=>null);
+      if(res.ok && json?.ok){
+        alert("OTP verified. Ride started.");
+        trackRide();
+        return;
+      }
+    }catch(_){ }
+  }
+  alert("OTP verification failed.");
 }
 
 async function createAgentBooking(agentId){
@@ -575,7 +713,12 @@ document.getElementById("enhanceBtn").addEventListener("click", () => {
   document.getElementById("enhanceText").textContent = "Auto-enhance preview ready. (Advanced AI pipeline can be connected next.)";
 });
 document.getElementById("saveListingBtn").addEventListener("click", createListing);
+document.getElementById("rideRequestBtn").addEventListener("click", createRideRequest);
+document.getElementById("rideTrackBtn").addEventListener("click", trackRide);
+document.getElementById("rideOtpBtn").addEventListener("click", verifyRideOtp);
+document.getElementById("dropGeoBtn").addEventListener("click", fillDropCoordinatesFromText);
 
+detectLocation();
 loadListings();
 </script>
 </body>

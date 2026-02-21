@@ -6141,11 +6141,15 @@ app.post("/api/local/rides/accept", async (req, res) => {
     if(offered.length && !offered.includes(driverUserId)){
       return res.status(403).json({ ok:false, error:"driver_not_offered_for_request" });
     }
+    const otp = String(Math.floor(1000 + Math.random() * 9000));
     const patched = await localServicesSupabaseRequest("local_ride_requests", "PATCH", {
       query: { id: `eq.${requestId}` },
       body: {
         status: "accepted",
         driver_user_id: driverUserId,
+        ride_start_otp: otp,
+        otp_verified: false,
+        otp_verified_at: null,
         accepted_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       },
@@ -6155,12 +6159,56 @@ app.post("/api/local/rides/accept", async (req, res) => {
     const riderTokens = getPushTokensForUser(state, sanitizeUserId(request.rider_user_id));
     sendFcmNotificationToTokens(riderTokens, {
       title: "Driver accepted your ride",
-      body: "Your auto/ride booking is confirmed.",
-      data: { type:"ride_accepted", request_id: requestId }
+      body: `Your ride is confirmed. Start OTP: ${otp}`,
+      data: { type:"ride_accepted", request_id: requestId, start_otp: otp }
     }).catch(() => {});
     return res.json({ ok:true, ride_request: Array.isArray(patched) ? patched[0] || null : null });
   }catch(err){
     return res.status(500).json({ ok:false, error:"ride_accept_failed", message:String(err?.message || "") });
+  }
+});
+
+app.post("/api/local/rides/otp/verify", async (req, res) => {
+  const requestId = String(req.body?.request_id || "").trim();
+  const riderUserId = sanitizeUserId(req.body?.rider_user_id);
+  const otp = String(req.body?.otp || "").trim();
+  if(!requestId || !riderUserId || !otp){
+    return res.status(400).json({ ok:false, error:"request_id_rider_user_id_otp_required" });
+  }
+  try{
+    const rows = await localServicesSupabaseRequest("local_ride_requests", "GET", {
+      query: {
+        select: "id,rider_user_id,driver_user_id,status,ride_start_otp,otp_verified",
+        id: `eq.${requestId}`,
+        limit: "1"
+      }
+    });
+    const ride = Array.isArray(rows) ? rows[0] || null : null;
+    if(!ride){
+      return res.status(404).json({ ok:false, error:"ride_not_found" });
+    }
+    if(sanitizeUserId(ride.rider_user_id) !== riderUserId){
+      return res.status(403).json({ ok:false, error:"otp_verify_forbidden" });
+    }
+    if(String(ride.status || "") !== "accepted"){
+      return res.status(409).json({ ok:false, error:"otp_verify_invalid_status" });
+    }
+    if(String(ride.ride_start_otp || "") !== otp){
+      return res.status(400).json({ ok:false, error:"otp_invalid" });
+    }
+    const patched = await localServicesSupabaseRequest("local_ride_requests", "PATCH", {
+      query: { id: `eq.${requestId}` },
+      body: {
+        otp_verified: true,
+        otp_verified_at: new Date().toISOString(),
+        status: "on_trip",
+        updated_at: new Date().toISOString()
+      },
+      prefer: "return=representation"
+    });
+    return res.json({ ok:true, ride_request: Array.isArray(patched) ? patched[0] || null : null });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"ride_otp_verify_failed", message:String(err?.message || "") });
   }
 });
 
@@ -6940,7 +6988,7 @@ app.get("/api/local/rides/track", async (req, res) => {
   try{
     const rows = await localServicesSupabaseRequest("local_ride_requests", "GET", {
       query: {
-        select: "id,rider_user_id,driver_user_id,status,pickup_text,drop_text,updated_at",
+        select: "id,rider_user_id,driver_user_id,status,pickup_text,drop_text,updated_at,otp_verified",
         id: `eq.${requestId}`,
         limit: "1"
       }
@@ -6950,6 +6998,7 @@ app.get("/api/local/rides/track", async (req, res) => {
       return res.status(404).json({ ok:false, error:"ride_request_not_found" });
     }
     let driverLocation = null;
+    let driverPhone = "";
     if(request.driver_user_id){
       const locRows = await localServicesSupabaseRequest("local_rider_locations", "GET", {
         query: {
@@ -6959,8 +7008,17 @@ app.get("/api/local/rides/track", async (req, res) => {
         }
       });
       driverLocation = Array.isArray(locRows) ? locRows[0] || null : null;
+      const driverListingRows = await localServicesSupabaseRequest("local_listings", "GET", {
+        query: {
+          select: "phone,listing_type,user_id",
+          user_id: `eq.${sanitizeUserId(request.driver_user_id)}`,
+          listing_type: "eq.ride",
+          limit: "1"
+        }
+      });
+      driverPhone = String((Array.isArray(driverListingRows) && driverListingRows[0]?.phone) || "").trim();
     }
-    return res.json({ ok:true, ride_request: request, driver_location: driverLocation });
+    return res.json({ ok:true, ride_request: request, driver_location: driverLocation, driver_phone: driverPhone });
   }catch(err){
     return res.status(500).json({ ok:false, error:"local_ride_track_failed", message:String(err?.message || "") });
   }
