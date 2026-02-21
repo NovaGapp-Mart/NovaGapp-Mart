@@ -98,7 +98,7 @@
   }
   .ride-form .input{margin-top:6px}
   .ride-form .btn{margin-top:8px}
-  #rideMap{width:100%;height:240px;border-radius:10px;border:1px solid #e5e5e5;margin-top:8px}
+  #rideMap{width:100%;height:420px;border-radius:12px;border:1px solid #e5e5e5;margin-top:8px}
   .bottom-nav{
     position:fixed;
     left:0;right:0;bottom:0;
@@ -134,7 +134,7 @@
       <strong>Current Location</strong>
       <button class="btn orange" id="locBtn">Refresh GPS</button>
     </div>
-    <div id="locText" class="muted" style="margin-top:8px">Detecting location...</div>
+    <div id="locText" class="muted" style="margin-top:8px">Detecting your current location...</div>
   </div>
 
   <div class="section">
@@ -176,8 +176,8 @@
     <input id="dropTextInput" class="input" placeholder="Drop location text (e.g. Hinjewadi Phase 1)">
     <button class="btn" id="dropGeoBtn" type="button">Auto Fill Drop Lat/Lng</button>
     <div id="rideMap"></div>
-    <input id="dropLatInput" class="input" type="number" step="0.000001" placeholder="Drop latitude">
-    <input id="dropLngInput" class="input" type="number" step="0.000001" placeholder="Drop longitude">
+    <input id="dropLatInput" class="input hide" type="number" step="0.000001" placeholder="Drop latitude">
+    <input id="dropLngInput" class="input hide" type="number" step="0.000001" placeholder="Drop longitude">
     <button class="btn orange" id="rideRequestBtn" type="button">Request Ride Now</button>
     <div id="rideTrackText" class="muted" style="margin-top:8px"></div>
     <div class="row">
@@ -227,6 +227,7 @@ let user = null;
 let rideMap = null;
 let ridePickupMarker = null;
 let rideDropMarker = null;
+let pickupCircle = null;
 let rideTrackTimer = null;
 
 function moneyInr(value){
@@ -335,6 +336,11 @@ function initRideMap(){
     if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     document.getElementById("dropLatInput").value = lat.toFixed(6);
     document.getElementById("dropLngInput").value = lng.toFixed(6);
+    resolvePlaceName(lat, lng).then((name) => {
+      if(name){
+        document.getElementById("dropTextInput").value = name;
+      }
+    }).catch(()=>{});
     if(rideDropMarker){
       rideDropMarker.setLatLng([lat, lng]);
     }else{
@@ -356,7 +362,29 @@ function updateRideMapMarkers(){
   }else{
     ridePickupMarker = window.L.marker(pickup).addTo(rideMap).bindPopup("Pickup (Current Location)");
   }
+  if(pickupCircle){
+    pickupCircle.setLatLng(pickup);
+  }else{
+    pickupCircle = window.L.circle(pickup, { radius: 120, color:"#1d5cff", fillColor:"#1d5cff", fillOpacity:0.15 }).addTo(rideMap);
+  }
   rideMap.setView(pickup, 14);
+}
+
+async function resolvePlaceName(lat, lng){
+  try{
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}`;
+    const res = await fetch(url, { headers:{ "Accept":"application/json" } });
+    const json = await res.json().catch(()=>null);
+    const addr = json?.address || {};
+    const name = [
+      addr.road || addr.neighbourhood || addr.suburb || addr.village || addr.town || addr.city || "",
+      addr.state || "",
+      addr.country || ""
+    ].filter(Boolean).join(", ").slice(0, 140);
+    return name || String(json?.display_name || "").slice(0, 140);
+  }catch(_){
+    return "";
+  }
 }
 
 async function detectLocation(){
@@ -368,7 +396,7 @@ async function detectLocation(){
   navigator.geolocation.getCurrentPosition((pos) => {
     myLat = Number(pos.coords.latitude);
     myLng = Number(pos.coords.longitude);
-    locText.textContent = `Lat: ${myLat.toFixed(5)}, Lng: ${myLng.toFixed(5)}`;
+    locText.textContent = "Current location detected.";
     const dropLatInput = document.getElementById("dropLatInput");
     const dropLngInput = document.getElementById("dropLngInput");
     if(dropLatInput && !String(dropLatInput.value || "").trim()){
@@ -379,6 +407,11 @@ async function detectLocation(){
     }
     initRideMap();
     updateRideMapMarkers();
+    resolvePlaceName(myLat, myLng).then((place) => {
+      if(place){
+        locText.textContent = `Current location: ${place}`;
+      }
+    }).catch(()=>{});
     loadListings();
   }, () => {
     locText.textContent = "Location permission denied.";
@@ -616,6 +649,14 @@ async function fillDropCoordinatesFromText(){
     if(Number.isFinite(lat) && Number.isFinite(lng)){
       document.getElementById("dropLatInput").value = lat.toFixed(6);
       document.getElementById("dropLngInput").value = lng.toFixed(6);
+      if(rideMap){
+        if(rideDropMarker){
+          rideDropMarker.setLatLng([lat, lng]);
+        }else{
+          rideDropMarker = window.L.marker([lat, lng], { draggable:true }).addTo(rideMap);
+        }
+        rideMap.setView([lat, lng], 15);
+      }
       return;
     }
   }catch(_){ }
