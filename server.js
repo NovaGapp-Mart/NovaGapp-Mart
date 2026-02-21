@@ -120,14 +120,87 @@ const PUBLIC_RAZORPAY_KEY_ID = String(
   process.env.RAZORPAY_API_KEY ||
   ""
 ).trim();
+const PUBLIC_FIREBASE_API_KEY = String(process.env.FIREBASE_API_KEY || "").trim();
+const PUBLIC_FIREBASE_AUTH_DOMAIN = String(process.env.FIREBASE_AUTH_DOMAIN || "").trim();
+const PUBLIC_FIREBASE_PROJECT_ID = String(process.env.FIREBASE_PROJECT_ID || "").trim();
+const PUBLIC_FIREBASE_STORAGE_BUCKET = String(process.env.FIREBASE_STORAGE_BUCKET || "").trim();
+const PUBLIC_FIREBASE_MESSAGING_SENDER_ID = String(process.env.FIREBASE_MESSAGING_SENDER_ID || "").trim();
+const PUBLIC_FIREBASE_APP_ID = String(process.env.FIREBASE_APP_ID || "").trim();
+const PUBLIC_FIREBASE_MEASUREMENT_ID = String(process.env.FIREBASE_MEASUREMENT_ID || "").trim();
+const PUBLIC_FIREBASE_VAPID_KEY = String(process.env.FIREBASE_VAPID_KEY || "").trim();
+const FIREBASE_SERVER_KEY = String(process.env.FIREBASE_SERVER_KEY || "").trim();
 
 app.get("/api/public/config", (req, res) => {
   res.setHeader("Cache-Control", "public, max-age=120");
   res.json({
     supabaseUrl: PUBLIC_SUPABASE_URL,
     supabaseAnonKey: PUBLIC_SUPABASE_ANON_KEY,
-    razorpayKeyId: PUBLIC_RAZORPAY_KEY_ID
+    razorpayKeyId: PUBLIC_RAZORPAY_KEY_ID,
+    firebaseApiKey: PUBLIC_FIREBASE_API_KEY,
+    firebaseAuthDomain: PUBLIC_FIREBASE_AUTH_DOMAIN,
+    firebaseProjectId: PUBLIC_FIREBASE_PROJECT_ID,
+    firebaseStorageBucket: PUBLIC_FIREBASE_STORAGE_BUCKET,
+    firebaseMessagingSenderId: PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    firebaseAppId: PUBLIC_FIREBASE_APP_ID,
+    firebaseMeasurementId: PUBLIC_FIREBASE_MEASUREMENT_ID,
+    firebaseVapidKey: PUBLIC_FIREBASE_VAPID_KEY
   });
+});
+
+app.post("/api/push/register", async (req, res) => {
+  const userId = sanitizePushUserId(req.body?.user_id);
+  const token = sanitizePushToken(req.body?.token);
+  if(!userId || !token){
+    return res.status(400).json({ ok:false, error:"user_id_and_token_required" });
+  }
+  try{
+    await mutateSystemState((state) => {
+      setPushTokenForUser(state, userId, token, {
+        platform: req.body?.platform,
+        user_agent: req.headers["user-agent"] || req.body?.user_agent || ""
+      });
+      return true;
+    });
+    return res.json({ ok:true });
+  }catch(err){
+    return res.status(500).json({
+      ok:false,
+      error:"push_register_failed",
+      message:String(err?.message || "Unable to register push token.")
+    });
+  }
+});
+
+app.post("/api/push/notify", async (req, res) => {
+  const toUserId = sanitizePushUserId(req.body?.to_user_id);
+  const title = String(req.body?.title || "NOVAGAPP").trim().slice(0, 120);
+  const body = String(req.body?.body || "").trim().slice(0, 300);
+  if(!toUserId || !title){
+    return res.status(400).json({ ok:false, error:"to_user_id_and_title_required" });
+  }
+  try{
+    const tokens = await mutateSystemState((state) => getPushTokensForUser(state, toUserId));
+    if(!Array.isArray(tokens) || tokens.length === 0){
+      return res.json({ ok:true, sent:0, failed:0, skipped:"no_tokens" });
+    }
+    const result = await sendFcmNotificationToTokens(tokens, {
+      title,
+      body,
+      data: req.body?.data || {}
+    });
+    return res.json({
+      ok: !!result?.ok,
+      sent: Number(result?.sent || 0),
+      failed: Number(result?.failed || 0),
+      error: result?.error || ""
+    });
+  }catch(err){
+    return res.status(500).json({
+      ok:false,
+      error:"push_notify_failed",
+      message:String(err?.message || "Unable to send push notification.")
+    });
+  }
 });
 
 function getSocialSupabaseBase(){
@@ -801,6 +874,15 @@ function normalizeSystemState(input){
   if(!state.automation.reports || typeof state.automation.reports !== "object"){
     state.automation.reports = {};
   }
+  if(!state.push || typeof state.push !== "object"){
+    state.push = {};
+  }
+  if(!state.push.tokens_by_user || typeof state.push.tokens_by_user !== "object"){
+    state.push.tokens_by_user = {};
+  }
+  if(!state.push.token_index || typeof state.push.token_index !== "object"){
+    state.push.token_index = {};
+  }
   if(!state.tryon || typeof state.tryon !== "object"){
     state.tryon = {};
   }
@@ -816,6 +898,122 @@ function normalizeSystemState(input){
   state.tryon.lane_metrics.failed = safeNumber(state.tryon.lane_metrics.failed);
 
   return state;
+}
+
+function sanitizePushToken(value){
+  const token = String(value || "").trim();
+  if(!token) return "";
+  if(token.length < 20 || token.length > 4096) return "";
+  return token;
+}
+
+function sanitizePushUserId(value){
+  return sanitizeUserId(value);
+}
+
+function sanitizePushData(input){
+  const out = {};
+  if(!input || typeof input !== "object") return out;
+  Object.keys(input).slice(0, 30).forEach((key) => {
+    const safeKey = String(key || "").trim().slice(0, 60);
+    if(!safeKey) return;
+    out[safeKey] = String(input[key] ?? "").slice(0, 600);
+  });
+  return out;
+}
+
+function setPushTokenForUser(state, userIdInput, tokenInput, meta){
+  const userId = sanitizePushUserId(userIdInput);
+  const token = sanitizePushToken(tokenInput);
+  if(!userId || !token) return false;
+  if(!state.push || typeof state.push !== "object"){
+    state.push = { tokens_by_user:{}, token_index:{} };
+  }
+  if(!state.push.tokens_by_user || typeof state.push.tokens_by_user !== "object"){
+    state.push.tokens_by_user = {};
+  }
+  if(!state.push.token_index || typeof state.push.token_index !== "object"){
+    state.push.token_index = {};
+  }
+
+  const previousOwner = String(state.push.token_index[token] || "").trim();
+  if(previousOwner && previousOwner !== userId){
+    const prevMap = state.push.tokens_by_user[previousOwner];
+    if(prevMap && typeof prevMap === "object"){
+      delete prevMap[token];
+      if(Object.keys(prevMap).length === 0){
+        delete state.push.tokens_by_user[previousOwner];
+      }
+    }
+  }
+
+  if(!state.push.tokens_by_user[userId] || typeof state.push.tokens_by_user[userId] !== "object"){
+    state.push.tokens_by_user[userId] = {};
+  }
+  state.push.tokens_by_user[userId][token] = {
+    token,
+    platform: String(meta?.platform || "").trim().slice(0, 40),
+    user_agent: String(meta?.user_agent || "").trim().slice(0, 240),
+    updated_at: new Date().toISOString()
+  };
+  state.push.token_index[token] = userId;
+  return true;
+}
+
+function getPushTokensForUser(state, userIdInput){
+  const userId = sanitizePushUserId(userIdInput);
+  if(!userId) return [];
+  const map = state?.push?.tokens_by_user?.[userId];
+  if(!map || typeof map !== "object") return [];
+  return Object.keys(map).map(sanitizePushToken).filter(Boolean).slice(0, 100);
+}
+
+async function sendFcmNotificationToTokens(tokens, payload){
+  const unique = Array.from(new Set((tokens || []).map(sanitizePushToken).filter(Boolean))).slice(0, 100);
+  if(!unique.length){
+    return { ok:true, sent:0, failed:0 };
+  }
+  if(!FIREBASE_SERVER_KEY){
+    return { ok:false, sent:0, failed:unique.length, error:"firebase_server_key_missing" };
+  }
+  const body = {
+    registration_ids: unique,
+    priority: "high",
+    notification: {
+      title: String(payload?.title || "NOVAGAPP").slice(0, 120),
+      body: String(payload?.body || "").slice(0, 300)
+    },
+    data: sanitizePushData(payload?.data || {})
+  };
+  const response = await fetch("https://fcm.googleapis.com/fcm/send", {
+    method: "POST",
+    headers: {
+      Authorization: `key=${FIREBASE_SERVER_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+  const raw = await response.text().catch(() => "");
+  let parsed = null;
+  try{
+    parsed = raw ? JSON.parse(raw) : null;
+  }catch(_){
+    parsed = null;
+  }
+  if(!response.ok){
+    return {
+      ok:false,
+      sent:0,
+      failed:unique.length,
+      error: `firebase_send_failed_${response.status}`,
+      details: String(raw || "").slice(0, 280)
+    };
+  }
+  return {
+    ok:true,
+    sent: Math.max(0, Number(parsed?.success || 0)),
+    failed: Math.max(0, Number(parsed?.failure || 0))
+  };
 }
 
 async function readSystemState(){

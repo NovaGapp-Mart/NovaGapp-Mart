@@ -1233,6 +1233,28 @@ async function trackAutomationStep(step, meta){
   }
 }
 
+async function sendRemotePush(toUserId, title, body, data){
+  const uid = String(toUserId || "").trim();
+  if(!uid || !title) return;
+  const payload = {
+    to_user_id: uid,
+    title: String(title || "").slice(0, 120),
+    body: String(body || "").slice(0, 300),
+    data: data && typeof data === "object" ? data : {}
+  };
+  const bases = buildAutomationApiBases();
+  for(const base of bases){
+    try{
+      const res = await fetch(`${base}/api/push/notify`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+      if(res.ok) break;
+    }catch(_){ }
+  }
+}
+
 async function getUserSummary(userId){
   if(!userId) return { name:"Member", photo:"", username:"", verified:false, trust_score:0 };
   if(userCache.has(userId)) return userCache.get(userId);
@@ -2685,6 +2707,12 @@ async function startCall(kind){
       mediaType: kind,
       sdp: rtcPeer.localDescription
     });
+    sendRemotePush(otherUid, `${myName || "Someone"} is calling`, kind === "video" ? "Incoming video call" : "Incoming call", {
+      type: "call_invite",
+      call_type: kind,
+      from_user_id: myUid,
+      link: `chat.html?uid=${encodeURIComponent(myUid)}`
+    }).catch(()=>{});
     callTimeout = setTimeout(() => {
       endCall(true, "timeout");
     }, 20000);
@@ -2923,6 +2951,12 @@ async function sendMsg(){
     receiver_id: otherUid,
     has_media: !!mediaUrl,
     media_type: mediaType || "text"
+  }).catch(()=>{});
+  const msgPreview = text || (mediaType === "image" ? "Photo" : mediaType === "video" ? "Video" : mediaType === "document" ? "Document" : "Message");
+  sendRemotePush(otherUid, myName || "New message", msgPreview, {
+    type: "chat_message",
+    from_user_id: myUid,
+    link: `chat.html?uid=${encodeURIComponent(myUid)}`
   }).catch(()=>{});
   scrollToBottom(true);
 }

@@ -636,3 +636,126 @@ window.translateProductName = function(name){
 
   document.addEventListener("DOMContentLoaded", ensureDownloadNavIcon);
 })();
+
+/* =====================================
+   FIREBASE PUSH BOOTSTRAP
+===================================== */
+(function(){
+  let started = false;
+
+  function loadScript(src){
+    return new Promise((resolve, reject) => {
+      const found = Array.from(document.scripts || []).find(s => String(s.src || "").includes(src));
+      if(found){
+        resolve(true);
+        return;
+      }
+      const s = document.createElement("script");
+      s.src = src;
+      s.async = true;
+      s.onload = () => resolve(true);
+      s.onerror = () => reject(new Error("script_load_failed"));
+      document.head.appendChild(s);
+    });
+  }
+
+  function getCurrentUserId(){
+    try{
+      const raw = JSON.parse(localStorage.getItem("user") || "{}");
+      return String(raw?.uid || raw?.user_id || raw?.id || "").trim();
+    }catch(_){
+      return "";
+    }
+  }
+
+  function buildApiBases(){
+    const out = [];
+    const push = (value) => {
+      const clean = String(value || "").trim().replace(/\/+$/g, "");
+      if(!clean) return;
+      if(!/^https?:\/\//i.test(clean)) return;
+      if(!out.includes(clean)) out.push(clean);
+    };
+    push(window.CONTEST_API_BASE || window.API_BASE || "");
+    try{
+      push(localStorage.getItem("contest_api_base"));
+      push(localStorage.getItem("api_base"));
+    }catch(_){ }
+    if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+    push("https://novagapp-mart.onrender.com");
+    return out;
+  }
+
+  async function postRegisterToken(userId, token){
+    const payload = {
+      user_id: userId,
+      token,
+      platform: "web",
+      user_agent: navigator.userAgent || ""
+    };
+    const bases = buildApiBases();
+    for(const base of bases){
+      try{
+        const res = await fetch(`${base}/api/push/register`, {
+          method: "POST",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify(payload)
+        });
+        if(res.ok) return true;
+      }catch(_){ }
+    }
+    return false;
+  }
+
+  async function startPush(){
+    if(started) return;
+    started = true;
+    if(!("serviceWorker" in navigator) || !("Notification" in window)) return;
+    const userId = getCurrentUserId();
+    if(!userId) return;
+
+    const cfg = typeof window.getNovaPublicConfig === "function"
+      ? await window.getNovaPublicConfig(false)
+      : (window.NOVA_PUBLIC_CONFIG || {});
+    const firebaseConfig = {
+      apiKey: String(cfg?.firebaseApiKey || "").trim(),
+      authDomain: String(cfg?.firebaseAuthDomain || "").trim(),
+      projectId: String(cfg?.firebaseProjectId || "").trim(),
+      storageBucket: String(cfg?.firebaseStorageBucket || "").trim(),
+      messagingSenderId: String(cfg?.firebaseMessagingSenderId || "").trim(),
+      appId: String(cfg?.firebaseAppId || "").trim(),
+      measurementId: String(cfg?.firebaseMeasurementId || "").trim()
+    };
+    const vapidKey = String(cfg?.firebaseVapidKey || "").trim();
+    if(!firebaseConfig.apiKey || !firebaseConfig.projectId || !firebaseConfig.messagingSenderId || !firebaseConfig.appId || !vapidKey){
+      return;
+    }
+
+    try{
+      const registration = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+      await loadScript("https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js");
+      await loadScript("https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js");
+      if(!window.firebase) return;
+      if(!window.firebase.apps || window.firebase.apps.length === 0){
+        window.firebase.initializeApp(firebaseConfig);
+      }
+      const permission = Notification.permission === "granted"
+        ? "granted"
+        : await Notification.requestPermission();
+      if(permission !== "granted") return;
+
+      const messaging = window.firebase.messaging();
+      const token = await messaging.getToken({
+        vapidKey,
+        serviceWorkerRegistration: registration
+      });
+      if(token){
+        await postRegisterToken(userId, token);
+      }
+    }catch(_){ }
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    setTimeout(() => { startPush().catch(()=>{}); }, 600);
+  });
+})();

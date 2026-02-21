@@ -732,6 +732,28 @@ async function trackAutomationStep(step, userId, meta){
   }
 }
 
+async function sendRemotePush(toUserId, title, body, data){
+  const uid = String(toUserId || "").trim();
+  if(!uid || !title) return;
+  const payload = {
+    to_user_id: uid,
+    title: String(title || "").slice(0, 120),
+    body: String(body || "").slice(0, 300),
+    data: data && typeof data === "object" ? data : {}
+  };
+  const bases = buildAutomationApiBases();
+  for(const base of bases){
+    try{
+      const res = await fetch(`${base}/api/push/notify`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+      if(res.ok) break;
+    }catch(_){ }
+  }
+}
+
 /* PLACE ORDER (SUPABASE DB) */
 async function placeOrder(){
   if(isPlacingOrder) return;
@@ -1028,6 +1050,16 @@ async function createSellerNotifications(payload){
 
     const { error } = await supa.from("notifications").insert([row]);
     if(error) console.error("Failed to create seller notification:", error);
+    sendRemotePush(
+      sellerId,
+      "New order approval pending",
+      `${buyer?.name || "Buyer"} placed an order. Open seller panel to approve.`,
+      {
+        type: "seller_new_order",
+        order_id: String(orderId || ""),
+        link: "seller.html"
+      }
+    ).catch(()=>{});
   }
 }
 </script>

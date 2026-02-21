@@ -17,13 +17,29 @@
   const EMPTY_CONFIG = Object.freeze({
     supabaseUrl: "",
     supabaseAnonKey: "",
-    razorpayKeyId: ""
+    razorpayKeyId: "",
+    firebaseApiKey: "",
+    firebaseAuthDomain: "",
+    firebaseProjectId: "",
+    firebaseStorageBucket: "",
+    firebaseMessagingSenderId: "",
+    firebaseAppId: "",
+    firebaseMeasurementId: "",
+    firebaseVapidKey: ""
   });
   const FALLBACK_CONFIG = Object.freeze({
     // Keep empty in source. Runtime values should come from /api/public/config.
     supabaseUrl: "",
     supabaseAnonKey: "",
-    razorpayKeyId: ""
+    razorpayKeyId: "",
+    firebaseApiKey: "",
+    firebaseAuthDomain: "",
+    firebaseProjectId: "",
+    firebaseStorageBucket: "",
+    firebaseMessagingSenderId: "",
+    firebaseAppId: "",
+    firebaseMeasurementId: "",
+    firebaseVapidKey: ""
   });
   const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
 
@@ -66,7 +82,15 @@
     const next = {
       supabaseUrl: String(raw?.supabaseUrl || "").trim(),
       supabaseAnonKey: String(raw?.supabaseAnonKey || "").trim(),
-      razorpayKeyId: String(raw?.razorpayKeyId || "").trim()
+      razorpayKeyId: String(raw?.razorpayKeyId || "").trim(),
+      firebaseApiKey: String(raw?.firebaseApiKey || "").trim(),
+      firebaseAuthDomain: String(raw?.firebaseAuthDomain || "").trim(),
+      firebaseProjectId: String(raw?.firebaseProjectId || "").trim(),
+      firebaseStorageBucket: String(raw?.firebaseStorageBucket || "").trim(),
+      firebaseMessagingSenderId: String(raw?.firebaseMessagingSenderId || "").trim(),
+      firebaseAppId: String(raw?.firebaseAppId || "").trim(),
+      firebaseMeasurementId: String(raw?.firebaseMeasurementId || "").trim(),
+      firebaseVapidKey: String(raw?.firebaseVapidKey || "").trim()
     };
     return next;
   }
@@ -98,7 +122,15 @@
     return sanitizeConfig({
       supabaseUrl: p.supabaseUrl || s.supabaseUrl,
       supabaseAnonKey: p.supabaseAnonKey || s.supabaseAnonKey,
-      razorpayKeyId: p.razorpayKeyId || s.razorpayKeyId
+      razorpayKeyId: p.razorpayKeyId || s.razorpayKeyId,
+      firebaseApiKey: p.firebaseApiKey || s.firebaseApiKey,
+      firebaseAuthDomain: p.firebaseAuthDomain || s.firebaseAuthDomain,
+      firebaseProjectId: p.firebaseProjectId || s.firebaseProjectId,
+      firebaseStorageBucket: p.firebaseStorageBucket || s.firebaseStorageBucket,
+      firebaseMessagingSenderId: p.firebaseMessagingSenderId || s.firebaseMessagingSenderId,
+      firebaseAppId: p.firebaseAppId || s.firebaseAppId,
+      firebaseMeasurementId: p.firebaseMeasurementId || s.firebaseMeasurementId,
+      firebaseVapidKey: p.firebaseVapidKey || s.firebaseVapidKey
     });
   }
 
