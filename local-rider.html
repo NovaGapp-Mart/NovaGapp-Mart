@@ -2,89 +2,573 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rider Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, viewport-fit=cover">
+<title>Driver Dashboard - NovaGapp Ride</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="global.js"></script>
 <script src="public-config.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
-:root{--brand:#ff6a00;--line:#e2e8f0;--bg:#f1f5f9;--text:#0f172a;--muted:#64748b}
-body{font-family:Arial,sans-serif;background:var(--bg);margin:0;color:var(--text)}
-.top{background:#111;color:#fff;padding:12px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+:root{--brand:#ff6a00;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--bg:#f1f5f9;--ok:#0f9f50;--bad:#c62828}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif;padding-bottom:20px}
+.top{position:sticky;top:0;z-index:50;background:#111;color:#fff;padding:12px;display:flex;justify-content:space-between;align-items:center;font-weight:700}
 .wrap{padding:10px}
 .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
-.btn{border:none;border-radius:8px;padding:9px 11px;background:var(--brand);color:#fff;cursor:pointer;font-weight:700}
-.btn.gray{background:#334155}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{border:none;border-radius:10px;padding:10px 12px;font-weight:700;cursor:pointer}
+.btn.brand{background:var(--brand);color:#fff}
+.btn.gray{background:#334155;color:#fff}
+.btn.ok{background:var(--ok);color:#fff}
+.btn.bad{background:var(--bad);color:#fff}
+.btn.full{width:100%}
 .muted{font-size:12px;color:var(--muted)}
-.req{border:1px solid #e8edf5;border-radius:10px;padding:10px;margin:8px 0}
-.timer{font-size:13px;color:#b91c1c;font-weight:700}
-.hide{display:none}
+.kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.kpi{border:1px solid #e8edf5;border-radius:10px;padding:10px;background:#fff}
+.req{border:1px solid #e8edf5;border-radius:10px;padding:10px;margin-top:8px}
+.req-title{font-size:14px;font-weight:700}
+.timer{font-size:12px;color:#b91c1c;font-weight:700;margin-top:6px}
+#driverMap{height:280px;border-radius:12px;border:1px solid #dbe2ef;margin-top:8px}
+.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;background:#e8f1ff;color:#1d4ed8}
+.actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
+.hide{display:none!important}
 </style>
 </head>
 <body>
-<div class="top">Driver Dashboard <a href="food-auto.html" style="color:#fff;text-decoration:none;font-size:12px">Rider App</a></div>
+<div class="top">
+  <span>Driver Dashboard</span>
+  <a href="food-auto.html" style="color:#fff;text-decoration:none;font-size:12px">Open Rider App</a>
+</div>
 <div class="wrap">
   <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+    <div class="row" style="justify-content:space-between">
       <div>
         <div><b>Go Online</b></div>
         <div class="muted" id="onlineText">Offline</div>
       </div>
-      <button class="btn" id="onlineBtn">Go Online</button>
-      <button class="btn gray" id="refreshBtn">Refresh</button>
+      <div class="row">
+        <button class="btn brand" id="onlineBtn">Go Online</button>
+        <button class="btn gray" id="refreshBtn">Refresh</button>
+      </div>
     </div>
-    <div style="margin-top:10px"><b>Today earnings:</b> <span id="earnings">INR 0.00</span></div>
   </div>
 
   <div class="card">
-    <b>Ride Request Popup Queue</b>
-    <div class="muted" style="margin-top:4px">Each request has 10s timer. Accept or reject.</div>
-    <div id="queue"></div>
+    <div class="kpis">
+      <div class="kpi">
+        <div class="muted">Today earnings</div>
+        <div><b id="earningsText">INR 0.00</b></div>
+      </div>
+      <div class="kpi">
+        <div class="muted">Completed rides</div>
+        <div><b id="ridesCompletedText">0</b></div>
+      </div>
+    </div>
   </div>
 
   <div class="card">
-    <b>Active Ride Flow</b>
+    <div class="row" style="justify-content:space-between">
+      <b>Incoming Ride Requests</b>
+      <span class="badge" id="queueBadge">0 waiting</span>
+    </div>
+    <div class="muted" style="margin-top:6px">Each request has a 10 second response window.</div>
+    <div id="queueList"></div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <b>Active Ride</b>
+      <span class="badge" id="activeStatusBadge">idle</span>
+    </div>
     <div id="activeRideBox" class="muted" style="margin-top:8px">No active ride</div>
+    <div id="driverMap"></div>
+    <div class="actions" id="rideActions"></div>
   </div>
 </div>
 
 <script>
-const supa=window.supa||window.novaCreateSupabaseClient();
-let me=null,heartbeat=null,poller=null,online=false;
-const timers=new Map();
+const supa = window.supa || window.novaCreateSupabaseClient();
+const DRIVER_STATE_KEY = "nova_driver_state_v1";
+const state = {
+  me: null,
+  online: false,
+  watchId: null,
+  pollTimer: null,
+  heartbeatTimer: null,
+  lastLocationPushAt: 0,
+  lat: null,
+  lng: null,
+  queueTimers: new Map(),
+  rides: [],
+  activeRideId: ""
+};
+let map = null;
+let driverMarker = null;
+let pickupMarker = null;
+let dropMarker = null;
+let guideLine = null;
 
-function bases(){const o=[];const p=v=>{v=String(v||"").trim().replace(/\/+$/g,"");if(v&&/^https?:\/\//i.test(v)&&!o.includes(v))o.push(v)};p(window.CONTEST_API_BASE||window.API_BASE||"");try{p(localStorage.getItem("contest_api_base"));p(localStorage.getItem("api_base"));}catch(_){ }if(/^https?:\/\//i.test(location.origin||""))p(location.origin);p("https://novagapp-mart.onrender.com");return o;}
-async function apiGet(path){for(const b of bases()){try{const r=await fetch(b+path,{cache:"no-store"});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok)return j;}catch(_){}}return null;}
-async function apiPost(path,body){for(const b of bases()){try{const r=await fetch(b+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok)return j;}catch(_){}}return null;}
+function money(v){ return "INR " + Number(v || 0).toFixed(2); }
+function nowMs(){ return Date.now(); }
 
-function money(v){return "INR "+Number(v||0).toFixed(2)}
-function haversineKm(a,b,c,d){const r=x=>x*Math.PI/180;const R=6371;const dLat=r(c-a),dLng=r(d-b);const q=Math.sin(dLat/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dLng/2)**2;return R*(2*Math.atan2(Math.sqrt(q),Math.sqrt(1-q)));}
-function estimateFare(ride){const dist=haversineKm(Number(ride.pickup_lat||0),Number(ride.pickup_lng||0),Number(ride.drop_lat||0),Number(ride.drop_lng||0));const dur=Math.max((dist/24)*60,3);const fare=45+(dist*11)+(dur*2);return {fare,dist};}
+function apiBases(){
+  const out = [];
+  const push = (value) => {
+    const clean = String(value || "").trim().replace(/\/+$/g, "");
+    if(!clean) return;
+    if(!/^https?:\/\//i.test(clean)) return;
+    if(!out.includes(clean)) out.push(clean);
+  };
+  push(window.CONTEST_API_BASE || window.API_BASE || "");
+  try{
+    push(localStorage.getItem("contest_api_base"));
+    push(localStorage.getItem("api_base"));
+  }catch(_){ }
+  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+  push("https://novagapp-mart.onrender.com");
+  return out;
+}
 
-async function meUser(){if(me)return me;const {data}=await supa.auth.getSession();me=data?.session?.user||null;if(!me){location.href="login.html";return null;}return me;}
+async function apiGet(path){
+  for(const base of apiBases()){
+    try{
+      const res = await fetch(base + path, { cache: "no-store" });
+      const json = await res.json().catch(() => null);
+      if(res.ok && json?.ok) return json;
+    }catch(_){ }
+  }
+  return null;
+}
 
-async function goOnline(){const u=await meUser();if(!u)return;if(!navigator.geolocation){alert("GPS unavailable");return;}navigator.geolocation.getCurrentPosition(async p=>{const ok=await apiPost("/api/local/riders/location",{user_id:u.id,lat:p.coords.latitude,lng:p.coords.longitude,is_online:true});if(!ok){document.getElementById("onlineText").textContent="Online update failed";return;}online=true;document.getElementById("onlineText").textContent="Online and receiving requests";if(heartbeat)clearInterval(heartbeat);heartbeat=setInterval(()=>goOnline(),15000);if(poller)clearInterval(poller);poller=setInterval(()=>loadRides(),4000);loadRides();},()=>alert("Location denied"),{enableHighAccuracy:true,timeout:15000,maximumAge:0});}
+async function apiPost(path, body){
+  for(const base of apiBases()){
+    try{
+      const res = await fetch(base + path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const json = await res.json().catch(() => null);
+      if(res.ok && json?.ok) return json;
+    }catch(_){ }
+  }
+  return null;
+}
 
-async function loadRides(){const u=await meUser();if(!u)return;const j=await apiGet(`/api/local/rides/for-rider?user_id=${encodeURIComponent(u.id)}`);render((j&&j.rides)||[]);}
+async function ensureMe(){
+  if(state.me) return state.me;
+  const { data } = await supa.auth.getSession();
+  state.me = data?.session?.user || null;
+  if(!state.me){
+    location.href = "login.html";
+    return null;
+  }
+  return state.me;
+}
 
-function render(rows){const q=document.getElementById("queue");q.innerHTML="";if(!rows.length){q.innerHTML='<div class="muted" style="margin-top:8px">No ride requests</div>';document.getElementById("activeRideBox").textContent="No active ride";document.getElementById("earnings").textContent=money(0);return;}
-let earning=0;let activeHtml="No active ride";
-rows.forEach(r=>{const s=String(r.status||"");const e=estimateFare(r);if(s==="completed")earning += e.fare*0.9;
-if(s==="accepted"||s==="arriving"||s==="on_trip"){activeHtml=`<b>${r.pickup_text||"Pickup"}</b> -> <b>${r.drop_text||"Drop"}</b><div style='margin-top:8px'>Status: ${s}</div><div style='margin-top:8px'><button class='btn' onclick="setStatus('${r.id}','arriving')">Arriving</button> <button class='btn' onclick="setStatus('${r.id}','on_trip')">Start Ride</button> <button class='btn' onclick="setStatus('${r.id}','completed')">End Ride</button> <button class='btn gray' onclick="setStatus('${r.id}','cancelled')">Cancel</button></div>`;}
-const canAccept=s==="searching";
-const d=document.createElement("div");d.className="req";
-d.innerHTML=`<b>${r.pickup_text||"Pickup"}</b> -> ${r.drop_text||"Drop"}<div class='muted' style='margin-top:4px'>Pickup distance estimate: ${e.dist.toFixed(1)} km | Est. earning: ${money(e.fare*0.9)}</div><div style='margin-top:4px'>Status: ${s}</div>${canAccept?`<div class='timer' id='tm_${r.id}'>Auto reject in 10s</div><div style='margin-top:8px'><button class='btn' onclick="acceptRide('${r.id}')">Accept</button> <button class='btn gray' onclick="rejectRide('${r.id}')">Reject</button></div>`:""}`;
-q.appendChild(d);
-if(canAccept && !timers.has(r.id)){let t=10;const int=setInterval(()=>{t--;const el=document.getElementById(`tm_${r.id}`);if(el)el.textContent=`Auto reject in ${Math.max(0,t)}s`;if(t<=0){clearInterval(int);timers.delete(r.id);}},1000);timers.set(r.id,int);}if(!canAccept&&timers.has(r.id)){clearInterval(timers.get(r.id));timers.delete(r.id);} });
-document.getElementById("activeRideBox").innerHTML=activeHtml;document.getElementById("earnings").textContent=money(earning);}
+function saveDriverState(){
+  try{
+    localStorage.setItem(DRIVER_STATE_KEY, JSON.stringify({
+      online: state.online,
+      activeRideId: state.activeRideId || "",
+      savedAt: Date.now()
+    }));
+  }catch(_){ }
+}
 
-async function acceptRide(id){const u=await meUser();if(!u)return;const j=await apiPost('/api/local/rides/accept',{request_id:id,driver_user_id:u.id});if(!j){alert('Accept failed');return;}loadRides();}
-async function rejectRide(id){if(timers.has(id)){clearInterval(timers.get(id));timers.delete(id);}loadRides();}
-async function setStatus(id,status){const u=await meUser();if(!u)return;const j=await apiPost('/api/local/rides/status',{request_id:id,user_id:u.id,status});if(!j){alert('Status update failed');return;}loadRides();}
+function loadDriverState(){
+  try{
+    const raw = localStorage.getItem(DRIVER_STATE_KEY);
+    if(!raw) return null;
+    const json = JSON.parse(raw);
+    if(!json || typeof json !== "object") return null;
+    return json;
+  }catch(_){
+    return null;
+  }
+}
 
-document.getElementById("onlineBtn").onclick=goOnline;
-document.getElementById("refreshBtn").onclick=loadRides;
-meUser().then(()=>loadRides());
+function haversineKm(lat1, lon1, lat2, lon2){
+  const toRad = d => d * Math.PI / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
+function estimateAutoFare(ride){
+  const pLat = Number(ride?.pickup_lat || 0);
+  const pLng = Number(ride?.pickup_lng || 0);
+  const dLat = Number(ride?.drop_lat || 0);
+  const dLng = Number(ride?.drop_lng || 0);
+  const dist = haversineKm(pLat, pLng, dLat, dLng);
+  const durationMin = Math.max((dist / 24) * 60, 3);
+  const fare = 45 + (dist * 11) + (durationMin * 2);
+  const earning = fare * 0.90;
+  return { fare, earning, dist };
+}
+
+function initMap(){
+  if(map) return;
+  map = L.map("driverMap", { zoomControl: true }).setView([18.5204, 73.8567], 13);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(map);
+}
+
+function updateMapForRide(activeRide){
+  initMap();
+  if(state.lat != null && state.lng != null){
+    const mePoint = [state.lat, state.lng];
+    if(!driverMarker){
+      driverMarker = L.circleMarker(mePoint, { radius: 7, color: "#dc2626", fillOpacity: 1 }).addTo(map).bindPopup("You");
+    }else{
+      driverMarker.setLatLng(mePoint);
+    }
+  }
+  if(!activeRide){
+    if(pickupMarker){ map.removeLayer(pickupMarker); pickupMarker = null; }
+    if(dropMarker){ map.removeLayer(dropMarker); dropMarker = null; }
+    if(guideLine){ map.removeLayer(guideLine); guideLine = null; }
+    if(driverMarker && state.lat != null && state.lng != null){
+      map.setView([state.lat, state.lng], Math.max(map.getZoom(), 14));
+    }
+    return;
+  }
+  const pLat = Number(activeRide.pickup_lat);
+  const pLng = Number(activeRide.pickup_lng);
+  const dLat = Number(activeRide.drop_lat);
+  const dLng = Number(activeRide.drop_lng);
+  if(Number.isFinite(pLat) && Number.isFinite(pLng)){
+    if(!pickupMarker){
+      pickupMarker = L.marker([pLat, pLng]).addTo(map).bindPopup("Pickup");
+    }else{
+      pickupMarker.setLatLng([pLat, pLng]);
+    }
+  }
+  if(Number.isFinite(dLat) && Number.isFinite(dLng)){
+    if(!dropMarker){
+      dropMarker = L.marker([dLat, dLng]).addTo(map).bindPopup("Drop");
+    }else{
+      dropMarker.setLatLng([dLat, dLng]);
+    }
+  }
+  if(guideLine){ map.removeLayer(guideLine); guideLine = null; }
+  const status = String(activeRide.status || "").toLowerCase();
+  if(state.lat != null && state.lng != null){
+    if(status === "accepted" || status === "arriving"){
+      guideLine = L.polyline([[state.lat, state.lng], [pLat, pLng]], { color: "#dc2626", weight: 4, dashArray: "6,6" }).addTo(map);
+    }else if(status === "on_trip"){
+      guideLine = L.polyline([[state.lat, state.lng], [dLat, dLng]], { color: "#16a34a", weight: 4 }).addTo(map);
+    }
+  }
+  const boundsPoints = [];
+  if(state.lat != null && state.lng != null) boundsPoints.push([state.lat, state.lng]);
+  if(Number.isFinite(pLat) && Number.isFinite(pLng)) boundsPoints.push([pLat, pLng]);
+  if(Number.isFinite(dLat) && Number.isFinite(dLng)) boundsPoints.push([dLat, dLng]);
+  if(boundsPoints.length >= 2){
+    map.fitBounds(boundsPoints, { padding: [25, 25] });
+  }else if(boundsPoints.length === 1){
+    map.setView(boundsPoints[0], Math.max(map.getZoom(), 14));
+  }
+}
+
+async function pushLocation(isOnline){
+  const me = await ensureMe();
+  if(!me) return;
+  if(state.lat == null || state.lng == null) return;
+  await apiPost("/api/local/riders/location", {
+    user_id: me.id,
+    lat: state.lat,
+    lng: state.lng,
+    is_online: Boolean(isOnline)
+  });
+}
+
+function setOnlineUi(flag){
+  state.online = Boolean(flag);
+  document.getElementById("onlineText").textContent = state.online ? "Online and receiving requests" : "Offline";
+  const btn = document.getElementById("onlineBtn");
+  btn.textContent = state.online ? "Go Offline" : "Go Online";
+  btn.className = state.online ? "btn bad" : "btn brand";
+  saveDriverState();
+}
+
+async function enableOnline(){
+  const me = await ensureMe();
+  if(!me) return;
+  if(!navigator.geolocation){
+    alert("GPS unavailable on this device.");
+    return;
+  }
+  if(state.watchId != null){
+    try{ navigator.geolocation.clearWatch(state.watchId); }catch(_){ }
+    state.watchId = null;
+  }
+  state.watchId = navigator.geolocation.watchPosition(async (pos) => {
+    const lat = Number(pos.coords.latitude);
+    const lng = Number(pos.coords.longitude);
+    if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    state.lat = lat;
+    state.lng = lng;
+    const now = nowMs();
+    if(now - state.lastLocationPushAt >= 3000){
+      state.lastLocationPushAt = now;
+      pushLocation(true).catch(() => {});
+    }
+    updateMapForRide(getActiveRide(state.rides));
+  }, () => {
+    document.getElementById("onlineText").textContent = "Location permission denied";
+  }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+
+  if(state.pollTimer) clearInterval(state.pollTimer);
+  state.pollTimer = setInterval(() => loadData().catch(() => {}), 3000);
+  if(state.heartbeatTimer) clearInterval(state.heartbeatTimer);
+  state.heartbeatTimer = setInterval(() => pushLocation(true).catch(() => {}), 10000);
+  setOnlineUi(true);
+  await loadData();
+}
+
+async function disableOnline(){
+  if(state.watchId != null){
+    try{ navigator.geolocation.clearWatch(state.watchId); }catch(_){ }
+    state.watchId = null;
+  }
+  if(state.pollTimer){ clearInterval(state.pollTimer); state.pollTimer = null; }
+  if(state.heartbeatTimer){ clearInterval(state.heartbeatTimer); state.heartbeatTimer = null; }
+  await pushLocation(false).catch(() => {});
+  setOnlineUi(false);
+}
+
+function clearQueueTimer(rideId){
+  const id = String(rideId || "");
+  if(!id) return;
+  const val = state.queueTimers.get(id);
+  if(val){
+    clearInterval(val.interval);
+    state.queueTimers.delete(id);
+  }
+}
+
+async function rejectRide(rideId, silent){
+  const me = await ensureMe();
+  if(!me) return;
+  clearQueueTimer(rideId);
+  const res = await apiPost("/api/local/rides/reject", {
+    request_id: String(rideId || ""),
+    driver_user_id: me.id
+  });
+  if(!res && !silent){
+    alert("Reject failed. Try again.");
+  }
+  await loadData();
+}
+
+function ensureQueueTimer(ride){
+  const id = String(ride?.id || "");
+  if(!id || state.queueTimers.has(id)) return;
+  let remain = 10;
+  const interval = setInterval(() => {
+    remain -= 1;
+    const el = document.getElementById("tm_" + id);
+    if(el){
+      el.textContent = "Auto reject in " + Math.max(0, remain) + "s";
+    }
+    if(remain <= 0){
+      clearQueueTimer(id);
+      rejectRide(id, true).catch(() => {});
+    }
+  }, 1000);
+  state.queueTimers.set(id, { interval });
+}
+
+function renderQueue(rides){
+  const queue = document.getElementById("queueList");
+  queue.innerHTML = "";
+  const waiting = rides.filter((r) => String(r?.status || "") === "searching");
+  document.getElementById("queueBadge").textContent = waiting.length + " waiting";
+  if(!waiting.length){
+    queue.innerHTML = '<div class="muted" style="margin-top:8px">No pending requests</div>';
+  }
+  waiting.forEach((ride) => {
+    const estimate = estimateAutoFare(ride);
+    const pickupKm = (state.lat != null && state.lng != null)
+      ? haversineKm(state.lat, state.lng, Number(ride.pickup_lat || 0), Number(ride.pickup_lng || 0))
+      : estimate.dist;
+    const div = document.createElement("div");
+    div.className = "req";
+    div.innerHTML = `
+      <div class="req-title">${String(ride.pickup_text || "Pickup")}</div>
+      <div class="muted">to ${String(ride.drop_text || "Drop")}</div>
+      <div class="muted" style="margin-top:6px">Pickup distance: ${Number(pickupKm || 0).toFixed(1)} km | Est. earning: ${money(estimate.earning)}</div>
+      <div class="timer" id="tm_${String(ride.id)}">Auto reject in 10s</div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn ok" data-act="accept" data-id="${String(ride.id)}">Accept</button>
+        <button class="btn gray" data-act="reject" data-id="${String(ride.id)}">Reject</button>
+      </div>
+    `;
+    queue.appendChild(div);
+    ensureQueueTimer(ride);
+  });
+  const visibleIds = new Set(waiting.map((r) => String(r?.id || "")));
+  Array.from(state.queueTimers.keys()).forEach((id) => {
+    if(!visibleIds.has(id)) clearQueueTimer(id);
+  });
+}
+
+function getActiveRide(rides){
+  const all = Array.isArray(rides) ? rides : [];
+  if(state.activeRideId){
+    const found = all.find((r) => String(r?.id || "") === state.activeRideId);
+    if(found) return found;
+  }
+  return all.find((r) => {
+    const s = String(r?.status || "").toLowerCase();
+    return s === "accepted" || s === "arriving" || s === "on_trip";
+  }) || null;
+}
+
+function renderActiveRide(rides){
+  const active = getActiveRide(rides);
+  const box = document.getElementById("activeRideBox");
+  const badge = document.getElementById("activeStatusBadge");
+  const actions = document.getElementById("rideActions");
+  actions.innerHTML = "";
+
+  if(!active){
+    state.activeRideId = "";
+    box.textContent = "No active ride";
+    badge.textContent = "idle";
+    updateMapForRide(null);
+    saveDriverState();
+    return;
+  }
+
+  state.activeRideId = String(active.id || "");
+  saveDriverState();
+
+  const s = String(active.status || "").toLowerCase();
+  badge.textContent = s || "active";
+  const estimate = estimateAutoFare(active);
+  const toPickup = (state.lat != null && state.lng != null)
+    ? haversineKm(state.lat, state.lng, Number(active.pickup_lat || 0), Number(active.pickup_lng || 0))
+    : 0;
+  const toDrop = (state.lat != null && state.lng != null)
+    ? haversineKm(state.lat, state.lng, Number(active.drop_lat || 0), Number(active.drop_lng || 0))
+    : 0;
+  box.innerHTML = `
+    <div><b>${String(active.pickup_text || "Pickup")}</b> -> <b>${String(active.drop_text || "Drop")}</b></div>
+    <div class="muted" style="margin-top:6px">Status: ${s}</div>
+    <div class="muted" style="margin-top:6px">Fare est.: ${money(estimate.fare)} | Driver est.: ${money(estimate.earning)}</div>
+    <div class="muted" style="margin-top:6px">To pickup: ${Number(toPickup || 0).toFixed(1)} km | To drop: ${Number(toDrop || 0).toFixed(1)} km</div>
+  `;
+
+  const addAction = (label, status, cls) => {
+    const b = document.createElement("button");
+    b.className = "btn " + (cls || "brand");
+    b.textContent = label;
+    b.onclick = () => setRideStatus(active.id, status);
+    actions.appendChild(b);
+  };
+
+  if(s === "accepted") addAction("Start Arriving", "arriving", "brand");
+  if(s === "accepted" || s === "arriving") addAction("Start Ride", "on_trip", "ok");
+  if(s === "on_trip") addAction("End Ride", "completed", "ok");
+  if(s === "accepted" || s === "arriving" || s === "on_trip") addAction("Cancel", "cancelled", "bad");
+
+  updateMapForRide(active);
+}
+
+async function acceptRide(rideId){
+  const me = await ensureMe();
+  if(!me) return;
+  clearQueueTimer(rideId);
+  const res = await apiPost("/api/local/rides/accept", {
+    request_id: String(rideId || ""),
+    driver_user_id: me.id
+  });
+  if(!res){
+    alert("Accept failed. Ride may already be taken.");
+    await loadData();
+    return;
+  }
+  state.activeRideId = String(res?.ride_request?.id || rideId || "");
+  saveDriverState();
+  await loadData();
+}
+
+async function setRideStatus(rideId, status){
+  const me = await ensureMe();
+  if(!me) return;
+  const res = await apiPost("/api/local/rides/status", {
+    request_id: String(rideId || ""),
+    user_id: me.id,
+    status: String(status || "")
+  });
+  if(!res){
+    alert("Status update failed.");
+  }
+  await loadData();
+}
+
+async function loadEarnings(){
+  const me = await ensureMe();
+  if(!me) return;
+  const r = await apiGet("/api/local/rides/driver/earnings?user_id=" + encodeURIComponent(me.id));
+  if(!r){
+    document.getElementById("earningsText").textContent = money(0);
+    document.getElementById("ridesCompletedText").textContent = "0";
+    return;
+  }
+  document.getElementById("earningsText").textContent = money(r.driver_earning_inr || 0);
+  document.getElementById("ridesCompletedText").textContent = String(Number(r.rides_completed || 0));
+}
+
+async function loadData(){
+  const me = await ensureMe();
+  if(!me) return;
+  const rideRes = await apiGet("/api/local/rides/for-rider?user_id=" + encodeURIComponent(me.id));
+  state.rides = Array.isArray(rideRes?.rides) ? rideRes.rides : [];
+  renderQueue(state.rides);
+  renderActiveRide(state.rides);
+  await loadEarnings();
+}
+
+function bindEvents(){
+  document.getElementById("onlineBtn").addEventListener("click", async () => {
+    if(state.online) await disableOnline();
+    else await enableOnline();
+  });
+  document.getElementById("refreshBtn").addEventListener("click", () => loadData().catch(() => {}));
+
+  document.getElementById("queueList").addEventListener("click", (event) => {
+    const btn = event.target.closest("button[data-act]");
+    if(!btn) return;
+    const act = String(btn.dataset.act || "");
+    const id = String(btn.dataset.id || "");
+    if(!id) return;
+    if(act === "accept") acceptRide(id).catch(() => {});
+    if(act === "reject") rejectRide(id, false).catch(() => {});
+  });
+}
+
+(async function init(){
+  await ensureMe();
+  initMap();
+  bindEvents();
+  const stored = loadDriverState();
+  if(stored?.activeRideId) state.activeRideId = String(stored.activeRideId || "");
+  if(stored?.online){
+    await enableOnline();
+  }else{
+    setOnlineUi(false);
+    await loadData();
+  }
+})();
 </script>
 </body>
 </html>
