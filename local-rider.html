@@ -17,6 +17,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif
 .wrap{padding:10px}
 .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.input,select{width:100%;padding:10px;border:1px solid #d6deea;border-radius:10px;font-size:14px;background:#fff}
 .btn{border:none;border-radius:10px;padding:10px 12px;font-weight:700;cursor:pointer}
 .btn.brand{background:var(--brand);color:#fff}
 .btn.gray{background:#334155;color:#fff}
@@ -43,6 +44,36 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif
   <a href="food-auto.html" style="color:#fff;text-decoration:none;font-size:12px">Open Rider App</a>
 </div>
 <div class="wrap">
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <b>Driver Registration</b>
+      <span class="badge" id="driverProfileStatus">Not saved</span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="driverNameInput" class="input" placeholder="Driver / Business name">
+      <input id="driverPhoneInput" class="input" placeholder="Phone number">
+    </div>
+    <div class="row" style="margin-top:8px">
+      <select id="driverVehicleTypeInput" class="input">
+        <option value="bike">Bike</option>
+        <option value="auto" selected>Auto</option>
+        <option value="car">Car</option>
+      </select>
+      <input id="driverVehicleNumberInput" class="input" placeholder="Vehicle number">
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="driverBaseFareInput" class="input" type="number" min="0" step="0.01" placeholder="Base fare (INR)">
+      <input id="driverPerKmInput" class="input" type="number" min="0" step="0.01" placeholder="Per km (INR)">
+      <input id="driverPerMinInput" class="input" type="number" min="0" step="0.01" placeholder="Per minute (INR)">
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="driverRadiusInput" class="input" type="number" min="1" max="50" step="1" placeholder="Service radius (km)">
+      <input id="driverDocsInput" class="input" placeholder="Document URL (optional)">
+    </div>
+    <button class="btn brand full" id="driverSaveBtn" style="margin-top:8px">Save Driver Profile</button>
+    <div id="driverProfileHint" class="muted" style="margin-top:6px">Save once, then go online for ride matching.</div>
+  </div>
+
   <div class="card">
     <div class="row" style="justify-content:space-between">
       <div>
@@ -86,6 +117,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif
     <div id="activeRideBox" class="muted" style="margin-top:8px">No active ride</div>
     <div id="driverMap"></div>
     <div id="navMeta" class="nav-meta">Navigation details will appear here.</div>
+    <div id="turnSteps" class="small-note">Turn-by-turn steps will appear here.</div>
     <div class="small-note">Small city/village tip: use landmark text from pickup/drop while navigating.</div>
     <div class="actions" id="rideActions"></div>
   </div>
@@ -105,19 +137,27 @@ const state = {
   gpsLastFixAt: 0,
   lat: null,
   lng: null,
+  headingDeg: null,
+  speedKmph: null,
+  driverListingId: "",
   queueTimers: new Map(),
   rides: [],
   activeRideId: ""
 };
+
 let map = null;
 let driverMarker = null;
 let pickupMarker = null;
 let dropMarker = null;
 let guideLine = null;
 let routeDrawSeq = 0;
+let turnInstructionCache = [];
 
 function money(v){ return "INR " + Number(v || 0).toFixed(2); }
 function nowMs(){ return Date.now(); }
+function prettyLabel(text){
+  return String(text || "").replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+}
 
 function apiBases(){
   const out = [];
@@ -172,6 +212,121 @@ async function ensureMe(){
     return null;
   }
   return state.me;
+}
+
+function setDriverProfileStatus(text, active){
+  const badge = document.getElementById("driverProfileStatus");
+  if(!badge) return;
+  badge.textContent = String(text || "Not saved");
+  badge.style.background = active ? "#dcfce7" : "#e8f1ff";
+  badge.style.color = active ? "#166534" : "#1d4ed8";
+}
+
+function getDriverFormPayload(){
+  return {
+    store_name: String(document.getElementById("driverNameInput")?.value || "").trim().slice(0, 120),
+    phone: String(document.getElementById("driverPhoneInput")?.value || "").trim().slice(0, 30),
+    ride_vehicle_type: String(document.getElementById("driverVehicleTypeInput")?.value || "auto").trim().toLowerCase(),
+    vehicle_number: String(document.getElementById("driverVehicleNumberInput")?.value || "").trim().slice(0, 40),
+    base_fare_inr: Math.max(0, Number(document.getElementById("driverBaseFareInput")?.value || 0)),
+    per_km_rate_inr: Math.max(0, Number(document.getElementById("driverPerKmInput")?.value || 0)),
+    per_min_rate_inr: Math.max(0, Number(document.getElementById("driverPerMinInput")?.value || 0)),
+    service_radius_km: Math.max(1, Math.min(50, Math.round(Number(document.getElementById("driverRadiusInput")?.value || 5)))),
+    documents_url: String(document.getElementById("driverDocsInput")?.value || "").trim().slice(0, 3000)
+  };
+}
+
+async function ensureDriverGpsForProfile(){
+  if(Number.isFinite(state.lat) && Number.isFinite(state.lng)){
+    return { lat: state.lat, lng: state.lng };
+  }
+  if(!navigator.geolocation){
+    throw new Error("gps_unavailable");
+  }
+  return await new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const lat = Number(pos?.coords?.latitude);
+      const lng = Number(pos?.coords?.longitude);
+      if(!Number.isFinite(lat) || !Number.isFinite(lng)){
+        reject(new Error("gps_not_ready"));
+        return;
+      }
+      state.lat = lat;
+      state.lng = lng;
+      state.gpsLastFixAt = nowMs();
+      resolve({ lat, lng });
+    }, () => reject(new Error("gps_permission_required")), {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0
+    });
+  });
+}
+
+async function loadDriverProfile(){
+  const me = await ensureMe();
+  if(!me) return;
+  const out = await apiGet(`/api/local/listings/for-owner?user_id=${encodeURIComponent(me.id)}&listing_type=ride`);
+  const rows = Array.isArray(out?.listings) ? out.listings : [];
+  const listing = rows[0] || null;
+  state.driverListingId = String(listing?.id || "");
+  if(!listing){
+    setDriverProfileStatus("Not saved", false);
+    return;
+  }
+  document.getElementById("driverNameInput").value = String(listing.store_name || "");
+  document.getElementById("driverPhoneInput").value = String(listing.phone || "");
+  document.getElementById("driverVehicleTypeInput").value = String(listing.ride_vehicle_type || "auto");
+  document.getElementById("driverVehicleNumberInput").value = String(listing.vehicle_number || "");
+  document.getElementById("driverBaseFareInput").value = String(Number(listing.base_fare_inr || 0));
+  document.getElementById("driverPerKmInput").value = String(Number(listing.per_km_rate_inr || 0));
+  document.getElementById("driverPerMinInput").value = String(Number(listing.per_min_rate_inr || 0));
+  document.getElementById("driverRadiusInput").value = String(Number(listing.service_radius_km || 5));
+  document.getElementById("driverDocsInput").value = String(listing.documents_url || "");
+  const status = String(listing.status || "pending_approval");
+  setDriverProfileStatus(prettyLabel(status), status === "approved");
+}
+
+async function saveDriverProfile(){
+  const me = await ensureMe();
+  if(!me) return;
+  const payload = getDriverFormPayload();
+  if(!payload.store_name || !payload.phone || !payload.vehicle_number){
+    alert("Name, phone and vehicle number are required.");
+    return;
+  }
+  const loc = await ensureDriverGpsForProfile();
+  const body = {
+    user_id: me.id,
+    store_name: payload.store_name,
+    phone: payload.phone,
+    ride_vehicle_type: payload.ride_vehicle_type,
+    vehicle_number: payload.vehicle_number,
+    base_fare_inr: payload.base_fare_inr,
+    per_km_rate_inr: payload.per_km_rate_inr,
+    per_min_rate_inr: payload.per_min_rate_inr,
+    service_radius_km: payload.service_radius_km,
+    documents_url: payload.documents_url,
+    lat: loc.lat,
+    lng: loc.lng,
+    listing_type: "ride",
+    open_now: true
+  };
+  let out = null;
+  if(state.driverListingId){
+    out = await apiPost("/api/local/listings/update", {
+      listing_id: state.driverListingId,
+      ...body
+    });
+  }else{
+    out = await apiPost("/api/local/listings/create", body);
+  }
+  if(!out?.ok){
+    alert(String(out?.message || out?.error || "Unable to save driver profile."));
+    return;
+  }
+  document.getElementById("driverProfileHint").textContent = "Profile saved. Wait for admin approval before receiving rides.";
+  await loadDriverProfile();
 }
 
 function saveDriverState(){
@@ -240,22 +395,10 @@ function isRideStarted(statusRaw){
 function initMap(){
   if(map) return;
   map = L.map("driverMap", { zoomControl: true }).setView([18.5204, 73.8567], 13);
-  const primaryTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-    subdomains: "abcd",
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
-  });
-  const fallbackTiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap contributors"
-  });
-  let fallbackAdded = false;
-  primaryTiles.on("tileerror", () => {
-    if(fallbackAdded) return;
-    fallbackAdded = true;
-    fallbackTiles.addTo(map);
-  });
-  primaryTiles.addTo(map);
+  }).addTo(map);
 }
 
 function buildExternalNavUrl(lat, lng){
@@ -290,19 +433,54 @@ async function fetchDriverRoute(fromLat, fromLng, toLat, toLng){
       : [];
     const distanceKm = Number(route?.distance || 0) / 1000;
     const durationMin = Number(route?.duration || 0) / 60;
+    const steps = [];
+    const legs = Array.isArray(route?.legs) ? route.legs : [];
+    legs.forEach((leg) => {
+      const list = Array.isArray(leg?.steps) ? leg.steps : [];
+      list.forEach((step) => {
+        const maneuver = String(step?.maneuver?.modifier || step?.maneuver?.type || "").trim().toLowerCase();
+        const instruction = String(step?.maneuver?.instruction || "").trim();
+        const name = String(step?.name || "").trim();
+        const distance = Number(step?.distance || 0);
+        const icon = maneuver.includes("left") ? "LEFT" : maneuver.includes("right") ? "RIGHT" : "STRAIGHT";
+        steps.push({
+          icon,
+          instruction: instruction || (name ? `Go via ${name}` : "Continue"),
+          distance_m: Number.isFinite(distance) ? Math.round(distance) : 0
+        });
+      });
+    });
     return {
       path: coords.length >= 2 ? coords : [[la1, ln1], [la2, ln2]],
       distanceKm: Number.isFinite(distanceKm) ? distanceKm : haversineKm(la1, ln1, la2, ln2),
-      durationMin: Number.isFinite(durationMin) ? durationMin : Math.max((haversineKm(la1, ln1, la2, ln2) / 24) * 60, 1)
+      durationMin: Number.isFinite(durationMin) ? durationMin : Math.max((haversineKm(la1, ln1, la2, ln2) / 24) * 60, 1),
+      steps
     };
   }catch(_){
     const distanceKm = haversineKm(la1, ln1, la2, ln2);
     return {
       path: [[la1, ln1], [la2, ln2]],
       distanceKm,
-      durationMin: Math.max((distanceKm / 24) * 60, 1)
+      durationMin: Math.max((distanceKm / 24) * 60, 1),
+      steps: []
     };
   }
+}
+
+function renderTurnSteps(steps){
+  const box = document.getElementById("turnSteps");
+  if(!box) return;
+  const list = Array.isArray(steps) ? steps.slice(0, 5) : [];
+  if(!list.length){
+    box.textContent = "Turn-by-turn steps will appear here.";
+    return;
+  }
+  box.innerHTML = list.map((step, idx) => {
+    const icon = String(step?.icon || "STRAIGHT");
+    const marker = icon === "LEFT" ? "⬅" : icon === "RIGHT" ? "➡" : "⬆";
+    const dist = Number(step?.distance_m || 0);
+    return `${idx + 1}. ${marker} ${String(step?.instruction || "Continue")} ${dist > 0 ? `(${dist}m)` : ""}`;
+  }).join("<br>");
 }
 
 async function drawGuideRoute(targetLat, targetLng, mode){
@@ -325,6 +503,8 @@ async function drawGuideRoute(targetLat, targetLng, mode){
     const targetLabel = isTrip ? "drop" : "pickup";
     navMeta.textContent = `Route to ${targetLabel}: ${route.distanceKm.toFixed(1)} km | ETA ${Math.max(1, Math.round(route.durationMin))} min`;
   }
+  turnInstructionCache = Array.isArray(route.steps) ? route.steps : [];
+  renderTurnSteps(turnInstructionCache);
 }
 
 async function updateMapForRide(activeRide){
@@ -343,6 +523,8 @@ async function updateMapForRide(activeRide){
     if(guideLine){ map.removeLayer(guideLine); guideLine = null; }
     const navMeta = document.getElementById("navMeta");
     if(navMeta) navMeta.textContent = "Navigation details will appear here.";
+    turnInstructionCache = [];
+    renderTurnSteps([]);
     if(driverMarker && state.lat != null && state.lng != null){
       map.setView([state.lat, state.lng], Math.max(map.getZoom(), 14));
     }
@@ -376,6 +558,8 @@ async function updateMapForRide(activeRide){
       if(guideLine){ map.removeLayer(guideLine); guideLine = null; }
       const navMeta = document.getElementById("navMeta");
       if(navMeta) navMeta.textContent = "Waiting for next ride state update.";
+      turnInstructionCache = [];
+      renderTurnSteps([]);
     }
   }
   const boundsPoints = [];
@@ -397,6 +581,9 @@ async function pushLocation(isOnline){
     user_id: me.id,
     lat: state.lat,
     lng: state.lng,
+    accuracy_m: state.gpsAccuracy,
+    heading_deg: state.headingDeg,
+    speed_kmph: state.speedKmph,
     is_online: Boolean(isOnline)
   });
 }
@@ -421,6 +608,19 @@ function gpsQualityText(acc){
 async function enableOnline(){
   const me = await ensureMe();
   if(!me) return;
+  const profile = await apiGet(`/api/local/listings/for-owner?user_id=${encodeURIComponent(me.id)}&listing_type=ride`);
+  const listing = Array.isArray(profile?.listings) ? profile.listings[0] || null : null;
+  if(!listing){
+    alert("Save driver profile first.");
+    return;
+  }
+  state.driverListingId = String(listing.id || "");
+  const status = String(listing.status || "");
+  setDriverProfileStatus(prettyLabel(status || "pending_approval"), status === "approved");
+  if(status !== "approved"){
+    alert("Driver profile is pending approval. You can go online after approval.");
+    return;
+  }
   if(!navigator.geolocation){
     alert("GPS unavailable on this device.");
     return;
@@ -433,10 +633,14 @@ async function enableOnline(){
     const lat = Number(pos.coords.latitude);
     const lng = Number(pos.coords.longitude);
     const acc = Number(pos.coords.accuracy);
+    const heading = Number(pos.coords.heading);
+    const speedMps = Number(pos.coords.speed);
     if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     state.lat = lat;
     state.lng = lng;
     state.gpsAccuracy = Number.isFinite(acc) ? acc : null;
+    state.headingDeg = Number.isFinite(heading) ? heading : null;
+    state.speedKmph = Number.isFinite(speedMps) ? (speedMps * 3.6) : null;
     state.gpsLastFixAt = nowMs();
     if(state.online){
       document.getElementById("onlineText").textContent = gpsQualityText(acc);
@@ -465,6 +669,8 @@ async function enableOnline(){
           state.lng = lng;
           state.gpsLastFixAt = nowMs();
           state.gpsAccuracy = Number(pos?.coords?.accuracy);
+          state.headingDeg = Number.isFinite(Number(pos?.coords?.heading)) ? Number(pos?.coords?.heading) : null;
+          state.speedKmph = Number.isFinite(Number(pos?.coords?.speed)) ? Number(pos?.coords?.speed) * 3.6 : null;
           document.getElementById("onlineText").textContent = gpsQualityText(state.gpsAccuracy);
           updateMapForRide(getActiveRide(state.rides)).catch(() => {});
         }
@@ -694,6 +900,11 @@ async function loadData(){
 }
 
 function bindEvents(){
+  document.getElementById("driverSaveBtn").addEventListener("click", () => {
+    saveDriverProfile().catch((err) => {
+      alert(String(err?.message || "Unable to save driver profile."));
+    });
+  });
   document.getElementById("onlineBtn").addEventListener("click", async () => {
     if(state.online) await disableOnline();
     else await enableOnline();
@@ -724,6 +935,7 @@ function cleanupDriverRuntime(){
   await ensureMe();
   initMap();
   bindEvents();
+  await loadDriverProfile();
   const stored = loadDriverState();
   if(stored?.activeRideId) state.activeRideId = String(stored.activeRideId || "");
   if(stored?.online){

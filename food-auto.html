@@ -10,6 +10,7 @@
 <script src="public-config.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <style>
 :root{--brand:#ff6a00;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--bg:#f1f5f9;--ok:#16974b;--bad:#c62828}
 *{box-sizing:border-box}
@@ -70,6 +71,12 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif
 }
 .suggest-item:last-child{border-bottom:none}
 .suggest-item:hover{background:#f8fafc}
+.list-card{border:1px solid #dde5f3;border-radius:12px;padding:10px;background:#fff;margin-bottom:8px}
+.list-title{font-size:14px;font-weight:700}
+.list-sub{font-size:12px;color:#64748b;margin-top:4px}
+.price{font-weight:700;color:#0f172a}
+.qty-btn{border:none;border-radius:8px;padding:6px 10px;background:#111;color:#fff;cursor:pointer}
+.status-chip{display:inline-block;padding:3px 8px;border-radius:999px;background:#edf2ff;color:#1e40af;font-size:11px;font-weight:700}
 </style>
 </head>
 <body>
@@ -101,8 +108,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif
       <div class="row" style="margin-top:8px">
         <select id="paymentMethod">
           <option value="cash">Cash</option>
-          <option value="upi">UPI</option>
-          <option value="card">Card</option>
+          <option value="online">Pay Online</option>
         </select>
       </div>
       <button id="confirmRideBtn" class="btn brand full" style="margin-top:8px">Confirm Ride</button>
@@ -163,15 +169,80 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif
 
 <section id="foodView" class="hide">
   <div class="block">
-    <b>Food / Grocery</b>
-    <div class="muted" style="margin-top:6px">Ride tab is production focus. Food and grocery module can be expanded next.</div>
+    <div class="row" style="justify-content:space-between">
+      <b>Food / Grocery</b>
+      <div class="row">
+        <button id="foodTypeFoodBtn" class="btn gray" type="button">Food</button>
+        <button id="foodTypeGroceryBtn" class="btn gray" type="button">Grocery</button>
+      </div>
+    </div>
+    <div class="muted" id="foodLocationNote" style="margin-top:6px">Fetching nearest stores within 5km...</div>
+    <div id="foodList" style="margin-top:10px"></div>
+  </div>
+
+  <div class="block" style="margin-top:10px">
+    <div class="row" style="justify-content:space-between">
+      <b id="foodMenuTitle">Menu</b>
+      <span class="badge" id="foodCartCount">0 item</span>
+    </div>
+    <div id="foodMenuList" style="margin-top:10px"></div>
+    <div class="row" style="margin-top:8px">
+      <input id="foodAddressInput" class="input" placeholder="Delivery address">
+      <select id="foodPaymentMethod">
+        <option value="cash">Cash on delivery</option>
+        <option value="online">Pay online</option>
+      </select>
+    </div>
+    <textarea id="foodNoteInput" class="input" style="margin-top:8px;min-height:70px" placeholder="Order note (optional)"></textarea>
+    <div id="foodCartSummary" class="muted" style="margin-top:8px">Cart is empty.</div>
+    <button id="foodCheckoutBtn" class="btn brand full" style="margin-top:8px" type="button">Place Order</button>
+  </div>
+
+  <div class="block" style="margin-top:10px">
+    <div class="row" style="justify-content:space-between">
+      <b>My Orders</b>
+      <button id="foodOrdersRefreshBtn" class="btn gray" type="button">Refresh</button>
+    </div>
+    <div id="foodOrdersList" style="margin-top:10px"></div>
   </div>
 </section>
 
 <section id="agentView" class="hide">
   <div class="block">
-    <b>Agent</b>
-    <div class="muted" style="margin-top:6px">Ride tab is production focus. Agent module can be expanded next.</div>
+    <div class="row" style="justify-content:space-between">
+      <b>Book Agent</b>
+      <button id="agentRefreshBtn" class="btn gray" type="button">Refresh</button>
+    </div>
+    <div id="agentCategoryGrid" class="vehicle-list" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-top:10px"></div>
+    <div class="muted" id="agentLocationNote" style="margin-top:8px">Showing available agents in 5km.</div>
+    <div id="agentList" style="margin-top:10px"></div>
+  </div>
+
+  <div class="block" style="margin-top:10px">
+    <b id="agentBookingTitle">Booking</b>
+    <div class="row" style="margin-top:8px">
+      <input id="agentDateInput" class="input" type="date">
+      <input id="agentTimeInput" class="input" type="time">
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="agentHoursInput" class="input" type="number" min="1" max="12" value="1" placeholder="Hours">
+      <select id="agentPaymentMethod">
+        <option value="cash">Pay after service</option>
+        <option value="online">Pay online</option>
+      </select>
+    </div>
+    <input id="agentAddressInput" class="input" style="margin-top:8px" placeholder="Service address">
+    <textarea id="agentNoteInput" class="input" style="margin-top:8px;min-height:70px" placeholder="Describe issue / landmark"></textarea>
+    <div id="agentEstimateText" class="muted" style="margin-top:8px">Select an agent to see estimate.</div>
+    <button id="agentBookBtn" class="btn brand full" style="margin-top:8px" type="button">Book Agent</button>
+  </div>
+
+  <div class="block" style="margin-top:10px">
+    <div class="row" style="justify-content:space-between">
+      <b>My Bookings</b>
+      <button id="agentBookingsRefreshBtn" class="btn gray" type="button">Refresh</button>
+    </div>
+    <div id="agentBookingsList" style="margin-top:10px"></div>
   </div>
 </section>
 
@@ -223,6 +294,32 @@ const state = {
   driverLng: null
 };
 
+const foodState = {
+  type: "food",
+  listings: [],
+  selectedListing: null,
+  menuItems: [],
+  cart: [],
+  orders: []
+};
+
+const agentState = {
+  categories: [
+    "electrician",
+    "plumber",
+    "ac_repair",
+    "carpenter",
+    "mechanic",
+    "painter",
+    "cleaning"
+  ],
+  activeCategory: "electrician",
+  agents: [],
+  selectedAgent: null,
+  bookings: []
+};
+
+
 let map = null;
 let pickupMarker = null;
 let dropMarker = null;
@@ -237,6 +334,11 @@ let rideRealtimeChannel = null;
 let driverLocationRealtimeChannel = null;
 
 function money(v){ return "INR " + Number(v || 0).toFixed(2); }
+function roundMoney(v){
+  const n = Number(v);
+  if(!Number.isFinite(n)) return 0;
+  return Math.round(n * 100) / 100;
+}
 function haversineKm(lat1, lon1, lat2, lon2){
   const toRad = d => d * Math.PI / 180;
   const R = 6371;
@@ -385,22 +487,10 @@ async function ensureMe(){
 function initMap(){
   if(map) return;
   map = L.map("rideMap", { zoomControl: true }).setView([18.5204, 73.8567], 14);
-  const primaryTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-    subdomains: "abcd",
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
-  });
-  const fallbackTiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap contributors"
-  });
-  let fallbackAdded = false;
-  primaryTiles.on("tileerror", () => {
-    if(fallbackAdded) return;
-    fallbackAdded = true;
-    fallbackTiles.addTo(map);
-  });
-  primaryTiles.addTo(map);
+  }).addTo(map);
   nearbyLayer = L.layerGroup().addTo(map);
   map.on("click", (e) => {
     const lat = Number(e.latlng?.lat);
@@ -413,8 +503,16 @@ function initMap(){
 function setPickupMarker(){
   if(!map || state.pickupLat == null || state.pickupLng == null) return;
   const p = [state.pickupLat, state.pickupLng];
-  if(!pickupMarker) pickupMarker = L.marker(p).addTo(map).bindPopup("Pickup");
-  else pickupMarker.setLatLng(p);
+  if(!pickupMarker){
+    pickupMarker = L.marker(p, { draggable: true }).addTo(map).bindPopup("Pickup");
+    pickupMarker.on("dragend", () => {
+      const pos = pickupMarker.getLatLng();
+      state.pickupMode = "manual";
+      setPickup(Number(pos.lat), Number(pos.lng), false).catch(() => {});
+    });
+  }else{
+    pickupMarker.setLatLng(p);
+  }
 }
 
 function setDropMarker(){
@@ -447,22 +545,29 @@ function clearDriverGuide(){
 
 async function reverseGeocode(lat, lng){
   try{
-    const bdc = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(String(lat))}&longitude=${encodeURIComponent(String(lng))}&localityLanguage=en`;
-    const res = await fetch(bdc, { cache: "no-store" });
-    if(res.ok){
-      const json = await res.json().catch(() => null);
-      const name = [json?.locality || json?.city || "", json?.principalSubdivision || "", json?.countryName || ""].filter(Boolean).join(", ");
-      if(name) return name.slice(0, 120);
-    }
-  }catch(_){ }
-  try{
-    const n = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}`;
-    const res = await fetch(n, { cache: "no-store", headers: { "Accept": "application/json" } });
+    const url = new URL("https://nominatim.openstreetmap.org/reverse");
+    url.searchParams.set("format", "jsonv2");
+    url.searchParams.set("addressdetails", "1");
+    url.searchParams.set("zoom", "18");
+    url.searchParams.set("lat", String(lat));
+    url.searchParams.set("lon", String(lng));
+    const res = await fetch(url.toString(), {
+      cache: "no-store",
+      headers: {
+        "Accept": "application/json",
+        "Accept-Language": "en-IN,en;q=0.9"
+      }
+    });
     if(res.ok){
       const json = await res.json().catch(() => null);
       const a = json?.address || {};
-      const name = [a.road || a.suburb || a.neighbourhood || a.city || a.town || a.village || "", a.state || "", a.country || ""].filter(Boolean).join(", ");
-      if(name) return name.slice(0, 120);
+      const name = buildPlaceName([
+        a.road || a.pedestrian || a.footway || a.path || a.neighbourhood || a.suburb || a.hamlet || "",
+        a.city || a.town || a.village || a.municipality || a.county || "",
+        a.state_district || a.state || "",
+        a.postcode || ""
+      ]) || String(json?.display_name || "").slice(0, 140);
+      if(name) return name;
     }
   }catch(_){ }
   return "Current location";
@@ -525,64 +630,43 @@ async function searchLandmarkSuggestions(query, limitCount){
   const limit = Math.max(1, Math.min(8, Number(limitCount || 6)));
   if(q.length < 2) return [];
   const merged = [];
-
   try{
-    const photon = new URL("https://photon.komoot.io/api/");
-    photon.searchParams.set("q", q);
-    photon.searchParams.set("limit", String(limit));
+    const nom = new URL("https://nominatim.openstreetmap.org/search");
+    nom.searchParams.set("format", "jsonv2");
+    nom.searchParams.set("addressdetails", "1");
+    nom.searchParams.set("limit", String(limit));
+    nom.searchParams.set("countrycodes", "in");
+    nom.searchParams.set("q", q);
     if(Number.isFinite(state.liveLat) && Number.isFinite(state.liveLng)){
-      photon.searchParams.set("lat", String(state.liveLat));
-      photon.searchParams.set("lon", String(state.liveLng));
+      const lat = Number(state.liveLat);
+      const lng = Number(state.liveLng);
+      const dLat = 0.35;
+      const dLng = 0.35;
+      nom.searchParams.set("viewbox", `${lng - dLng},${lat + dLat},${lng + dLng},${lat - dLat}`);
+      nom.searchParams.set("bounded", "0");
     }
-    const res = await fetch(photon.toString(), { cache: "no-store" });
+    const res = await fetch(nom.toString(), {
+      cache: "no-store",
+      headers: {
+        "Accept": "application/json",
+        "Accept-Language": "en-IN,en;q=0.9"
+      }
+    });
     if(res.ok){
-      const data = await res.json().catch(() => null);
-      const features = Array.isArray(data?.features) ? data.features : [];
-      features.forEach((feature) => {
-        const coords = Array.isArray(feature?.geometry?.coordinates) ? feature.geometry.coordinates : [];
-        const lng = Number(coords[0]);
-        const lat = Number(coords[1]);
-        const p = feature?.properties || {};
+      const rows = await res.json().catch(() => []);
+      (Array.isArray(rows) ? rows : []).forEach((row) => {
+        const a = row?.address || {};
         const name = buildPlaceName([
-          p.name || p.street || "",
-          p.city || p.district || p.county || "",
-          p.state || "",
-          p.country || ""
-        ]);
-        const row = normalizeSuggestion(name, lat, lng);
-        if(row) merged.push(row);
+          a.road || a.neighbourhood || a.suburb || a.hamlet || a.allotments || "",
+          a.city || a.town || a.village || a.municipality || a.county || "",
+          a.state_district || a.state || "",
+          a.postcode || ""
+        ]) || String(row?.display_name || "").slice(0, 140);
+        const item = normalizeSuggestion(name, row?.lat, row?.lon);
+        if(item) merged.push(item);
       });
     }
   }catch(_){ }
-
-  if(merged.length < limit){
-    try{
-      const nom = new URL("https://nominatim.openstreetmap.org/search");
-      nom.searchParams.set("format", "jsonv2");
-      nom.searchParams.set("addressdetails", "1");
-      nom.searchParams.set("limit", String(limit));
-      nom.searchParams.set("q", q);
-      const res = await fetch(nom.toString(), {
-        cache: "no-store",
-        headers: { "Accept": "application/json" }
-      });
-      if(res.ok){
-        const rows = await res.json().catch(() => []);
-        (Array.isArray(rows) ? rows : []).forEach((row) => {
-          const a = row?.address || {};
-          const name = buildPlaceName([
-            a.road || a.neighbourhood || a.suburb || a.hamlet || a.city || a.town || a.village || "",
-            a.city || a.town || a.village || a.county || "",
-            a.state || "",
-            a.country || ""
-          ]) || String(row?.display_name || "").slice(0, 140);
-          const item = normalizeSuggestion(name, row?.lat, row?.lon);
-          if(item) merged.push(item);
-        });
-      }
-    }catch(_){ }
-  }
-
   return dedupeSuggestions(merged).slice(0, limit);
 }
 
@@ -1496,6 +1580,28 @@ async function requestRide(){
   if(fareRes?.ok && fareRes?.estimate?.fare_inr){
     state.fare = Number(fareRes.estimate.fare_inr);
   }
+  const selectedPayment = String(document.getElementById("paymentMethod")?.value || "cash").trim().toLowerCase();
+  let paymentPayload = {
+    payment_method: "cash",
+    payment_status: "cod",
+    payment_order_id: "",
+    payment_id: "",
+    payment_ref: ""
+  };
+  if(selectedPayment === "online"){
+    try{
+      paymentPayload = await handleOnlinePayment(
+        "ride",
+        state.fare,
+        "ride",
+        "",
+        `Pay ${money(state.fare)} for ${prettyLabel(state.vehicle)} ride`
+      );
+    }catch(err){
+      setRideHint(String(err?.message || "Payment failed"));
+      return;
+    }
+  }
 
   const req = await apiPost("/api/local/rides/request", {
     user_id: me.id,
@@ -1506,7 +1612,7 @@ async function requestRide(){
     pickup_text: composePlaceText(state.pickupText || "Pickup", state.pickupLandmark).slice(0, 160),
     drop_text: composePlaceText(state.dropText || "Drop", state.dropLandmark).slice(0, 160),
     vehicle_type: state.vehicle,
-    payment_method: document.getElementById("paymentMethod").value,
+    ...paymentPayload,
     fare_inr: state.fare,
     distance_km: state.distanceKm,
     duration_min: state.durationMin
@@ -1628,7 +1734,730 @@ async function resetRideFlow(keepPickup){
   }
 }
 
+let activeView = "ride";
+let foodBooted = false;
+let agentBooted = false;
+let foodOrderTimer = null;
+let agentBookingTimer = null;
+
+function prettyLabel(text){
+  return String(text || "").replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function calcFoodCartTotal(){
+  return roundMoney(foodState.cart.reduce((sum, row) => sum + (Number(row.price_inr || 0) * Number(row.qty || 0)), 0));
+}
+
+function calcAgentEstimate(agent, hours){
+  const base = Math.max(0, Number(agent?.price_per_visit_inr || 0));
+  const perHour = Math.max(0, Number(agent?.per_hour_rate_inr || 0));
+  const h = Math.max(1, Math.min(12, Math.round(Number(hours || 1))));
+  return roundMoney(base + (perHour * h));
+}
+
+async function ensureLocationForServices(){
+  if(Number.isFinite(state.pickupLat) && Number.isFinite(state.pickupLng)){
+    return {
+      lat: state.pickupLat,
+      lng: state.pickupLng,
+      address: state.pickupText || ""
+    };
+  }
+  await focusCurrentLocation().catch(() => {});
+  if(Number.isFinite(state.pickupLat) && Number.isFinite(state.pickupLng)){
+    return {
+      lat: state.pickupLat,
+      lng: state.pickupLng,
+      address: state.pickupText || ""
+    };
+  }
+  throw new Error("location_not_available");
+}
+
+async function handleOnlinePayment(module, amountInr, referenceType, referenceId, description){
+  const me = await ensureMe();
+  if(!me) throw new Error("login_required");
+  const amount = Math.max(1, roundMoney(amountInr || 0));
+  const order = await apiPost("/api/local/payments/order", {
+    user_id: me.id,
+    module,
+    amount_inr: amount,
+    reference_type: referenceType || "",
+    reference_id: referenceId || ""
+  });
+  if(!order?.ok || !order?.order?.razorpay_order_id){
+    throw new Error(order?.message || order?.error || "payment_order_failed");
+  }
+  if(typeof window.Razorpay !== "function"){
+    throw new Error("razorpay_sdk_missing");
+  }
+  return await new Promise((resolve, reject) => {
+    const rz = new window.Razorpay({
+      key: order.order.key_id,
+      amount: order.order.amount_paise,
+      currency: "INR",
+      name: "NovaGapp Local Services",
+      description: description || "Service payment",
+      order_id: order.order.razorpay_order_id,
+      prefill: {
+        email: String(me?.email || ""),
+        name: String(me?.user_metadata?.full_name || me?.user_metadata?.name || ""),
+        contact: String(me?.phone || me?.user_metadata?.phone || "")
+      },
+      theme: { color: "#ff6a00" },
+      handler: async function(resp){
+        try{
+          const verify = await apiPost("/api/local/payments/verify", {
+            user_id: me.id,
+            module,
+            reference_type: referenceType || "",
+            reference_id: referenceId || "",
+            razorpay_order_id: resp?.razorpay_order_id,
+            razorpay_payment_id: resp?.razorpay_payment_id,
+            razorpay_signature: resp?.razorpay_signature
+          });
+          if(!verify?.ok){
+            reject(new Error(verify?.message || verify?.error || "payment_verify_failed"));
+            return;
+          }
+          resolve({
+            payment_method: "online",
+            payment_status: "captured",
+            payment_order_id: String(resp?.razorpay_order_id || ""),
+            payment_id: String(resp?.razorpay_payment_id || ""),
+            payment_ref: String(resp?.razorpay_payment_id || "")
+          });
+        }catch(err){
+          reject(err);
+        }
+      },
+      modal: {
+        ondismiss: () => reject(new Error("payment_cancelled"))
+      }
+    });
+    rz.open();
+  });
+}
+
+function renderFoodTypeButtons(){
+  const foodBtn = document.getElementById("foodTypeFoodBtn");
+  const groceryBtn = document.getElementById("foodTypeGroceryBtn");
+  if(foodBtn) foodBtn.className = `btn ${foodState.type === "food" ? "brand" : "gray"}`;
+  if(groceryBtn) groceryBtn.className = `btn ${foodState.type === "grocery" ? "brand" : "gray"}`;
+}
+
+function renderFoodListings(){
+  const box = document.getElementById("foodList");
+  if(!box) return;
+  box.innerHTML = "";
+  if(!foodState.listings.length){
+    box.innerHTML = `<div class="muted">No ${foodState.type} partners found nearby.</div>`;
+    return;
+  }
+  foodState.listings.forEach((listing) => {
+    const div = document.createElement("div");
+    div.className = "list-card";
+    const active = foodState.selectedListing && String(foodState.selectedListing.id) === String(listing.id);
+    const distance = Number(listing?.distance_km || 0);
+    div.innerHTML = `
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <div class="list-title">${String(listing.store_name || "Store")}</div>
+          <div class="list-sub">${distance.toFixed(2)} km | ${listing.open_now ? "Open" : "Closed"} | Delivery INR ${Number(listing.delivery_charge_inr || 0).toFixed(2)}</div>
+          <div class="list-sub">Min order INR ${Number(listing.minimum_order_inr || 0).toFixed(2)}</div>
+        </div>
+        <button class="btn ${active ? "brand" : "gray"}" data-food-listing="${String(listing.id)}">${active ? "Selected" : "View"}</button>
+      </div>
+    `;
+    box.appendChild(div);
+  });
+}
+
+function renderFoodMenu(){
+  const title = document.getElementById("foodMenuTitle");
+  const box = document.getElementById("foodMenuList");
+  if(title){
+    title.textContent = foodState.selectedListing
+      ? `${String(foodState.selectedListing.store_name || "Store")} menu`
+      : "Menu";
+  }
+  if(!box) return;
+  box.innerHTML = "";
+  if(!foodState.selectedListing){
+    box.innerHTML = `<div class="muted">Select a partner to load menu.</div>`;
+    return;
+  }
+  if(!foodState.menuItems.length){
+    box.innerHTML = `<div class="muted">No menu items available right now.</div>`;
+    return;
+  }
+  foodState.menuItems.forEach((item) => {
+    const div = document.createElement("div");
+    div.className = "list-card";
+    const inCart = foodState.cart.find((c) => String(c.id) === String(item.id));
+    const qty = Number(inCart?.qty || 0);
+    div.innerHTML = `
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <div class="list-title">${String(item.name || "Item")}</div>
+          <div class="list-sub">${String(item.category || "General")}</div>
+          <div class="price">INR ${Number(item.price_inr || 0).toFixed(2)}</div>
+        </div>
+        <div class="row">
+          <button class="qty-btn" data-food-dec="${String(item.id)}">-</button>
+          <span style="min-width:18px;text-align:center">${qty}</span>
+          <button class="qty-btn" data-food-inc="${String(item.id)}">+</button>
+        </div>
+      </div>
+    `;
+    box.appendChild(div);
+  });
+}
+
+function renderFoodCartSummary(){
+  const count = foodState.cart.reduce((sum, row) => sum + Number(row.qty || 0), 0);
+  const subtotal = calcFoodCartTotal();
+  const delivery = Number(foodState.selectedListing?.delivery_charge_inr || 0);
+  const total = roundMoney(subtotal + delivery);
+  const minOrder = Number(foodState.selectedListing?.minimum_order_inr || 0);
+  const countEl = document.getElementById("foodCartCount");
+  if(countEl){
+    countEl.textContent = `${count} item${count === 1 ? "" : "s"}`;
+  }
+  const summary = document.getElementById("foodCartSummary");
+  if(!summary) return;
+  if(!count){
+    summary.textContent = "Cart is empty.";
+    return;
+  }
+  summary.textContent = `Subtotal ${money(subtotal)} + Delivery ${money(delivery)} = Total ${money(total)}${minOrder > 0 ? ` | Min order ${money(minOrder)}` : ""}`;
+}
+
+function updateFoodAddressPrefill(){
+  const input = document.getElementById("foodAddressInput");
+  if(!input) return;
+  if(String(input.value || "").trim()) return;
+  if(state.pickupText){
+    input.value = state.pickupText;
+  }
+}
+
+function mutateCart(item, delta){
+  const id = String(item?.id || "");
+  if(!id) return;
+  const found = foodState.cart.find((row) => String(row.id) === id);
+  if(!found && delta > 0){
+    foodState.cart.push({
+      id,
+      name: String(item.name || ""),
+      price_inr: Number(item.price_inr || 0),
+      image_url: String(item.image_url || ""),
+      qty: 1
+    });
+  }else if(found){
+    found.qty = Math.max(0, Number(found.qty || 0) + delta);
+    if(found.qty <= 0){
+      foodState.cart = foodState.cart.filter((row) => String(row.id) !== id);
+    }
+  }
+  renderFoodMenu();
+  renderFoodCartSummary();
+}
+
+async function loadFoodListings(){
+  const note = document.getElementById("foodLocationNote");
+  if(note) note.textContent = "Loading nearby partners...";
+  try{
+    const ctx = await ensureLocationForServices();
+    updateFoodAddressPrefill();
+    const res = await apiGet(`/api/local/nearby?type=${encodeURIComponent(foodState.type)}&lat=${encodeURIComponent(String(ctx.lat))}&lng=${encodeURIComponent(String(ctx.lng))}&radius_km=5&limit=40`);
+    foodState.listings = Array.isArray(res?.listings) ? res.listings : [];
+    if(note){
+      note.textContent = `${foodState.listings.length} ${foodState.type} partner(s) found in 5km`;
+    }
+    renderFoodListings();
+    if(foodState.selectedListing){
+      const exists = foodState.listings.find((row) => String(row.id) === String(foodState.selectedListing.id));
+      if(!exists){
+        foodState.selectedListing = null;
+        foodState.menuItems = [];
+        foodState.cart = [];
+      }
+    }
+    renderFoodMenu();
+    renderFoodCartSummary();
+  }catch(err){
+    if(note) note.textContent = "Location unavailable. Enable GPS for nearby food/grocery.";
+    foodState.listings = [];
+    renderFoodListings();
+    renderFoodMenu();
+    renderFoodCartSummary();
+  }
+}
+
+async function selectFoodListing(listingId){
+  const id = String(listingId || "").trim();
+  if(!id) return;
+  const listing = foodState.listings.find((row) => String(row.id) === id);
+  if(!listing) return;
+  foodState.selectedListing = listing;
+  foodState.cart = [];
+  renderFoodListings();
+  const menuRes = await apiGet(`/api/local/listings/items?listing_id=${encodeURIComponent(id)}`);
+  foodState.menuItems = Array.isArray(menuRes?.items) ? menuRes.items.filter((item) => Number(item?.stock_qty || 0) > 0) : [];
+  renderFoodMenu();
+  renderFoodCartSummary();
+}
+
+function renderFoodOrders(){
+  const box = document.getElementById("foodOrdersList");
+  if(!box) return;
+  box.innerHTML = "";
+  if(!foodState.orders.length){
+    box.innerHTML = `<div class="muted">No orders yet.</div>`;
+    return;
+  }
+  foodState.orders.forEach((order) => {
+    const div = document.createElement("div");
+    div.className = "list-card";
+    const status = String(order?.status || "placed");
+    const items = Array.isArray(order?.item_snapshot) ? order.item_snapshot : [];
+    const itemText = items.map((item) => `${item.name} x${item.qty}`).join(", ");
+    div.innerHTML = `
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <div class="list-title">Order ${String(order.id || "").slice(0, 8).toUpperCase()}</div>
+          <div class="list-sub">${prettyLabel(String(order.service_type || foodState.type))} | ${money(order.amount_inr || 0)}</div>
+          <div class="list-sub">${itemText || "Items not available"}</div>
+          <div class="list-sub">${String(order.delivery_address || "")}</div>
+        </div>
+        <span class="status-chip">${prettyLabel(status)}</span>
+      </div>
+    `;
+    box.appendChild(div);
+  });
+}
+
+async function loadFoodOrders(){
+  const me = await ensureMe();
+  if(!me) return;
+  const orders = await apiGet(`/api/local/orders/for-buyer?user_id=${encodeURIComponent(me.id)}`);
+  foodState.orders = Array.isArray(orders?.orders) ? orders.orders : [];
+  renderFoodOrders();
+}
+
+async function checkoutFoodOrder(){
+  const me = await ensureMe();
+  if(!me) return;
+  if(!foodState.selectedListing){
+    alert("Select a restaurant/store first.");
+    return;
+  }
+  if(!foodState.cart.length){
+    alert("Cart is empty.");
+    return;
+  }
+  const roleOk = await ensureConsumerRole();
+  if(!roleOk){
+    alert("Consumer role activation failed.");
+    return;
+  }
+  const address = String(document.getElementById("foodAddressInput")?.value || "").trim();
+  if(!address){
+    alert("Delivery address required.");
+    return;
+  }
+  const note = String(document.getElementById("foodNoteInput")?.value || "").trim().slice(0, 300);
+  const paymentMethod = String(document.getElementById("foodPaymentMethod")?.value || "cash").trim();
+  const subtotal = calcFoodCartTotal();
+  const delivery = Number(foodState.selectedListing?.delivery_charge_inr || 0);
+  const total = roundMoney(subtotal + delivery);
+  const minOrder = Number(foodState.selectedListing?.minimum_order_inr || 0);
+  if(total < minOrder){
+    alert(`Minimum order is ${money(minOrder)}.`);
+    return;
+  }
+  let paymentPayload = {
+    payment_method: "cash",
+    payment_status: "cod",
+    payment_order_id: "",
+    payment_id: "",
+    payment_ref: ""
+  };
+  if(paymentMethod === "online"){
+    try{
+      paymentPayload = await handleOnlinePayment(
+        foodState.type,
+        total,
+        "order",
+        "",
+        `Pay ${money(total)} for ${prettyLabel(foodState.type)} order`
+      );
+    }catch(err){
+      alert(String(err?.message || "Payment failed"));
+      return;
+    }
+  }
+  const items = foodState.cart.map((row) => ({
+    item_id: row.id,
+    name: row.name,
+    qty: row.qty,
+    price_inr: row.price_inr,
+    image_url: row.image_url
+  }));
+  const out = await apiPost("/api/local/orders/create", {
+    user_id: me.id,
+    listing_id: foodState.selectedListing.id,
+    service_type: foodState.type,
+    amount_inr: total,
+    items,
+    delivery_address: address,
+    note,
+    ...paymentPayload
+  });
+  if(!out?.ok){
+    alert(String(out?.message || out?.error || "Order failed"));
+    return;
+  }
+  foodState.cart = [];
+  renderFoodMenu();
+  renderFoodCartSummary();
+  await loadFoodOrders();
+  alert("Order placed successfully.");
+}
+
+function renderAgentCategories(){
+  const box = document.getElementById("agentCategoryGrid");
+  if(!box) return;
+  box.innerHTML = "";
+  agentState.categories.forEach((cat) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `btn ${agentState.activeCategory === cat ? "brand" : "gray"}`;
+    b.textContent = prettyLabel(cat);
+    b.dataset.agentCat = cat;
+    box.appendChild(b);
+  });
+}
+
+function renderAgentList(){
+  const box = document.getElementById("agentList");
+  if(!box) return;
+  box.innerHTML = "";
+  if(!agentState.agents.length){
+    box.innerHTML = `<div class="muted">No agent available in selected category.</div>`;
+    return;
+  }
+  agentState.agents.forEach((agent) => {
+    const selected = agentState.selectedAgent && String(agentState.selectedAgent.id) === String(agent.id);
+    const hours = Number(document.getElementById("agentHoursInput")?.value || 1);
+    const estimate = calcAgentEstimate(agent, hours);
+    const div = document.createElement("div");
+    div.className = "list-card";
+    div.innerHTML = `
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <div class="list-title">${String(agent.title || "Agent")}</div>
+          <div class="list-sub">${prettyLabel(agent.service_category)} | ${Number(agent.distance_km || 0).toFixed(2)} km</div>
+          <div class="list-sub">Rating ${Number(agent.rating || 0).toFixed(1)} (${Number(agent.rating_count || 0)}) | Exp ${Number(agent.experience_years || 0)} yr</div>
+          <div class="list-sub">Visit ${money(agent.price_per_visit_inr || 0)} + ${money(agent.per_hour_rate_inr || 0)}/hr</div>
+          <div class="price">Est. ${money(estimate)}</div>
+        </div>
+        <button class="btn ${selected ? "brand" : "gray"}" data-agent-id="${String(agent.id)}">${selected ? "Selected" : "Select"}</button>
+      </div>
+    `;
+    box.appendChild(div);
+  });
+}
+
+function renderAgentEstimate(){
+  const text = document.getElementById("agentEstimateText");
+  if(!text) return;
+  if(!agentState.selectedAgent){
+    text.textContent = "Select an agent to see estimate.";
+    return;
+  }
+  const hours = Math.max(1, Math.min(12, Math.round(Number(document.getElementById("agentHoursInput")?.value || 1))));
+  const estimate = calcAgentEstimate(agentState.selectedAgent, hours);
+  text.textContent = `Estimated price: ${money(estimate)} for ${hours} hour(s).`;
+}
+
+async function loadNearbyAgents(){
+  const note = document.getElementById("agentLocationNote");
+  if(note) note.textContent = "Loading nearby agents...";
+  try{
+    const ctx = await ensureLocationForServices();
+    const out = await apiGet(`/api/local/agents/nearby?service_category=${encodeURIComponent(agentState.activeCategory)}&lat=${encodeURIComponent(String(ctx.lat))}&lng=${encodeURIComponent(String(ctx.lng))}&radius_km=5`);
+    agentState.agents = Array.isArray(out?.agents) ? out.agents : [];
+    if(note){
+      note.textContent = `${agentState.agents.length} ${prettyLabel(agentState.activeCategory)} agent(s) found in 5km`;
+    }
+  }catch(_){
+    agentState.agents = [];
+    if(note) note.textContent = "Location unavailable. Enable GPS for nearby agents.";
+  }
+  if(agentState.selectedAgent){
+    const fresh = agentState.agents.find((row) => String(row.id) === String(agentState.selectedAgent.id));
+    if(!fresh) agentState.selectedAgent = null;
+  }
+  renderAgentCategories();
+  renderAgentList();
+  renderAgentEstimate();
+}
+
+function renderAgentBookings(){
+  const box = document.getElementById("agentBookingsList");
+  if(!box) return;
+  box.innerHTML = "";
+  if(!agentState.bookings.length){
+    box.innerHTML = `<div class="muted">No bookings yet.</div>`;
+    return;
+  }
+  agentState.bookings.forEach((booking) => {
+    const div = document.createElement("div");
+    div.className = "list-card";
+    div.innerHTML = `
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <div class="list-title">Booking ${String(booking.id || "").slice(0, 8).toUpperCase()}</div>
+          <div class="list-sub">${String(booking.service_address || "")}</div>
+          <div class="list-sub">Scheduled: ${booking.scheduled_at ? new Date(booking.scheduled_at).toLocaleString() : "-"}</div>
+          <div class="list-sub">Estimated: ${money(booking.estimated_price_inr || 0)}</div>
+        </div>
+        <span class="status-chip">${prettyLabel(booking.status || "requested")}</span>
+      </div>
+    `;
+    box.appendChild(div);
+  });
+}
+
+async function loadAgentBookings(){
+  const me = await ensureMe();
+  if(!me) return;
+  const out = await apiGet(`/api/local/agent/bookings?user_id=${encodeURIComponent(me.id)}&side=customer`);
+  agentState.bookings = Array.isArray(out?.bookings) ? out.bookings : [];
+  renderAgentBookings();
+}
+
+async function bookAgentNow(){
+  const me = await ensureMe();
+  if(!me) return;
+  const roleOk = await ensureConsumerRole();
+  if(!roleOk){
+    alert("Consumer role activation failed.");
+    return;
+  }
+  if(!agentState.selectedAgent){
+    alert("Select an agent first.");
+    return;
+  }
+  const serviceDate = String(document.getElementById("agentDateInput")?.value || "").trim();
+  const serviceTime = String(document.getElementById("agentTimeInput")?.value || "").trim();
+  if(!serviceDate || !serviceTime){
+    alert("Choose date and time.");
+    return;
+  }
+  const hours = Math.max(1, Math.min(12, Math.round(Number(document.getElementById("agentHoursInput")?.value || 1))));
+  const address = String(document.getElementById("agentAddressInput")?.value || "").trim();
+  if(!address){
+    alert("Service address required.");
+    return;
+  }
+  const note = String(document.getElementById("agentNoteInput")?.value || "").trim().slice(0, 300);
+  const paymentMethod = String(document.getElementById("agentPaymentMethod")?.value || "cash").trim();
+  const estimate = calcAgentEstimate(agentState.selectedAgent, hours);
+  let paymentPayload = {
+    payment_method: "cash",
+    payment_status: "cod",
+    payment_order_id: "",
+    payment_id: "",
+    payment_ref: ""
+  };
+  if(paymentMethod === "online"){
+    try{
+      paymentPayload = await handleOnlinePayment("agent", estimate, "service_booking", "", `Pay ${money(estimate)} for agent booking`);
+    }catch(err){
+      alert(String(err?.message || "Payment failed"));
+      return;
+    }
+  }
+  const out = await apiPost("/api/local/agents/book", {
+    customer_user_id: me.id,
+    agent_id: agentState.selectedAgent.id,
+    service_address: address,
+    note,
+    service_date: serviceDate,
+    service_time: serviceTime,
+    hours_booked: hours,
+    estimated_price_inr: estimate,
+    ...paymentPayload
+  });
+  if(!out?.ok){
+    alert(String(out?.message || out?.error || "Booking failed"));
+    return;
+  }
+  await loadAgentBookings();
+  alert("Agent booking created.");
+}
+
+function bindFoodEvents(){
+  document.getElementById("foodTypeFoodBtn")?.addEventListener("click", async () => {
+    foodState.type = "food";
+    foodState.selectedListing = null;
+    foodState.menuItems = [];
+    foodState.cart = [];
+    renderFoodTypeButtons();
+    renderFoodMenu();
+    renderFoodCartSummary();
+    await loadFoodListings();
+  });
+  document.getElementById("foodTypeGroceryBtn")?.addEventListener("click", async () => {
+    foodState.type = "grocery";
+    foodState.selectedListing = null;
+    foodState.menuItems = [];
+    foodState.cart = [];
+    renderFoodTypeButtons();
+    renderFoodMenu();
+    renderFoodCartSummary();
+    await loadFoodListings();
+  });
+  document.getElementById("foodList")?.addEventListener("click", (event) => {
+    const btn = event.target.closest("button[data-food-listing]");
+    if(!btn) return;
+    selectFoodListing(String(btn.dataset.foodListing || "")).catch(() => {});
+  });
+  document.getElementById("foodMenuList")?.addEventListener("click", (event) => {
+    const incBtn = event.target.closest("button[data-food-inc]");
+    if(incBtn){
+      const id = String(incBtn.dataset.foodInc || "");
+      const item = foodState.menuItems.find((row) => String(row.id) === id);
+      if(item) mutateCart(item, 1);
+      return;
+    }
+    const decBtn = event.target.closest("button[data-food-dec]");
+    if(decBtn){
+      const id = String(decBtn.dataset.foodDec || "");
+      const item = foodState.menuItems.find((row) => String(row.id) === id);
+      if(item) mutateCart(item, -1);
+    }
+  });
+  document.getElementById("foodCheckoutBtn")?.addEventListener("click", () => {
+    checkoutFoodOrder().catch(() => {});
+  });
+  document.getElementById("foodOrdersRefreshBtn")?.addEventListener("click", () => {
+    loadFoodOrders().catch(() => {});
+  });
+}
+
+function bindAgentEvents(){
+  document.getElementById("agentCategoryGrid")?.addEventListener("click", (event) => {
+    const btn = event.target.closest("button[data-agent-cat]");
+    if(!btn) return;
+    const cat = String(btn.dataset.agentCat || "");
+    if(!cat || !agentState.categories.includes(cat)) return;
+    agentState.activeCategory = cat;
+    agentState.selectedAgent = null;
+    loadNearbyAgents().catch(() => {});
+  });
+  document.getElementById("agentList")?.addEventListener("click", (event) => {
+    const btn = event.target.closest("button[data-agent-id]");
+    if(!btn) return;
+    const id = String(btn.dataset.agentId || "");
+    const found = agentState.agents.find((row) => String(row.id) === id);
+    if(!found) return;
+    agentState.selectedAgent = found;
+    renderAgentList();
+    renderAgentEstimate();
+    const title = document.getElementById("agentBookingTitle");
+    if(title) title.textContent = `Booking with ${String(found.title || "Agent")}`;
+  });
+  document.getElementById("agentHoursInput")?.addEventListener("input", () => {
+    renderAgentEstimate();
+    renderAgentList();
+  });
+  document.getElementById("agentBookBtn")?.addEventListener("click", () => {
+    bookAgentNow().catch(() => {});
+  });
+  document.getElementById("agentRefreshBtn")?.addEventListener("click", () => {
+    loadNearbyAgents().catch(() => {});
+  });
+  document.getElementById("agentBookingsRefreshBtn")?.addEventListener("click", () => {
+    loadAgentBookings().catch(() => {});
+  });
+}
+
+async function bootFoodModule(){
+  if(!foodBooted){
+    foodBooted = true;
+    bindFoodEvents();
+    renderFoodTypeButtons();
+    renderFoodMenu();
+    renderFoodCartSummary();
+  }
+  updateFoodAddressPrefill();
+  await loadFoodListings();
+  await loadFoodOrders();
+}
+
+async function bootAgentModule(){
+  if(!agentBooted){
+    agentBooted = true;
+    bindAgentEvents();
+    renderAgentCategories();
+    renderAgentList();
+    renderAgentEstimate();
+    const now = new Date();
+    const dateInput = document.getElementById("agentDateInput");
+    const timeInput = document.getElementById("agentTimeInput");
+    if(dateInput && !dateInput.value){
+      dateInput.value = now.toISOString().slice(0, 10);
+    }
+    if(timeInput && !timeInput.value){
+      const hh = String(now.getHours()).padStart(2, "0");
+      const mm = String(now.getMinutes()).padStart(2, "0");
+      timeInput.value = `${hh}:${mm}`;
+    }
+  }
+  const addressInput = document.getElementById("agentAddressInput");
+  if(addressInput && !String(addressInput.value || "").trim() && state.pickupText){
+    addressInput.value = state.pickupText;
+  }
+  await loadNearbyAgents();
+  await loadAgentBookings();
+}
+
+function startFoodTimer(){
+  if(foodOrderTimer) clearInterval(foodOrderTimer);
+  foodOrderTimer = setInterval(() => {
+    if(activeView !== "food") return;
+    loadFoodOrders().catch(() => {});
+  }, 12000);
+}
+
+function stopFoodTimer(){
+  if(foodOrderTimer){
+    clearInterval(foodOrderTimer);
+    foodOrderTimer = null;
+  }
+}
+
+function startAgentTimer(){
+  if(agentBookingTimer) clearInterval(agentBookingTimer);
+  agentBookingTimer = setInterval(() => {
+    if(activeView !== "agent") return;
+    loadAgentBookings().catch(() => {});
+  }, 12000);
+}
+
+function stopAgentTimer(){
+  if(agentBookingTimer){
+    clearInterval(agentBookingTimer);
+    agentBookingTimer = null;
+  }
+}
+
 function setActiveView(view){
+  activeView = view;
   const ride = document.getElementById("rideView");
   const food = document.getElementById("foodView");
   const agent = document.getElementById("agentView");
@@ -1643,6 +2472,18 @@ function setActiveView(view){
 
   if(view === "ride" && map){
     setTimeout(() => map.invalidateSize(), 80);
+  }
+  if(view === "food"){
+    bootFoodModule().catch(() => {});
+    startFoodTimer();
+    stopAgentTimer();
+  }else if(view === "agent"){
+    bootAgentModule().catch(() => {});
+    startAgentTimer();
+    stopFoodTimer();
+  }else{
+    stopFoodTimer();
+    stopAgentTimer();
   }
 }
 
@@ -1869,6 +2710,8 @@ async function bootRidePage(){
   window.addEventListener("beforeunload", () => {
     stopGpsWatch();
     stopNearbyLoop();
+    stopFoodTimer();
+    stopAgentTimer();
     stopRideRealtime().catch(() => {});
     stopDriverLocationRealtime().catch(() => {});
     hideSuggestPopup();
@@ -1883,6 +2726,13 @@ async function bootRidePage(){
       }
       if(state.phase === "idle"){
         fetchNearbyDrivers().catch(() => {});
+      }
+      if(activeView === "food"){
+        loadFoodListings().catch(() => {});
+        loadFoodOrders().catch(() => {});
+      }else if(activeView === "agent"){
+        loadNearbyAgents().catch(() => {});
+        loadAgentBookings().catch(() => {});
       }
     }
   });
