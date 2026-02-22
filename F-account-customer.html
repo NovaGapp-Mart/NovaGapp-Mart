@@ -1,0 +1,159 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>F-Account Customer</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="global.js"></script>
+<script src="public-config.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="f-account-theme.css">
+</head>
+<body>
+<div class="top">
+  <b>Customer Account</b>
+  <div class="top-actions">
+    <button class="btn soft" type="button" onclick="location.href='F-account.html'">F-Account Hub</button>
+    <button class="btn dark" type="button" onclick="location.href='food-auto.html'">Services</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <section class="hero">
+    <b>Free customer onboarding</b>
+    <p>Customer account has zero listing fee. Save your profile and start booking rides, food and agents immediately.</p>
+    <div class="hero-pills">
+      <span class="pill">INR 0 fee</span>
+      <span class="pill">No OTP required</span>
+      <span class="pill">No Razorpay payment</span>
+    </div>
+  </section>
+
+  <div class="layout">
+    <div>
+      <section class="card">
+        <div class="title"><b>1) Customer Info</b><span class="tag">Required</span></div>
+        <div id="who" class="muted" style="margin-top:8px">Checking login...</div>
+        <div class="grid-2" style="margin-top:8px">
+          <input id="name" class="field" placeholder="Full name">
+          <input id="phone" class="field" placeholder="Phone (+91...)">
+        </div>
+        <div class="grid-2" style="margin-top:8px">
+          <input id="city" class="field" placeholder="City">
+          <input id="area" class="field" placeholder="Area / locality">
+        </div>
+        <div class="note">Customer role free hai. Bas profile information save hogi, koi listing fee nahi lagegi.</div>
+      </section>
+
+      <section class="card">
+        <div class="title"><b>2) Activate</b><span class="tag">Instant</span></div>
+        <button id="activateBtn" class="btn brand full" type="button">Create Free Customer Account</button>
+        <div id="status" class="status">Ready</div>
+      </section>
+    </div>
+
+    <aside>
+      <section class="card">
+        <div class="title"><b>Policy</b><span class="tag">Customer</span></div>
+        <div class="list">
+          <div class="list-row"><b>Account fee</b><span>INR 0</span></div>
+          <div class="list-row"><b>Booking fee</b><span>No hidden customer fee from account onboarding</span></div>
+          <div class="list-row"><b>Usage</b><span>Book rides, place food/grocery orders, request service agents</span></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="title"><b>Next</b><span class="tag">Actions</span></div>
+        <div class="grid-2" style="margin-top:8px">
+          <button class="btn brand" type="button" onclick="location.href='food-auto.html'">Open Services</button>
+          <button class="btn dark" type="button" onclick="location.href='index.html'">Home</button>
+        </div>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<script src="f-account-core.js"></script>
+<script>
+const q = (id) => document.getElementById(id);
+
+function setStatus(msg, kind){
+  const el = q("status");
+  el.className = "status";
+  if(kind === "ok") el.classList.add("ok");
+  if(kind === "bad") el.classList.add("bad");
+  el.textContent = String(msg || "");
+}
+
+async function preloadUser(){
+  const user = await FAccountCore.getSessionUser(true);
+  if(!user){
+    location.href = "login.html";
+    return null;
+  }
+  q("who").textContent = `${user.email || "Logged in"} (${user.id})`;
+  q("name").value = String(user?.user_metadata?.full_name || user?.user_metadata?.name || "").slice(0, 80);
+  if(user?.phone) q("phone").value = String(user.phone || "").slice(0, 30);
+  try{
+    const cache = JSON.parse(localStorage.getItem(`nova_customer_profile_${user.id}`) || "null");
+    if(cache && typeof cache === "object"){
+      if(cache.city && !q("city").value) q("city").value = String(cache.city).slice(0, 80);
+      if(cache.area && !q("area").value) q("area").value = String(cache.area).slice(0, 120);
+    }
+  }catch(_){ }
+  return user;
+}
+
+async function activateCustomer(){
+  const user = await FAccountCore.requireSessionUser();
+  const name = String(q("name").value || "").trim();
+  const phone = FAccountCore.normalizePhone(q("phone").value);
+  const city = String(q("city").value || "").trim();
+  const area = String(q("area").value || "").trim();
+
+  if(!name || !phone){
+    setStatus("Name and valid phone are required", "bad");
+    return;
+  }
+
+  setStatus("Creating customer account...", "");
+
+  const enroll = await FAccountCore.enrollRole({
+    user_id: user.id,
+    role: "consumer",
+    display_name: name,
+    phone,
+    fee_paid: true,
+    payment_ref: "customer_free",
+    otp_token: ""
+  });
+
+  if(!enroll?.ok){
+    setStatus(`Failed: ${String(enroll?.error || "role_enroll_failed")}`, "bad");
+    return;
+  }
+
+  try{
+    localStorage.setItem(`nova_customer_profile_${user.id}`, JSON.stringify({
+      city,
+      area,
+      phone,
+      name,
+      updated_at: new Date().toISOString()
+    }));
+  }catch(_){ }
+
+  setStatus("Customer account active. You can use ride, food and agent services now.", "ok");
+}
+
+q("activateBtn").onclick = () => activateCustomer().catch((err) => {
+  setStatus(`Failed: ${String(err?.message || err || "unknown")}`, "bad");
+});
+
+preloadUser().catch(() => {
+  setStatus("Unable to load session", "bad");
+});
+</script>
+</body>
+</html>

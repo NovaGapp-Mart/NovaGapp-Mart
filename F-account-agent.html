@@ -1,0 +1,360 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>F-Account Agent</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="global.js"></script>
+<script src="public-config.js"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="f-account-theme.css">
+</head>
+<body>
+<div class="top">
+  <b>Agent Account Setup</b>
+  <div class="top-actions">
+    <button class="btn soft" type="button" onclick="location.href='F-account.html'">F-Account Hub</button>
+    <button class="btn dark" type="button" onclick="location.href='local-agent.html'">Agent Panel</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <section class="hero">
+    <b>Service agent onboarding with live service radius</b>
+    <p>Flow: OTP verify, lock live location, pay INR 500 listing fee, then activate professional agent profile for local bookings.</p>
+    <div class="hero-pills">
+      <span class="pill">Role: Agent</span>
+      <span class="pill">Fee: INR 500 once</span>
+      <span class="pill">Monthly share: 10%</span>
+      <span class="pill">Category based visibility</span>
+    </div>
+  </section>
+
+  <div class="layout">
+    <div>
+      <section class="card">
+        <div class="title"><b>1) Identity</b><span class="tag">Required</span></div>
+        <div id="who" class="muted" style="margin-top:8px">Checking login...</div>
+        <div class="grid-2" style="margin-top:8px">
+          <input id="name" class="field" placeholder="Agent full name">
+          <input id="phone" class="field" placeholder="Phone (+91...)" inputmode="tel">
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="title"><b>2) OTP Verification</b><span class="tag">Mandatory</span></div>
+        <div class="grid-2" style="margin-top:8px">
+          <button id="sendOtpBtn" class="btn soft" type="button">Send OTP</button>
+          <div style="display:flex;gap:8px">
+            <input id="otp" class="field" placeholder="6-digit OTP" inputmode="numeric">
+            <button id="verifyOtpBtn" class="btn ok" type="button">Verify</button>
+          </div>
+        </div>
+        <div id="otpStatus" class="status">OTP not sent</div>
+      </section>
+
+      <section class="card">
+        <div class="title"><b>3) Service Location</b><span class="tag">Mandatory</span></div>
+        <div class="grid-2" style="margin-top:8px">
+          <input id="address" class="field" placeholder="Auto-detected address">
+          <button id="gpsBtn" class="btn brand" type="button">Use Live GPS</button>
+        </div>
+        <div id="gpsStatus" class="status">GPS not locked</div>
+        <div id="map" class="map"></div>
+      </section>
+
+      <section class="card">
+        <div class="title"><b>4) Agent Profile</b><span class="tag">Service</span></div>
+        <div class="grid-2" style="margin-top:8px">
+          <select id="category" class="select">
+            <option value="electrician">Electrician</option>
+            <option value="plumber">Plumber</option>
+            <option value="ac_repair">AC Repair</option>
+            <option value="carpenter">Carpenter</option>
+            <option value="mechanic">Mechanic</option>
+            <option value="painter">Painter</option>
+            <option value="cleaning">Cleaning</option>
+          </select>
+          <input id="title" class="field" placeholder="Profile title">
+        </div>
+        <div class="grid-3" style="margin-top:8px">
+          <input id="experience" class="field" type="number" placeholder="Experience years">
+          <input id="visitCharge" class="field" type="number" placeholder="Visit charge INR">
+          <input id="hourRate" class="field" type="number" placeholder="Per hour INR">
+        </div>
+        <div class="grid-2" style="margin-top:8px">
+          <input id="radiusKm" class="field" type="number" placeholder="Service radius km" value="8">
+          <select id="availableNow" class="select">
+            <option value="true" selected>Available now</option>
+            <option value="false">Offline</option>
+          </select>
+        </div>
+      </section>
+    </div>
+
+    <aside>
+      <section class="card">
+        <div class="title"><b>5) Activate Agent Account</b><span class="tag">Final</span></div>
+        <div class="list">
+          <div class="list-row"><b>Listing fee</b><span>INR 500 one-time via Razorpay</span></div>
+          <div class="list-row"><b>Monthly share</b><span>10% of completed monthly service revenue</span></div>
+          <div class="list-row"><b>Post activation</b><span>Customers can book you based on category and live location</span></div>
+        </div>
+        <button id="activateBtn" class="btn brand full" style="margin-top:10px" type="button">Pay INR 500 and Activate Agent</button>
+        <div id="status" class="status">Ready</div>
+      </section>
+
+      <section class="card">
+        <div class="title"><b>Quick Actions</b><span class="tag">Go Live</span></div>
+        <div class="grid-2" style="margin-top:8px">
+          <button class="btn brand" type="button" onclick="location.href='local-agent.html'">Open Agent Panel</button>
+          <button class="btn dark" type="button" onclick="location.href='food-auto.html'">Open Services</button>
+        </div>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<script src="f-account-core.js"></script>
+<script>
+const q = (id) => document.getElementById(id);
+const state = {
+  otpToken: "",
+  otpVerified: false,
+  lat: null,
+  lng: null,
+  map: null,
+  marker: null
+};
+
+function setStatus(msg, kind){
+  const el = q("status");
+  el.className = "status";
+  if(kind === "ok") el.classList.add("ok");
+  if(kind === "bad") el.classList.add("bad");
+  el.textContent = String(msg || "");
+}
+
+function setOtpStatus(msg, kind){
+  const el = q("otpStatus");
+  el.className = "status";
+  if(kind === "ok") el.classList.add("ok");
+  if(kind === "bad") el.classList.add("bad");
+  el.textContent = String(msg || "");
+}
+
+function setGpsStatus(msg, kind){
+  const el = q("gpsStatus");
+  el.className = "status";
+  if(kind === "ok") el.classList.add("ok");
+  if(kind === "bad") el.classList.add("bad");
+  el.textContent = String(msg || "");
+}
+
+function num(id, fallback){
+  const n = Number(q(id).value);
+  return Number.isFinite(n) ? n : Number(fallback || 0);
+}
+
+function ensureMap(){
+  if(state.map) return;
+  state.map = L.map("map", { zoomControl: true }).setView([20.5937, 78.9629], 5);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(state.map);
+  state.map.on("click", (event) => {
+    const lat = Number(event?.latlng?.lat);
+    const lng = Number(event?.latlng?.lng);
+    setLocation(lat, lng, true).catch(() => {});
+  });
+}
+
+async function setLocation(lat, lng, center){
+  if(!FAccountCore.isValidLatLng(lat, lng)){
+    setGpsStatus("Invalid location", "bad");
+    return;
+  }
+  state.lat = Number(lat);
+  state.lng = Number(lng);
+  if(!state.marker){
+    state.marker = L.marker([state.lat, state.lng], { draggable: true }).addTo(state.map);
+    state.marker.on("dragend", () => {
+      const pos = state.marker.getLatLng();
+      setLocation(Number(pos.lat), Number(pos.lng), false).catch(() => {});
+    });
+  }else{
+    state.marker.setLatLng([state.lat, state.lng]);
+  }
+  if(center){
+    state.map.setView([state.lat, state.lng], Math.max(14, state.map.getZoom()));
+  }
+  const address = await FAccountCore.reverseGeocode(state.lat, state.lng);
+  if(address) q("address").value = address;
+}
+
+async function useLiveGps(){
+  ensureMap();
+  if(!navigator.geolocation){
+    setGpsStatus("GPS unsupported on this device", "bad");
+    return;
+  }
+  setGpsStatus("Reading live GPS...", "");
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    const lat = Number(pos?.coords?.latitude);
+    const lng = Number(pos?.coords?.longitude);
+    const acc = Math.round(Number(pos?.coords?.accuracy || 0));
+    if(!FAccountCore.isValidLatLng(lat, lng)){
+      setGpsStatus("Location read failed", "bad");
+      return;
+    }
+    await setLocation(lat, lng, true);
+    setGpsStatus(`GPS locked (${acc}m accuracy)`, "ok");
+  }, (err) => {
+    setGpsStatus(`Permission required: ${String(err?.message || "denied")}`, "bad");
+  }, { enableHighAccuracy: true, timeout: 25000, maximumAge: 0 });
+}
+
+async function sendOtp(){
+  const user = await FAccountCore.requireSessionUser();
+  const phone = FAccountCore.normalizePhone(q("phone").value);
+  if(!phone){
+    setOtpStatus("Enter valid phone first", "bad");
+    return;
+  }
+  q("phone").value = phone;
+  setOtpStatus("Sending OTP...", "");
+  const out = await FAccountCore.sendProviderOtp(user.id, phone);
+  if(!out?.ok){
+    setOtpStatus(`OTP send failed: ${String(out?.error || "otp_send_failed")}`, "bad");
+    return;
+  }
+  state.otpToken = String(out.otp_token || "");
+  state.otpVerified = false;
+  setOtpStatus("OTP sent", "ok");
+}
+
+async function verifyOtp(){
+  const user = await FAccountCore.requireSessionUser();
+  const otp = String(q("otp").value || "").trim();
+  if(!state.otpToken){
+    setOtpStatus("Send OTP first", "bad");
+    return;
+  }
+  if(!/^\d{6}$/.test(otp)){
+    setOtpStatus("Enter valid 6-digit OTP", "bad");
+    return;
+  }
+  const out = await FAccountCore.verifyProviderOtp(user.id, state.otpToken, otp);
+  if(!out?.ok){
+    state.otpVerified = false;
+    setOtpStatus(`OTP verify failed: ${String(out?.error || "invalid_otp")}`, "bad");
+    return;
+  }
+  state.otpVerified = true;
+  setOtpStatus("OTP verified", "ok");
+}
+
+async function activate(){
+  const user = await FAccountCore.requireSessionUser();
+  const fullName = String(q("name").value || "").trim();
+  const phone = FAccountCore.normalizePhone(q("phone").value);
+  const title = String(q("title").value || "").trim();
+
+  if(!fullName || !phone){
+    setStatus("Name and valid phone are required", "bad");
+    return;
+  }
+  if(!state.otpVerified || !state.otpToken){
+    setStatus("OTP verification is required", "bad");
+    return;
+  }
+  if(!FAccountCore.isValidLatLng(state.lat, state.lng)){
+    setStatus("Service location is required", "bad");
+    return;
+  }
+  if(!title){
+    setStatus("Profile title is required", "bad");
+    return;
+  }
+
+  q("phone").value = phone;
+  setStatus("Opening Razorpay payment...", "");
+
+  try{
+    const payment = await FAccountCore.payProviderListingFee({
+      userId: user.id,
+      role: "agent",
+      name: fullName,
+      phone,
+      email: user.email || ""
+    });
+
+    setStatus("Saving agent role...", "");
+    const enroll = await FAccountCore.enrollRole({
+      user_id: user.id,
+      role: "agent",
+      display_name: fullName,
+      phone,
+      fee_paid: true,
+      payment_ref: String(payment?.payment_ref || ""),
+      otp_token: state.otpToken
+    });
+    if(!enroll?.ok){
+      throw new Error(String(enroll?.error || "role_enroll_failed"));
+    }
+
+    const profile = await FAccountCore.upsertAgentProfile({
+      user_id: user.id,
+      service_category: String(q("category").value || "electrician"),
+      title,
+      phone,
+      price_per_visit_inr: num("visitCharge", 0),
+      per_hour_rate_inr: num("hourRate", 0),
+      experience_years: num("experience", 0),
+      service_radius_km: num("radiusKm", 8),
+      available_now: String(q("availableNow").value || "true") === "true",
+      lat: state.lat,
+      lng: state.lng
+    });
+    if(!profile?.ok){
+      throw new Error(String(profile?.error || "agent_profile_failed"));
+    }
+
+    setStatus("Agent account activated successfully.", "ok");
+    setGpsStatus("Service location locked and profile linked", "ok");
+  }catch(err){
+    setStatus(`Failed: ${String(err?.message || err || "unknown")}`, "bad");
+  }
+}
+
+async function boot(){
+  ensureMap();
+  const user = await FAccountCore.getSessionUser(true);
+  if(!user){
+    location.href = "login.html";
+    return;
+  }
+  q("who").textContent = `${user.email || "Logged in"} (${user.id})`;
+  q("name").value = String(user?.user_metadata?.full_name || user?.user_metadata?.name || "").slice(0, 80);
+  if(user?.phone) q("phone").value = String(user.phone || "").slice(0, 30);
+  if(!q("title").value){
+    q("title").value = `${String(user?.user_metadata?.full_name || user?.user_metadata?.name || "Agent").slice(0, 40)} Service`;
+  }
+}
+
+q("sendOtpBtn").onclick = () => sendOtp().catch((err) => setOtpStatus(String(err?.message || "otp_send_failed"), "bad"));
+q("verifyOtpBtn").onclick = () => verifyOtp().catch((err) => setOtpStatus(String(err?.message || "otp_verify_failed"), "bad"));
+q("gpsBtn").onclick = () => useLiveGps().catch((err) => setGpsStatus(String(err?.message || "gps_failed"), "bad"));
+q("activateBtn").onclick = () => activate().catch((err) => setStatus(String(err?.message || "activation_failed"), "bad"));
+
+boot().catch((err) => {
+  setStatus(`Unable to load session: ${String(err?.message || err || "unknown")}`, "bad");
+});
+</script>
+</body>
+</html>

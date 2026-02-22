@@ -6976,7 +6976,7 @@ app.post("/api/local/rides/request", async (req, res) => {
   }
 });
 
-const RIDE_MATCH_RADIUS_KM = 3;
+const RIDE_MATCH_RADIUS_KM = 8;
 const RIDE_INITIAL_OFFER_COUNT = 40;
 const RIDE_REMATCH_BATCH_COUNT = 1;
 const RIDE_DRIVER_LOCATION_MAX_AGE_MS = 2 * 60 * 1000;

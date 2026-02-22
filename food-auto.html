@@ -17,10 +17,10 @@
   --brand:#ff6a00;
   --brand-dark:#d45100;
   --ink:#0f172a;
-  --ink-soft:#334155;
-  --muted:#64748b;
-  --line:#dbe2ef;
-  --surface:#f3f5fb;
+  --ink-soft:#5f3920;
+  --muted:#805131;
+  --line:#e8d7cb;
+  --surface:#fff6ef;
   --panel:#ffffff;
   --ok:#0f9f50;
   --bad:#b91c1c;
@@ -34,7 +34,7 @@
 html,body{height:100%}
 body{
   margin:0;
-  background:radial-gradient(1200px 600px at 50% -120px,#eceff7 0%,#f5f6f9 48%,#f0f2f8 100%);
+  background:radial-gradient(1200px 600px at 50% -120px,#ffe4cc 0%,#fff0e1 48%,#fff8f1 100%);
   color:var(--ink);
   font-family:"Manrope",sans-serif;
 }
@@ -65,7 +65,7 @@ body{
   display:flex;
   gap:8px;
   background:rgba(255,255,255,.94);
-  border:1px solid rgba(214,220,232,.92);
+  border:1px solid rgba(235,205,178,.92);
   border-radius:18px;
   padding:8px;
   box-shadow:0 14px 34px rgba(3,7,18,.24);
@@ -112,9 +112,9 @@ body{
   bottom:58px;
   z-index:25;
   background:rgba(255,255,255,.98);
-  border-top:1px solid #dde4f0;
+  border-top:1px solid #ecdccf;
   border-radius:26px 26px 0 0;
-  box-shadow:0 -14px 30px rgba(15,23,42,.2);
+  box-shadow:0 -14px 30px rgba(122,72,35,.22);
   max-height:58vh;
   overflow:auto;
   padding:14px 14px 18px;
@@ -142,7 +142,7 @@ body{
 .input,select,textarea{
   width:100%;
   padding:12px 13px;
-  border:1px solid #d6deea;
+  border:1px solid #e6d5c7;
   border-radius:12px;
   font-size:14px;
   font-family:"Manrope",sans-serif;
@@ -189,7 +189,7 @@ body{
 
 .vehicle-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}
 .vehicle-card{
-  border:1px solid #dae2f0;
+  border:1px solid #e8d9cb;
   border-radius:14px;
   padding:11px;
   cursor:pointer;
@@ -216,8 +216,8 @@ body{
   grid-template-columns:58px 1fr auto;
   gap:10px;
   align-items:center;
-  background:#f7f9fe;
-  border:1px solid #dfe6f2;
+  background:#fff8f2;
+  border:1px solid #eddacb;
   border-radius:14px;
   padding:10px;
 }
@@ -230,10 +230,10 @@ body{
   margin-top:8px;
 }
 .ride-metric{
-  border:1px solid #e1e7f2;
+  border:1px solid #ecdccf;
   border-radius:12px;
   padding:10px;
-  background:#f8faff;
+  background:#fff8f2;
 }
 .ride-metric b{
   display:block;
@@ -607,7 +607,7 @@ body{
         <button id="foodTypeGroceryBtn" class="btn gray" type="button">Grocery</button>
       </div>
     </div>
-    <div class="muted" id="foodLocationNote" style="margin-top:6px">Fetching nearby stores in 5km based on your live location...</div>
+    <div class="muted" id="foodLocationNote" style="margin-top:6px">Fetching nearby stores in 8km based on your live location...</div>
     <div id="foodList" style="margin-top:10px"></div>
   </div>
 
@@ -656,7 +656,7 @@ body{
       <button id="agentRefreshBtn" class="btn gray" type="button">Refresh</button>
     </div>
     <div id="agentCategoryGrid" class="vehicle-list" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-top:10px"></div>
-    <div class="muted" id="agentLocationNote" style="margin-top:8px">Showing available agents in 5km.</div>
+    <div class="muted" id="agentLocationNote" style="margin-top:8px">Showing available agents in 8km.</div>
     <div id="agentList" style="margin-top:10px"></div>
   </div>
 
@@ -700,6 +700,9 @@ body{
 <script>
 const supa = window.supa || window.novaCreateSupabaseClient();
 const RIDE_STATE_KEY = "nova_ride_state_v3";
+const RIDE_NEARBY_RADIUS_KM = 8;
+const FOOD_NEARBY_RADIUS_KM = 8;
+const AGENT_NEARBY_RADIUS_KM = 8;
 const PRICING = {
   bike: { label: "Bike", base: 30, perKm: 8, perMin: 1.5, speed: 28 },
   auto: { label: "Auto", base: 45, perKm: 11, perMin: 2, speed: 24 },
@@ -1009,7 +1012,7 @@ async function reverseGeocode(lat, lng){
       cache: "no-store",
       headers: {
         "Accept": "application/json",
-        "Accept-Language": "en-IN,en;q=0.9"
+        "Accept-Language": "en,en-US;q=0.9"
       }
     });
     if(res.ok){
@@ -1084,41 +1087,49 @@ async function searchLandmarkSuggestions(query, limitCount){
   const limit = Math.max(1, Math.min(8, Number(limitCount || 6)));
   if(q.length < 2) return [];
   const merged = [];
-  try{
+  const collectFromResponse = (rows) => {
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+      const a = row?.address || {};
+      const name = buildPlaceName([
+        a.road || a.neighbourhood || a.suburb || a.hamlet || a.allotments || "",
+        a.city || a.town || a.village || a.municipality || a.county || "",
+        a.state_district || a.state || "",
+        a.postcode || "",
+        a.country || ""
+      ]) || String(row?.display_name || "").slice(0, 140);
+      const item = normalizeSuggestion(name, row?.lat, row?.lon);
+      if(item) merged.push(item);
+    });
+  };
+  const fetchSuggestions = async (withLocalBias) => {
     const nom = new URL("https://nominatim.openstreetmap.org/search");
     nom.searchParams.set("format", "jsonv2");
     nom.searchParams.set("addressdetails", "1");
     nom.searchParams.set("limit", String(limit));
-    nom.searchParams.set("countrycodes", "in");
     nom.searchParams.set("q", q);
-    if(Number.isFinite(state.liveLat) && Number.isFinite(state.liveLng)){
+    if(withLocalBias && Number.isFinite(state.liveLat) && Number.isFinite(state.liveLng)){
       const lat = Number(state.liveLat);
       const lng = Number(state.liveLng);
       const dLat = 0.35;
       const dLng = 0.35;
       nom.searchParams.set("viewbox", `${lng - dLng},${lat + dLat},${lng + dLng},${lat - dLat}`);
-      nom.searchParams.set("bounded", "0");
+      nom.searchParams.set("bounded", "1");
     }
     const res = await fetch(nom.toString(), {
       cache: "no-store",
       headers: {
         "Accept": "application/json",
-        "Accept-Language": "en-IN,en;q=0.9"
+        "Accept-Language": "en,en-US;q=0.9"
       }
     });
-    if(res.ok){
-      const rows = await res.json().catch(() => []);
-      (Array.isArray(rows) ? rows : []).forEach((row) => {
-        const a = row?.address || {};
-        const name = buildPlaceName([
-          a.road || a.neighbourhood || a.suburb || a.hamlet || a.allotments || "",
-          a.city || a.town || a.village || a.municipality || a.county || "",
-          a.state_district || a.state || "",
-          a.postcode || ""
-        ]) || String(row?.display_name || "").slice(0, 140);
-        const item = normalizeSuggestion(name, row?.lat, row?.lon);
-        if(item) merged.push(item);
-      });
+    if(!res.ok) return;
+    const rows = await res.json().catch(() => []);
+    collectFromResponse(rows);
+  };
+  try{
+    await fetchSuggestions(true);
+    if(dedupeSuggestions(merged).length < limit){
+      await fetchSuggestions(false);
     }
   }catch(_){ }
   return dedupeSuggestions(merged).slice(0, limit);
@@ -1575,7 +1586,7 @@ async function fetchNearbyDrivers(){
   if(now - state.lastNearbyAt < 2500) return;
   state.lastNearbyAt = now;
 
-  const res = await apiGet(`/api/local/riders/nearby?lat=${encodeURIComponent(String(state.pickupLat))}&lng=${encodeURIComponent(String(state.pickupLng))}&radius_km=3&limit=20`);
+  const res = await apiGet(`/api/local/riders/nearby?lat=${encodeURIComponent(String(state.pickupLat))}&lng=${encodeURIComponent(String(state.pickupLng))}&radius_km=${encodeURIComponent(String(RIDE_NEARBY_RADIUS_KM))}&limit=40`);
   if(!res?.ok){
     setNearbyInfo("Nearby drivers unavailable right now");
     if(nearbyLayer) nearbyLayer.clearLayers();
@@ -1599,7 +1610,7 @@ async function fetchNearbyDrivers(){
     const distance = Number(driver?.distance_km);
     marker.bindTooltip(Number.isFinite(distance) ? `${store} - ${distance.toFixed(2)} km` : store);
   });
-  setNearbyInfo(`${drivers.length} nearby driver(s) in 3 km`);
+  setNearbyInfo(`${drivers.length} nearby driver(s) in ${RIDE_NEARBY_RADIUS_KM} km`);
 }
 
 function startNearbyLoop(){
@@ -2427,10 +2438,10 @@ async function loadFoodListings(){
   try{
     const ctx = await ensureLocationForServices();
     updateFoodAddressPrefill();
-    const res = await apiGet(`/api/local/nearby?type=${encodeURIComponent(foodState.type)}&lat=${encodeURIComponent(String(ctx.lat))}&lng=${encodeURIComponent(String(ctx.lng))}&radius_km=5&limit=40`);
+    const res = await apiGet(`/api/local/nearby?type=${encodeURIComponent(foodState.type)}&lat=${encodeURIComponent(String(ctx.lat))}&lng=${encodeURIComponent(String(ctx.lng))}&radius_km=${encodeURIComponent(String(FOOD_NEARBY_RADIUS_KM))}&limit=60`);
     foodState.listings = Array.isArray(res?.listings) ? res.listings : [];
     if(note){
-      note.textContent = `${foodState.listings.length} ${foodState.type} partner(s) found in 5km`;
+      note.textContent = `${foodState.listings.length} ${foodState.type} partner(s) found in ${FOOD_NEARBY_RADIUS_KM}km`;
     }
     renderFoodListings();
     if(foodState.selectedListing){
@@ -2664,10 +2675,10 @@ async function loadNearbyAgents(){
   if(note) note.textContent = "Loading nearby agents...";
   try{
     const ctx = await ensureLocationForServices();
-    const out = await apiGet(`/api/local/agents/nearby?service_category=${encodeURIComponent(agentState.activeCategory)}&lat=${encodeURIComponent(String(ctx.lat))}&lng=${encodeURIComponent(String(ctx.lng))}&radius_km=5`);
+    const out = await apiGet(`/api/local/agents/nearby?service_category=${encodeURIComponent(agentState.activeCategory)}&lat=${encodeURIComponent(String(ctx.lat))}&lng=${encodeURIComponent(String(ctx.lng))}&radius_km=${encodeURIComponent(String(AGENT_NEARBY_RADIUS_KM))}`);
     agentState.agents = Array.isArray(out?.agents) ? out.agents : [];
     if(note){
-      note.textContent = `${agentState.agents.length} ${prettyLabel(agentState.activeCategory)} agent(s) found in 5km`;
+      note.textContent = `${agentState.agents.length} ${prettyLabel(agentState.activeCategory)} agent(s) found in ${AGENT_NEARBY_RADIUS_KM}km`;
     }
   }catch(_){
     agentState.agents = [];

@@ -1,0 +1,353 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>F-Account Seller</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="global.js"></script>
+<script src="public-config.js"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="f-account-theme.css">
+</head>
+<body>
+<div class="top">
+  <b>Seller Account Setup</b>
+  <div class="top-actions">
+    <button class="btn soft" type="button" onclick="location.href='F-account.html'">F-Account Hub</button>
+    <button class="btn dark" type="button" onclick="location.href='local-seller.html'">Seller Panel</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <section class="hero">
+    <b>Food and grocery seller onboarding</b>
+    <p>Flow: OTP verify, lock shop live location, pay INR 500 listing fee, then activate unlimited product listing profile.</p>
+    <div class="hero-pills">
+      <span class="pill">Role: Seller</span>
+      <span class="pill">Fee: INR 500 once</span>
+      <span class="pill">Monthly share: 10%</span>
+      <span class="pill">Unlimited item listing</span>
+    </div>
+  </section>
+
+  <div class="layout">
+    <div>
+      <section class="card">
+        <div class="title"><b>1) Identity</b><span class="tag">Required</span></div>
+        <div id="who" class="muted" style="margin-top:8px">Checking login...</div>
+        <div class="grid-2" style="margin-top:8px">
+          <input id="name" class="field" placeholder="Owner full name">
+          <input id="phone" class="field" placeholder="Phone (+91...)" inputmode="tel">
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="title"><b>2) OTP Verification</b><span class="tag">Mandatory</span></div>
+        <div class="grid-2" style="margin-top:8px">
+          <button id="sendOtpBtn" class="btn soft" type="button">Send OTP</button>
+          <div style="display:flex;gap:8px">
+            <input id="otp" class="field" placeholder="6-digit OTP" inputmode="numeric">
+            <button id="verifyOtpBtn" class="btn ok" type="button">Verify</button>
+          </div>
+        </div>
+        <div id="otpStatus" class="status">OTP not sent</div>
+      </section>
+
+      <section class="card">
+        <div class="title"><b>3) Shop Live Location</b><span class="tag">Mandatory</span></div>
+        <div class="grid-2" style="margin-top:8px">
+          <input id="address" class="field" placeholder="Auto-detected address">
+          <button id="gpsBtn" class="btn brand" type="button">Use Live GPS</button>
+        </div>
+        <div id="gpsStatus" class="status">GPS not locked</div>
+        <div id="map" class="map"></div>
+      </section>
+
+      <section class="card">
+        <div class="title"><b>4) Seller Details</b><span class="tag">Store</span></div>
+        <div class="grid-2" style="margin-top:8px">
+          <select id="listingType" class="select">
+            <option value="food" selected>Food</option>
+            <option value="grocery">Grocery</option>
+          </select>
+          <input id="storeName" class="field" placeholder="Store name">
+        </div>
+        <div class="grid-3" style="margin-top:8px">
+          <input id="deliveryCharge" class="field" type="number" placeholder="Delivery charge INR">
+          <input id="minOrder" class="field" type="number" placeholder="Minimum order INR">
+          <input id="openTime" class="field" placeholder="Open time (e.g. 08:00)">
+        </div>
+        <div class="grid-2" style="margin-top:8px">
+          <input id="closeTime" class="field" placeholder="Close time (e.g. 23:00)">
+          <input id="imageUrl" class="field" placeholder="Store image URL (optional)">
+        </div>
+        <div class="note">Seller role active hone ke baad food/grocery section me live location ke saath unlimited products list kar sakte ho.</div>
+      </section>
+    </div>
+
+    <aside>
+      <section class="card">
+        <div class="title"><b>5) Activate Seller Account</b><span class="tag">Final</span></div>
+        <div class="list">
+          <div class="list-row"><b>Listing fee</b><span>INR 500 one-time via Razorpay</span></div>
+          <div class="list-row"><b>Monthly share</b><span>10% of completed monthly sales</span></div>
+          <div class="list-row"><b>Post activation</b><span>Shop details and location visible to nearby customers</span></div>
+        </div>
+        <button id="activateBtn" class="btn brand full" style="margin-top:10px" type="button">Pay INR 500 and Activate Seller</button>
+        <div id="status" class="status">Ready</div>
+      </section>
+
+      <section class="card">
+        <div class="title"><b>Quick Actions</b><span class="tag">Go Live</span></div>
+        <div class="grid-2" style="margin-top:8px">
+          <button class="btn brand" type="button" onclick="location.href='local-seller.html'">Open Seller Panel</button>
+          <button class="btn dark" type="button" onclick="location.href='food-auto.html'">Open Services</button>
+        </div>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<script src="f-account-core.js"></script>
+<script>
+const q = (id) => document.getElementById(id);
+const state = {
+  otpToken: "",
+  otpVerified: false,
+  lat: null,
+  lng: null,
+  map: null,
+  marker: null
+};
+
+function setStatus(msg, kind){
+  const el = q("status");
+  el.className = "status";
+  if(kind === "ok") el.classList.add("ok");
+  if(kind === "bad") el.classList.add("bad");
+  el.textContent = String(msg || "");
+}
+
+function setOtpStatus(msg, kind){
+  const el = q("otpStatus");
+  el.className = "status";
+  if(kind === "ok") el.classList.add("ok");
+  if(kind === "bad") el.classList.add("bad");
+  el.textContent = String(msg || "");
+}
+
+function setGpsStatus(msg, kind){
+  const el = q("gpsStatus");
+  el.className = "status";
+  if(kind === "ok") el.classList.add("ok");
+  if(kind === "bad") el.classList.add("bad");
+  el.textContent = String(msg || "");
+}
+
+function num(id, fallback){
+  const n = Number(q(id).value);
+  return Number.isFinite(n) ? n : Number(fallback || 0);
+}
+
+function ensureMap(){
+  if(state.map) return;
+  state.map = L.map("map", { zoomControl: true }).setView([20.5937, 78.9629], 5);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(state.map);
+  state.map.on("click", (event) => {
+    const lat = Number(event?.latlng?.lat);
+    const lng = Number(event?.latlng?.lng);
+    setLocation(lat, lng, true).catch(() => {});
+  });
+}
+
+async function setLocation(lat, lng, center){
+  if(!FAccountCore.isValidLatLng(lat, lng)){
+    setGpsStatus("Invalid location", "bad");
+    return;
+  }
+  state.lat = Number(lat);
+  state.lng = Number(lng);
+  if(!state.marker){
+    state.marker = L.marker([state.lat, state.lng], { draggable: true }).addTo(state.map);
+    state.marker.on("dragend", () => {
+      const pos = state.marker.getLatLng();
+      setLocation(Number(pos.lat), Number(pos.lng), false).catch(() => {});
+    });
+  }else{
+    state.marker.setLatLng([state.lat, state.lng]);
+  }
+  if(center){
+    state.map.setView([state.lat, state.lng], Math.max(14, state.map.getZoom()));
+  }
+  const address = await FAccountCore.reverseGeocode(state.lat, state.lng);
+  if(address) q("address").value = address;
+}
+
+async function useLiveGps(){
+  ensureMap();
+  if(!navigator.geolocation){
+    setGpsStatus("GPS unsupported on this device", "bad");
+    return;
+  }
+  setGpsStatus("Reading live GPS...", "");
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    const lat = Number(pos?.coords?.latitude);
+    const lng = Number(pos?.coords?.longitude);
+    const acc = Math.round(Number(pos?.coords?.accuracy || 0));
+    if(!FAccountCore.isValidLatLng(lat, lng)){
+      setGpsStatus("Location read failed", "bad");
+      return;
+    }
+    await setLocation(lat, lng, true);
+    setGpsStatus(`GPS locked (${acc}m accuracy)`, "ok");
+  }, (err) => {
+    setGpsStatus(`Permission required: ${String(err?.message || "denied")}`, "bad");
+  }, { enableHighAccuracy: true, timeout: 25000, maximumAge: 0 });
+}
+
+async function sendOtp(){
+  const user = await FAccountCore.requireSessionUser();
+  const phone = FAccountCore.normalizePhone(q("phone").value);
+  if(!phone){
+    setOtpStatus("Enter valid phone first", "bad");
+    return;
+  }
+  q("phone").value = phone;
+  setOtpStatus("Sending OTP...", "");
+  const out = await FAccountCore.sendProviderOtp(user.id, phone);
+  if(!out?.ok){
+    setOtpStatus(`OTP send failed: ${String(out?.error || "otp_send_failed")}`, "bad");
+    return;
+  }
+  state.otpToken = String(out.otp_token || "");
+  state.otpVerified = false;
+  setOtpStatus("OTP sent", "ok");
+}
+
+async function verifyOtp(){
+  const user = await FAccountCore.requireSessionUser();
+  const otp = String(q("otp").value || "").trim();
+  if(!state.otpToken){
+    setOtpStatus("Send OTP first", "bad");
+    return;
+  }
+  if(!/^\d{6}$/.test(otp)){
+    setOtpStatus("Enter valid 6-digit OTP", "bad");
+    return;
+  }
+  const out = await FAccountCore.verifyProviderOtp(user.id, state.otpToken, otp);
+  if(!out?.ok){
+    state.otpVerified = false;
+    setOtpStatus(`OTP verify failed: ${String(out?.error || "invalid_otp")}`, "bad");
+    return;
+  }
+  state.otpVerified = true;
+  setOtpStatus("OTP verified", "ok");
+}
+
+async function activate(){
+  const user = await FAccountCore.requireSessionUser();
+  const ownerName = String(q("name").value || "").trim();
+  const phone = FAccountCore.normalizePhone(q("phone").value);
+  const listingType = String(q("listingType").value || "food").trim().toLowerCase();
+  const storeName = String(q("storeName").value || "").trim();
+
+  if(!ownerName || !phone){
+    setStatus("Name and valid phone are required", "bad");
+    return;
+  }
+  if(!state.otpVerified || !state.otpToken){
+    setStatus("OTP verification is required", "bad");
+    return;
+  }
+  if(!FAccountCore.isValidLatLng(state.lat, state.lng)){
+    setStatus("Shop live location is required", "bad");
+    return;
+  }
+  if(!storeName){
+    setStatus("Store name is required", "bad");
+    return;
+  }
+
+  q("phone").value = phone;
+  setStatus("Opening Razorpay payment...", "");
+
+  try{
+    const payment = await FAccountCore.payProviderListingFee({
+      userId: user.id,
+      role: "seller",
+      name: ownerName,
+      phone,
+      email: user.email || ""
+    });
+
+    setStatus("Saving seller role...", "");
+    const enroll = await FAccountCore.enrollRole({
+      user_id: user.id,
+      role: "seller",
+      display_name: ownerName,
+      phone,
+      fee_paid: true,
+      payment_ref: String(payment?.payment_ref || ""),
+      otp_token: state.otpToken
+    });
+    if(!enroll?.ok){
+      throw new Error(String(enroll?.error || "role_enroll_failed"));
+    }
+
+    const listing = await FAccountCore.upsertSellerListing({
+      user_id: user.id,
+      listing_type: listingType,
+      store_name: storeName,
+      phone,
+      image_url: String(q("imageUrl").value || "").trim(),
+      lat: state.lat,
+      lng: state.lng,
+      open_now: true,
+      delivery_charge_inr: num("deliveryCharge", 0),
+      minimum_order_inr: num("minOrder", 0),
+      open_time: String(q("openTime").value || "").trim(),
+      close_time: String(q("closeTime").value || "").trim(),
+      self_delivery: true
+    });
+    if(!listing?.ok){
+      throw new Error(String(listing?.error || "seller_listing_failed"));
+    }
+
+    setStatus("Seller account activated successfully.", "ok");
+    setGpsStatus("Shop location locked and profile linked", "ok");
+  }catch(err){
+    setStatus(`Failed: ${String(err?.message || err || "unknown")}`, "bad");
+  }
+}
+
+async function boot(){
+  ensureMap();
+  const user = await FAccountCore.getSessionUser(true);
+  if(!user){
+    location.href = "login.html";
+    return;
+  }
+  q("who").textContent = `${user.email || "Logged in"} (${user.id})`;
+  q("name").value = String(user?.user_metadata?.full_name || user?.user_metadata?.name || "").slice(0, 80);
+  if(user?.phone) q("phone").value = String(user.phone || "").slice(0, 30);
+}
+
+q("sendOtpBtn").onclick = () => sendOtp().catch((err) => setOtpStatus(String(err?.message || "otp_send_failed"), "bad"));
+q("verifyOtpBtn").onclick = () => verifyOtp().catch((err) => setOtpStatus(String(err?.message || "otp_verify_failed"), "bad"));
+q("gpsBtn").onclick = () => useLiveGps().catch((err) => setGpsStatus(String(err?.message || "gps_failed"), "bad"));
+q("activateBtn").onclick = () => activate().catch((err) => setStatus(String(err?.message || "activation_failed"), "bad"));
+
+boot().catch((err) => {
+  setStatus(`Unable to load session: ${String(err?.message || err || "unknown")}`, "bad");
+});
+</script>
+</body>
+</html>
