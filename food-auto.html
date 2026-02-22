@@ -343,6 +343,16 @@ body{
 #agentBookingsList .list-card{
   border-color:#dbe4fb;
 }
+.agent-art{
+  display:block;
+  width:100%;
+  height:120px;
+  border-radius:12px;
+  object-fit:cover;
+  border:1px solid #dce4fb;
+  background:#eef2ff;
+  margin-bottom:9px;
+}
 .list-title{
   font-size:15px;
   font-weight:800;
@@ -461,6 +471,43 @@ body{
   color:var(--brand);
   font-weight:800;
   background:#fff2e8;
+}
+
+.consent-overlay{
+  position:fixed;
+  inset:0;
+  z-index:140;
+  background:rgba(2,6,23,.55);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:16px;
+}
+.consent-card{
+  width:min(560px,100%);
+  background:#fff;
+  border:1px solid #e7d7ca;
+  border-radius:18px;
+  box-shadow:0 26px 56px rgba(15,23,42,.32);
+  padding:16px;
+}
+.consent-title{
+  font-size:18px;
+  font-weight:800;
+  color:#111827;
+}
+.consent-desc{
+  margin-top:8px;
+  font-size:13px;
+  line-height:1.5;
+  color:#334155;
+  font-weight:600;
+}
+.consent-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+  margin-top:14px;
 }
 
 .suggest-popup{
@@ -699,6 +746,16 @@ body{
   <button class="nav-item" data-nav="account">F-Account</button>
 </nav>
 
+<div id="serviceConsentOverlay" class="consent-overlay hide">
+  <div class="consent-card">
+    <div id="serviceConsentTitle" class="consent-title">Service Notice</div>
+    <div id="serviceConsentDesc" class="consent-desc"></div>
+    <div class="consent-actions">
+      <button id="serviceConsentAgreeBtn" type="button" class="btn brand">Agree & Continue</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const supa = window.supa || window.novaCreateSupabaseClient();
 const RIDE_STATE_KEY = "nova_ride_state_v3";
@@ -767,6 +824,226 @@ const agentState = {
   bookings: []
 };
 
+const SERVICE_NOTICE_KEY = "nova_service_notice_ack_v1";
+const SERVICE_NOTICE_ALIAS = Object.freeze({
+  brx: "hi",
+  doi: "hi",
+  ks: "hi",
+  kok: "hi",
+  mai: "hi",
+  mni: "hi",
+  sa: "hi",
+  sat: "hi",
+  sd: "hi"
+});
+const SERVICE_NOTICE_COPY = Object.freeze({
+  en: {
+    title: "Before You Continue",
+    message: "NovaGapp {service} is in an early rollout stage. Because resources are limited, area coverage, response speed, live tracking accuracy, and partner availability may vary. Tap Agree to continue with this understanding.",
+    back: "Back",
+    agree: "Agree and Continue",
+    services: { ride: "Ride services", food: "Food & grocery services", agent: "Agent services" }
+  },
+  hi: {
+    title: "Aage Badhne Se Pehle",
+    message: "NovaGapp {service} abhi shuruaati stage me hai. Resources ki kami ke kaaran area coverage, response speed, live tracking accuracy aur partner availability jagah ke hisab se badal sakti hai. Samajhkar continue karne ke liye Agree dabayen.",
+    back: "Back",
+    agree: "Agree aur Continue",
+    services: { ride: "Ride service", food: "Food aur grocery service", agent: "Agent service" }
+  },
+  bn: {
+    title: "Age Baranor Age",
+    message: "NovaGapp {service} ekdom shurur porjay e ache. Resource kom thakar karone coverage, response speed, live tracking accuracy ebong partner availability elaka onujayi poriborton hote pare. Bujhe Agree kore aage barun.",
+    back: "Back",
+    agree: "Agree kore Continue",
+    services: { ride: "Ride service", food: "Food o grocery service", agent: "Agent service" }
+  },
+  gu: {
+    title: "Aagal Vadhata Pela",
+    message: "NovaGapp ni {service} halma sharuatik charan ma chhe. Resources simit hova karane coverage, response speed, live tracking accuracy ane partner availability sthal anusar badlai shake chhe. Samji ne Agree kari aagal vadho.",
+    back: "Back",
+    agree: "Agree kari Continue",
+    services: { ride: "Ride service", food: "Food ane grocery service", agent: "Agent service" }
+  },
+  mr: {
+    title: "Pudhe Janayapurvi",
+    message: "NovaGapp chi {service} sadhya suruvatichya tapyat aahe. Resources maryadit aslyamule coverage, response speed, live tracking accuracy ani partner availability pradeshanuar badlu shakte. Samjun gheun Agree kara ani pudhe ja.",
+    back: "Back",
+    agree: "Agree kara ani Continue",
+    services: { ride: "Ride service", food: "Food ani grocery service", agent: "Agent service" }
+  },
+  ta: {
+    title: "Munnadi Selvatharku Mun",
+    message: "NovaGapp in {service} ippothu thodakkam nilaiyil ullathu. Kuraiyana resources karanam coverage, response speed, live tracking accuracy matrum partner availability idam idam maaralam. Ithai purinthu Agree seithu thodarungal.",
+    back: "Back",
+    agree: "Agree seithu Continue",
+    services: { ride: "Ride service", food: "Food matrum grocery service", agent: "Agent service" }
+  },
+  te: {
+    title: "Munduku Velledaniki Mundu",
+    message: "NovaGapp {service} ippudu prarambha dashalo undi. Resources takkuvaga undadam valla coverage, response speed, live tracking accuracy mariyu partner availability prantam batti maaravachu. Idi ardham chesukoni Agree nokki continue cheyyandi.",
+    back: "Back",
+    agree: "Agree chesi Continue",
+    services: { ride: "Ride service", food: "Food mariyu grocery service", agent: "Agent service" }
+  },
+  ml: {
+    title: "Munnottu Pokunnathinu Munpe",
+    message: "NovaGapp {service} ippol thudakkam ghattathil aanu. Resources kuravayath kond coverage, response speed, live tracking accuracy, partner availability ennivayil sthalabhedam undakum. Ith manassilakki Agree cheythu continue cheyyuka.",
+    back: "Back",
+    agree: "Agree cheythu Continue",
+    services: { ride: "Ride service", food: "Food um grocery service um", agent: "Agent service" }
+  },
+  kn: {
+    title: "Mundakke Hoguva Munche",
+    message: "NovaGapp na {service} iga aarambhika hantadalli ide. Simita resources inda coverage, response speed, live tracking accuracy mattu partner availability pradesha prakaravagi badalagabahudu. Idanna artha maadkondhu Agree maadi continue madi.",
+    back: "Back",
+    agree: "Agree maadi Continue",
+    services: { ride: "Ride service", food: "Food mattu grocery service", agent: "Agent service" }
+  },
+  pa: {
+    title: "Agge Vadhan To Pehla",
+    message: "NovaGapp di {service} hun shuruaati stage vich hai. Resource ghatt hon karke coverage, response speed, live tracking accuracy te partner availability ilaqe de hisaab naal badal sakdi hai. Samajh ke Agree te click karo te continue karo.",
+    back: "Back",
+    agree: "Agree karke Continue",
+    services: { ride: "Ride service", food: "Food te grocery service", agent: "Agent service" }
+  },
+  or: {
+    title: "Aage Jiba Purbaru",
+    message: "NovaGapp ra {service} ebe arambha avasthare achhi. Resource simita thibaru coverage, response speed, live tracking accuracy ebam partner availability sthana anusare badaliba. Eha bujhi Agree kari continue karantu.",
+    back: "Back",
+    agree: "Agree kari Continue",
+    services: { ride: "Ride service", food: "Food o grocery service", agent: "Agent service" }
+  },
+  as: {
+    title: "Age Barhar Aage",
+    message: "NovaGapp r {service} etiya arambhik porjayot ase. Resource kom thakar babe coverage, response speed, live tracking accuracy aru partner availability area anusare poriborton hobo pare. Buji Agree kori continue kori dibo.",
+    back: "Back",
+    agree: "Agree kori Continue",
+    services: { ride: "Ride service", food: "Food aru grocery service", agent: "Agent service" }
+  },
+  ne: {
+    title: "Agadi Badhnu Bhanda Agadi",
+    message: "NovaGapp ko {service} ahile suru charan ma chha. Resource simit bhayeko karan le coverage, response speed, live tracking accuracy ra partner availability thau anusar farak parna sakcha. Yo bujera Agree thichera continue garnuhos.",
+    back: "Back",
+    agree: "Agree garera Continue",
+    services: { ride: "Ride service", food: "Food ra grocery service", agent: "Agent service" }
+  },
+  ur: {
+    title: "Agay Barhne Se Pehle",
+    message: "NovaGapp ki {service} abhi ibtidayi marhalay mein hai. Mehdood resources ki wajah se coverage, response speed, live tracking accuracy aur partner availability ilaqay ke mutabiq tabdeel ho sakti hai. Is samajh ke sath Agree karke continue karein.",
+    back: "Back",
+    agree: "Agree karke Continue",
+    services: { ride: "Ride service", food: "Food aur grocery service", agent: "Agent service" }
+  },
+  es: {
+    title: "Antes De Continuar",
+    message: "NovaGapp {service} esta en una etapa inicial. Debido a recursos limitados, la cobertura por zona, la velocidad de respuesta, la precision del rastreo en vivo y la disponibilidad de socios pueden variar. Pulse Agree para continuar con este entendimiento.",
+    back: "Back",
+    agree: "Agree and Continue",
+    services: { ride: "servicio de viajes", food: "servicio de comida y abarrotes", agent: "servicio de agentes" }
+  },
+  fr: {
+    title: "Avant De Continuer",
+    message: "NovaGapp {service} est encore en phase de lancement. Avec des ressources limitees, la couverture locale, la vitesse de reponse, la precision du suivi en direct et la disponibilite des partenaires peuvent varier. Appuyez sur Agree pour continuer en connaissance de cause.",
+    back: "Back",
+    agree: "Agree and Continue",
+    services: { ride: "service de trajet", food: "service nourriture et epicerie", agent: "service d'agents" }
+  },
+  de: {
+    title: "Bevor Sie Fortfahren",
+    message: "NovaGapp {service} befindet sich noch in einer fruhen Einfuhrungsphase. Wegen begrenzter Ressourcen konnen Gebietsabdeckung, Reaktionsgeschwindigkeit, Genauigkeit des Live-Trackings und Partnerverfugbarkeit variieren. Tippen Sie auf Agree, um fortzufahren.",
+    back: "Back",
+    agree: "Agree and Continue",
+    services: { ride: "Fahrdienst", food: "Essen- und Lebensmittelservice", agent: "Agentenservice" }
+  },
+  pt: {
+    title: "Antes De Continuar",
+    message: "A {service} da NovaGapp ainda esta em fase inicial. Devido a recursos limitados, cobertura por area, velocidade de resposta, precisao do rastreamento ao vivo e disponibilidade de parceiros podem variar. Toque em Agree para continuar com esse entendimento.",
+    back: "Back",
+    agree: "Agree and Continue",
+    services: { ride: "servico de corrida", food: "servico de comida e mercado", agent: "servico de agente" }
+  },
+  ru: {
+    title: "Pered Prodolzheniem",
+    message: "NovaGapp {service} nahoditsya na rannei stadii zapuska. Iz-za ogranichennykh resursov pokrytie po rayonam, skorost otveta, tochnost live-otslezhivaniya i dostupnost partnerov mogut otlichatsya. Nazhmite Agree, chtoby prodolzhit.",
+    back: "Back",
+    agree: "Agree and Continue",
+    services: { ride: "servis poezdok", food: "servis edy i produktov", agent: "servis agentov" }
+  },
+  ja: {
+    title: "Kono Saki Ni Susumu Mae Ni",
+    message: "NovaGapp no {service} wa genzai shutcho no shoki dankai desu. Resource ga kagirarete iru tame, area coverage, response speed, live tracking accuracy, partner availability wa chiiki ni yotte kotonaru baai ga arimasu. Rikai no ue Agree de tsuzukete kudasai.",
+    back: "Back",
+    agree: "Agree and Continue",
+    services: { ride: "ride service", food: "food and grocery service", agent: "agent service" }
+  },
+  ko: {
+    title: "Gyesokhagi Jeone",
+    message: "NovaGapp {service}neun jigeum chogi launch dangyeimnida. Jagiwon jehan ttaemune jiyeok coverage, response speed, live tracking accuracy, partner availabilityga dareul su itsseumnida. Ihaehasigo Agreereul nureugo gyesokhaejuseyo.",
+    back: "Back",
+    agree: "Agree and Continue",
+    services: { ride: "ride service", food: "food and grocery service", agent: "agent service" }
+  },
+  it: {
+    title: "Prima Di Continuare",
+    message: "NovaGapp {service} e ancora in fase iniziale. A causa di risorse limitate, copertura area, velocita di risposta, precisione del tracciamento live e disponibilita dei partner possono variare. Premi Agree per continuare con questa consapevolezza.",
+    back: "Back",
+    agree: "Agree and Continue",
+    services: { ride: "servizio corse", food: "servizio cibo e spesa", agent: "servizio agenti" }
+  },
+  tr: {
+    title: "Devam Etmeden Once",
+    message: "NovaGapp {service} su anda erken asamada. Sinirli kaynaklar nedeniyle bolgesel kapsama, yanit hizi, canli takip dogrulugu ve partner uygunlugu degisebilir. Bunu anlayarak devam etmek icin Agree'e basin.",
+    back: "Back",
+    agree: "Agree and Continue",
+    services: { ride: "surus hizmeti", food: "yemek ve market hizmeti", agent: "ajan hizmeti" }
+  },
+  id: {
+    title: "Sebelum Melanjutkan",
+    message: "Layanan {service} NovaGapp masih pada tahap awal. Karena sumber daya terbatas, cakupan area, kecepatan respons, akurasi pelacakan langsung, dan ketersediaan mitra dapat berbeda. Tekan Agree untuk lanjut dengan pemahaman ini.",
+    back: "Back",
+    agree: "Agree and Continue",
+    services: { ride: "layanan ride", food: "layanan food dan grocery", agent: "layanan agent" }
+  },
+  th: {
+    title: "Kon Doen Tor Gon",
+    message: "NovaGapp {service} yang yu nai rabeep roemton. Duey sapayakon chamkat, kan khropkhlum phuenthi, khwam reo nai kan top sanong, khwam maen yam khong live tracking lae khwam phrom khong phu hai borikan at taek tang tam phuenthi. Kot Agree phuea damnoen tor.",
+    back: "Back",
+    agree: "Agree and Continue",
+    services: { ride: "ride service", food: "food and grocery service", agent: "agent service" }
+  },
+  vi: {
+    title: "Truoc Khi Tiep Tuc",
+    message: "Dich vu {service} cua NovaGapp dang o giai doan dau. Do nguon luc han che, pham vi khu vuc, toc do phan hoi, do chinh xac theo doi truc tiep va do san co cua doi tac co the thay doi. Nhan Agree de tiep tuc voi su hieu ro nay.",
+    back: "Back",
+    agree: "Agree and Continue",
+    services: { ride: "dich vu di chuyen", food: "dich vu an uong va tap hoa", agent: "dich vu agent" }
+  },
+  ar: {
+    title: "Qabla Almutabaea",
+    message: "khidmat {service} fi NovaGapp ma zalat fi marhalat ibtida'iya. bisabab mahdudiyat almawarid qad tataghayyar taghtiyat almanaatiq wasur'at alistijaba wadaqat altatabu' almubashir watawafur alshuraka. idghat Agree lilmutabaea.",
+    back: "Back",
+    agree: "Agree and Continue",
+    services: { ride: "khidmat alrihlaat", food: "khidmat altaeam walbaqala", agent: "khidmat alwakala" }
+  },
+  zh: {
+    title: "Ji Xu Zhi Qian",
+    message: "NovaGapp de {service} muqian rengchu yu qibu jieduan. Youyu ziyuan youxian, bu tong diqu de fuwu fugai, xiangying sudu, shishi zhuizong zhunquedu he huoban keyongxing keneng hui bianhua. Dianji Agree biaoshi lijie hou jixu.",
+    back: "Back",
+    agree: "Agree and Continue",
+    services: { ride: "chuxing fuwu", food: "meishi he zazhi fuwu", agent: "daili fuwu" }
+  }
+});
+const AGENT_ARTWORK_META = Object.freeze({
+  electrician: { code: "EL", label: "Electrician", colorA: "#204ecf", colorB: "#8cb8ff" },
+  plumber: { code: "PL", label: "Plumber", colorA: "#0f6b7d", colorB: "#65cfe0" },
+  ac_repair: { code: "AC", label: "AC Repair", colorA: "#315f9d", colorB: "#98c7ff" },
+  carpenter: { code: "CP", label: "Carpenter", colorA: "#8c4a15", colorB: "#efb16e" },
+  mechanic: { code: "MC", label: "Mechanic", colorA: "#3f3f46", colorB: "#a1a1aa" },
+  painter: { code: "PT", label: "Painter", colorA: "#a43781", colorB: "#f6a8dd" },
+  cleaning: { code: "CL", label: "Cleaning", colorA: "#0b7f57", colorB: "#84e2c3" }
+});
+
 
 let map = null;
 let pickupMarker = null;
@@ -781,6 +1058,8 @@ let suggestDebounceTimer = null;
 let pickupResolveSeq = 0;
 let rideRealtimeChannel = null;
 let driverLocationRealtimeChannel = null;
+let serviceConsentResolver = null;
+let serviceConsentBound = false;
 
 function money(v){ return "INR " + Number(v || 0).toFixed(2); }
 function roundMoney(v){
@@ -805,6 +1084,116 @@ function isValidLatLng(latRaw, lngRaw){
   if(lng < -180 || lng > 180) return false;
   if(Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001) return false;
   return true;
+}
+
+function currentNoticeLang(){
+  const raw = String(window.USER_LANG || localStorage.getItem("lang") || document.documentElement.lang || "en").trim().toLowerCase();
+  if(!raw) return "en";
+  const short = raw.split("-")[0];
+  return short || "en";
+}
+
+function getNoticeCopy(){
+  const lang = currentNoticeLang();
+  const alias = SERVICE_NOTICE_ALIAS[lang] || lang;
+  return SERVICE_NOTICE_COPY[alias] || SERVICE_NOTICE_COPY.en;
+}
+
+function serviceLabelForNotice(section){
+  const copy = getNoticeCopy();
+  const key = String(section || "").trim().toLowerCase();
+  const map = copy?.services || {};
+  return String(map[key] || SERVICE_NOTICE_COPY.en.services[key] || "service");
+}
+
+function formatNoticeMessage(section){
+  const copy = getNoticeCopy();
+  const serviceLabel = serviceLabelForNotice(section);
+  const body = String(copy?.message || SERVICE_NOTICE_COPY.en.message || "").replace("{service}", serviceLabel);
+  return {
+    title: String(copy?.title || SERVICE_NOTICE_COPY.en.title || "Service notice"),
+    body,
+    agree: String(copy?.agree || SERVICE_NOTICE_COPY.en.agree || "Agree and Continue")
+  };
+}
+
+function readServiceNoticeState(){
+  try{
+    const raw = localStorage.getItem(SERVICE_NOTICE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  }catch(_){
+    return {};
+  }
+}
+
+function saveServiceNoticeConsent(section){
+  const key = String(section || "").trim().toLowerCase();
+  if(!key) return;
+  const lang = currentNoticeLang();
+  const stateObj = readServiceNoticeState();
+  if(!stateObj[lang] || typeof stateObj[lang] !== "object"){
+    stateObj[lang] = {};
+  }
+  stateObj[lang][key] = true;
+  stateObj.updated_at = new Date().toISOString();
+  try{
+    localStorage.setItem(SERVICE_NOTICE_KEY, JSON.stringify(stateObj));
+  }catch(_){ }
+}
+
+function closeServiceConsentModal(agreed){
+  const overlay = document.getElementById("serviceConsentOverlay");
+  if(overlay) overlay.classList.add("hide");
+  const resolver = serviceConsentResolver;
+  serviceConsentResolver = null;
+  if(typeof resolver === "function"){
+    resolver(Boolean(agreed));
+  }
+}
+
+function bindServiceConsentModal(){
+  if(serviceConsentBound) return;
+  serviceConsentBound = true;
+  const agreeBtn = document.getElementById("serviceConsentAgreeBtn");
+  if(agreeBtn){
+    agreeBtn.addEventListener("click", () => closeServiceConsentModal(true));
+  }
+}
+
+function openServiceConsentModal(section){
+  bindServiceConsentModal();
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("serviceConsentOverlay");
+    const titleEl = document.getElementById("serviceConsentTitle");
+    const descEl = document.getElementById("serviceConsentDesc");
+    const agreeBtn = document.getElementById("serviceConsentAgreeBtn");
+    const content = formatNoticeMessage(section);
+    if(titleEl) titleEl.textContent = content.title;
+    if(descEl) descEl.textContent = content.body;
+    if(agreeBtn) agreeBtn.textContent = content.agree;
+    if(overlay) overlay.classList.remove("hide");
+    serviceConsentResolver = resolve;
+  });
+}
+
+async function ensureServiceNoticeConsent(section){
+  const key = String(section || "").trim().toLowerCase();
+  if(!key) return true;
+  const agreed = await openServiceConsentModal(key);
+  if(agreed){
+    saveServiceNoticeConsent(key);
+    return true;
+  }
+  return false;
+}
+
+function serviceNoticeSectionForView(view){
+  const clean = String(view || "").trim().toLowerCase();
+  if(clean === "ride") return "ride";
+  if(clean === "food") return "food";
+  if(clean === "agent") return "agent";
+  return "";
 }
 
 function rideStatusPublic(statusRaw){
@@ -2204,6 +2593,39 @@ function prettyLabel(text){
   return String(text || "").replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
+function escapeSvgText(value){
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function buildAgentArtwork(category){
+  const key = String(category || "").trim().toLowerCase();
+  const meta = AGENT_ARTWORK_META[key] || {
+    code: "AG",
+    label: "Agent",
+    colorA: "#374151",
+    colorB: "#93a1b8"
+  };
+  const code = escapeSvgText(meta.code || "AG");
+  const label = escapeSvgText(meta.label || "Agent");
+  const colorA = String(meta.colorA || "#374151");
+  const colorB = String(meta.colorB || "#93a1b8");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="400" viewBox="0 0 720 400" role="img" aria-label="${label}"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="${colorA}"/><stop offset="100%" stop-color="${colorB}"/></linearGradient></defs><rect width="720" height="400" rx="26" fill="url(#g)"/><circle cx="98" cy="80" r="74" fill="#ffffff" fill-opacity="0.18"/><circle cx="654" cy="336" r="92" fill="#ffffff" fill-opacity="0.13"/><text x="54" y="222" fill="#ffffff" font-size="132" font-weight="800" font-family="Manrope, Arial, sans-serif">${code}</text><text x="56" y="288" fill="#f8fafc" font-size="40" font-weight="700" font-family="Manrope, Arial, sans-serif">${label}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function resolveAgentImage(agent){
+  const src = String(agent?.image_url || "").trim();
+  if(src && (/^https?:\/\//i.test(src) || /^data:image\//i.test(src) || /^\/.+/.test(src) || /^Images\//i.test(src))){
+    return src;
+  }
+  return buildAgentArtwork(agent?.service_category);
+}
+
 function calcFoodCartTotal(){
   return roundMoney(foodState.cart.reduce((sum, row) => sum + (Number(row.price_inr || 0) * Number(row.qty || 0)), 0));
 }
@@ -2638,11 +3060,13 @@ function renderAgentList(){
     const estimate = calcAgentEstimate(agent, hours);
     const rating = Math.max(0, Number(agent.rating || 0));
     const etaMin = Math.max(18, Math.round(Number(agent.distance_km || 0) * 7 + 20));
+    const imageSrc = resolveAgentImage(agent);
     const div = document.createElement("div");
     div.className = "list-card";
     div.innerHTML = `
       <div class="row" style="justify-content:space-between;align-items:flex-start">
         <div style="max-width:calc(100% - 108px)">
+          <img class="agent-art" src="${imageSrc}" alt="${prettyLabel(agent.service_category)} image" loading="lazy">
           <div class="list-title">${String(agent.title || "Agent")}</div>
           <div class="list-sub">${prettyLabel(agent.service_category)} | ${Number(agent.distance_km || 0).toFixed(2)} km</div>
           <div class="row" style="margin-top:6px;gap:6px">
@@ -2978,6 +3402,18 @@ function setActiveView(view){
   }
 }
 
+async function openViewWithConsent(view){
+  const section = serviceNoticeSectionForView(view);
+  if(section){
+    const allowed = await ensureServiceNoticeConsent(section);
+    if(!allowed){
+      return false;
+    }
+  }
+  setActiveView(view);
+  return true;
+}
+
 async function restoreStateIfPresent(){
   const saved = loadState();
   if(!saved || !shouldRestoreSavedState(saved)) return;
@@ -3174,14 +3610,14 @@ function bindRideEvents(){
         return;
       }
       if(nav === "food"){
-        setActiveView("food");
+        openViewWithConsent("food").catch(() => {});
         return;
       }
       if(nav === "agent"){
-        setActiveView("agent");
+        openViewWithConsent("agent").catch(() => {});
         return;
       }
-      setActiveView("ride");
+      openViewWithConsent("ride").catch(() => {});
     });
   });
 }
@@ -3194,7 +3630,7 @@ async function bootRidePage(){
   bindRideEvents();
   renderVehicleList();
   setPhase("idle");
-  setActiveView("ride");
+  await openViewWithConsent("ride");
 
   await ensureMe();
   await restoreStateIfPresent();
