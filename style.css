@@ -1,3 +1,9 @@
+:root{
+  --nova-nav-lift:0px;
+  --nova-safe-bottom:env(safe-area-inset-bottom, 0px);
+  --nova-bottom-nav-height:64px;
+}
+
 body{
   margin:0;
   font-family:Arial, sans-serif;
@@ -110,13 +116,15 @@ button{
 /* BOTTOM NAV */
 .bottom-nav{
   position:fixed;
-  bottom:0;
+  bottom:var(--nova-nav-lift);
   width:100%;
   background:white;
   display:flex;
   justify-content:space-around;
-  padding:6px 0;
+  padding:6px 0 calc(6px + var(--nova-safe-bottom));
+  min-height:var(--nova-bottom-nav-height);
   border-top:1px solid #ccc;
+  z-index:90;
 }
 .bottom-nav div{
   text-align:center;
@@ -179,7 +187,7 @@ button{
 /* HOME PAGE MOBILE TUNING */
 @media (max-width:768px){
   .home-page{
-    padding-bottom:116px;
+    padding-bottom:calc(116px + var(--nova-nav-lift) + var(--nova-safe-bottom));
   }
   .home-page .top{
     padding:14px 12px;
@@ -224,7 +232,7 @@ button{
     font-size:22px;
   }
   .home-page .bottom-nav{
-    padding:8px 0;
+    padding:8px 0 calc(8px + var(--nova-safe-bottom));
   }
   .home-page .bottom-nav img{
     width:23px;

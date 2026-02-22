@@ -206,6 +206,81 @@ app.post("/api/push/notify", async (req, res) => {
   }
 });
 
+app.post("/api/call/signal", async (req, res) => {
+  const fallback = {
+    to: req.body?.to_user_id,
+    from: req.body?.from_user_id,
+    callId: req.body?.call_id,
+    type: req.body?.type,
+    mediaType: req.body?.media_type,
+    reason: req.body?.reason,
+    sdp: req.body?.sdp
+  };
+  const payload = normalizeCallSignalPayload(req.body?.payload || req.body, fallback);
+  if(!payload){
+    return res.status(400).json({ ok:false, error:"invalid_call_signal_payload" });
+  }
+  const ttlSec = clampCallSignalTtl(req.body?.ttl_sec);
+  try{
+    const signal = await mutateSystemState((state) => {
+      return enqueueCallSignalForUser(state, payload, ttlSec);
+    });
+    if(!signal){
+      return res.status(400).json({ ok:false, error:"invalid_call_signal_payload" });
+    }
+    return res.json({
+      ok:true,
+      signal: {
+        id: String(signal.id || ""),
+        type: String(signal.type || ""),
+        call_id: String(signal.call_id || ""),
+        to_user_id: String(signal.to_user_id || ""),
+        from_user_id: String(signal.from_user_id || ""),
+        expires_at: String(signal.expires_at || "")
+      }
+    });
+  }catch(err){
+    return res.status(500).json({
+      ok:false,
+      error:"call_signal_enqueue_failed",
+      message:String(err?.message || "Unable to save call signal.")
+    });
+  }
+});
+
+app.get("/api/call/signals", async (req, res) => {
+  const userId = sanitizePushUserId(req.query?.user_id);
+  const withUserId = sanitizePushUserId(req.query?.with_user_id);
+  const limit = Math.max(1, Math.min(40, Math.floor(safeNumber(req.query?.limit || 20) || 20)));
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  try{
+    const pulled = await mutateSystemState((state) => {
+      return pullCallSignalsForUser(state, userId, withUserId, limit);
+    });
+    const signals = (Array.isArray(pulled) ? pulled : []).map((row) => ({
+      id: String(row?.id || ""),
+      type: String(row?.type || ""),
+      call_id: String(row?.call_id || ""),
+      from_user_id: String(row?.from_user_id || ""),
+      to_user_id: String(row?.to_user_id || ""),
+      created_at: String(row?.created_at || ""),
+      expires_at: String(row?.expires_at || ""),
+      payload: row?.payload && typeof row.payload === "object"
+        ? row.payload
+        : null
+    }));
+    return res.json({ ok:true, count: signals.length, signals });
+  }catch(err){
+    return res.status(500).json({
+      ok:false,
+      error:"call_signal_pull_failed",
+      message:String(err?.message || "Unable to load call signals.")
+    });
+  }
+});
+
 function getSocialSupabaseBase(){
   return String(PUBLIC_SUPABASE_URL || CONTEST_SUPABASE_URL || "").trim().replace(/\/+$/g, "");
 }
@@ -799,6 +874,9 @@ function createDefaultSystemState(){
       followups: [],
       reports: {}
     },
+    calls: {
+      signals_by_user: {}
+    },
     tryon: {
       abuse: {},
       lane_metrics: {
@@ -877,6 +955,12 @@ function normalizeSystemState(input){
   if(!state.automation.reports || typeof state.automation.reports !== "object"){
     state.automation.reports = {};
   }
+  if(!state.calls || typeof state.calls !== "object"){
+    state.calls = {};
+  }
+  if(!state.calls.signals_by_user || typeof state.calls.signals_by_user !== "object"){
+    state.calls.signals_by_user = {};
+  }
   if(!state.push || typeof state.push !== "object"){
     state.push = {};
   }
@@ -927,6 +1011,152 @@ function sanitizePushToken(value){
 
 function sanitizePushUserId(value){
   return sanitizeUserId(value);
+}
+
+const CALL_SIGNAL_ALLOWED_TYPES = new Set([
+  "call-offer",
+  "call-answer",
+  "call-end",
+  "call-decline",
+  "call-busy"
+]);
+const CALL_SIGNAL_DEFAULT_TTL_SEC = 90;
+const CALL_SIGNAL_MAX_TTL_SEC = 240;
+const CALL_SIGNAL_MAX_PER_USER = 120;
+
+function sanitizeCallSignalType(value){
+  const clean = String(value || "").trim().toLowerCase();
+  return CALL_SIGNAL_ALLOWED_TYPES.has(clean) ? clean : "";
+}
+
+function sanitizeCallId(value){
+  return String(value || "").trim().slice(0, 120);
+}
+
+function clampCallSignalTtl(value){
+  const raw = Math.round(safeNumber(value));
+  if(!Number.isFinite(raw) || raw <= 0) return CALL_SIGNAL_DEFAULT_TTL_SEC;
+  return Math.max(15, Math.min(CALL_SIGNAL_MAX_TTL_SEC, raw));
+}
+
+function normalizeCallSignalPayload(raw, fallback){
+  const source = raw && typeof raw === "object" ? raw : {};
+  const defaults = fallback && typeof fallback === "object" ? fallback : {};
+  const type = sanitizeCallSignalType(source.type || defaults.type);
+  const callId = sanitizeCallId(source.callId || source.call_id || defaults.callId || defaults.call_id);
+  const toUserId = sanitizePushUserId(source.to || source.to_user_id || defaults.to || defaults.to_user_id);
+  const fromUserId = sanitizePushUserId(source.from || source.from_user_id || defaults.from || defaults.from_user_id);
+  const mediaTypeRaw = String(source.mediaType || source.media_type || defaults.mediaType || defaults.media_type || "").trim().toLowerCase();
+  const mediaType = mediaTypeRaw === "video" ? "video" : "audio";
+  const reason = String(source.reason || defaults.reason || "").trim().slice(0, 120);
+  let sdp = null;
+  if(source.sdp && typeof source.sdp === "object"){
+    sdp = {
+      type: String(source.sdp.type || "").trim().slice(0, 40),
+      sdp: String(source.sdp.sdp || "").slice(0, 18000)
+    };
+  }
+  if(!type || !callId || !toUserId || !fromUserId){
+    return null;
+  }
+  return {
+    type,
+    callId,
+    to: toUserId,
+    from: fromUserId,
+    mediaType,
+    reason,
+    sdp
+  };
+}
+
+function ensureCallSignalState(state){
+  if(!state.calls || typeof state.calls !== "object"){
+    state.calls = {};
+  }
+  if(!state.calls.signals_by_user || typeof state.calls.signals_by_user !== "object"){
+    state.calls.signals_by_user = {};
+  }
+}
+
+function compactCallSignalQueue(queueInput){
+  const queue = Array.isArray(queueInput) ? queueInput : [];
+  const now = Date.now();
+  const compacted = queue
+    .filter((row) => row && typeof row === "object")
+    .filter((row) => {
+      const expiresAt = Date.parse(String(row.expires_at || ""));
+      if(!Number.isFinite(expiresAt)) return false;
+      return expiresAt > now;
+    })
+    .sort((a, b) => {
+      const at = Date.parse(String(a?.created_at || "")) || 0;
+      const bt = Date.parse(String(b?.created_at || "")) || 0;
+      return at - bt;
+    });
+  if(compacted.length <= CALL_SIGNAL_MAX_PER_USER){
+    return compacted;
+  }
+  return compacted.slice(compacted.length - CALL_SIGNAL_MAX_PER_USER);
+}
+
+function enqueueCallSignalForUser(state, payloadInput, ttlSecInput){
+  ensureCallSignalState(state);
+  const payload = normalizeCallSignalPayload(payloadInput);
+  if(!payload) return null;
+  const ttlSec = clampCallSignalTtl(ttlSecInput);
+  const now = Date.now();
+  const signal = {
+    id: `callsig_${now}_${crypto.randomBytes(4).toString("hex")}`,
+    to_user_id: payload.to,
+    from_user_id: payload.from,
+    call_id: payload.callId,
+    type: payload.type,
+    payload: {
+      type: payload.type,
+      callId: payload.callId,
+      to: payload.to,
+      from: payload.from,
+      mediaType: payload.mediaType,
+      reason: payload.reason,
+      sdp: payload.sdp
+    },
+    created_at: new Date(now).toISOString(),
+    expires_at: new Date(now + (ttlSec * 1000)).toISOString()
+  };
+  const key = payload.to;
+  const existing = compactCallSignalQueue(state.calls.signals_by_user[key]);
+  existing.push(signal);
+  state.calls.signals_by_user[key] = compactCallSignalQueue(existing);
+  return signal;
+}
+
+function pullCallSignalsForUser(state, userIdInput, withUserIdInput, limitInput){
+  ensureCallSignalState(state);
+  const userId = sanitizePushUserId(userIdInput);
+  const withUserId = sanitizePushUserId(withUserIdInput);
+  if(!userId) return [];
+  const limit = Math.max(1, Math.min(40, Math.floor(safeNumber(limitInput || 20) || 20)));
+  const current = compactCallSignalQueue(state.calls.signals_by_user[userId]);
+  if(!current.length){
+    state.calls.signals_by_user[userId] = [];
+    return [];
+  }
+  const picked = [];
+  const left = [];
+  current.forEach((row) => {
+    if(picked.length >= limit){
+      left.push(row);
+      return;
+    }
+    if(withUserId && sanitizePushUserId(row?.from_user_id) !== withUserId){
+      left.push(row);
+      return;
+    }
+    picked.push(row);
+  });
+  state.calls.signals_by_user[userId] = left;
+  return picked;
 }
 
 function sanitizePushData(input){

@@ -467,7 +467,10 @@ let currentUser = null;
 let myUid = null;
 let myName = "";
 let myPhoto = "";
-let otherUid = new URLSearchParams(location.search).get("uid");
+const URL_PARAMS = new URLSearchParams(location.search);
+let otherUid = URL_PARAMS.get("uid");
+const callActionFromQuery = String(URL_PARAMS.get("call_action") || "").trim().toLowerCase();
+const callIdFromQuery = String(URL_PARAMS.get("call_id") || "").trim();
 let otherUsername = "";
 let allContacts = [];
 let allowedChatIds = new Set();
@@ -510,6 +513,11 @@ let callFacingMode = "user";
 let switchingCamera = false;
 let callVideoInputs = [];
 let callVideoInputIndex = -1;
+let callSignalPollTimer = null;
+let callSignalSeenIds = new Set();
+let autoCallAnswerAttempted = false;
+const CALL_SIGNAL_POLL_MS = 2000;
+const CALL_SIGNAL_REMOTE_TYPES = new Set(["call-offer","call-answer","call-end","call-decline","call-busy"]);
 const selectCols = "id,sender_id,receiver_id,message,media_url,media_type,created_at";
 const CHAT_READ_EVENT_PREFIX = "__NOVA_READ__:";
 let otherSeenAt = "";
@@ -1255,6 +1263,123 @@ async function sendRemotePush(toUserId, title, body, data){
   }
 }
 
+function normalizeCallSignalPayload(payload){
+  const row = payload && typeof payload === "object" ? payload : {};
+  const type = String(row.type || "").trim().toLowerCase();
+  const callId = String(row.callId || row.call_id || "").trim();
+  const to = String(row.to || row.to_user_id || "").trim();
+  const from = String(row.from || row.from_user_id || "").trim();
+  if(!type || !callId || !to || !from) return null;
+  return {
+    type,
+    callId,
+    to,
+    from,
+    mediaType: String(row.mediaType || row.media_type || "").trim().toLowerCase() === "video" ? "video" : "audio",
+    reason: String(row.reason || "").trim().slice(0, 120),
+    sdp: row.sdp && typeof row.sdp === "object"
+      ? { type: String(row.sdp.type || "").slice(0, 40), sdp: String(row.sdp.sdp || "").slice(0, 18000) }
+      : null
+  };
+}
+
+async function sendCallSignalRemote(payload){
+  const clean = normalizeCallSignalPayload(payload);
+  if(!clean) return;
+  if(!CALL_SIGNAL_REMOTE_TYPES.has(clean.type)) return;
+  const body = {
+    to_user_id: clean.to,
+    from_user_id: clean.from,
+    call_id: clean.callId,
+    type: clean.type,
+    media_type: clean.mediaType,
+    reason: clean.reason,
+    sdp: clean.sdp
+  };
+  const ttlSec = clean.type === "call-offer" ? 90 : 120;
+  const bases = buildAutomationApiBases();
+  for(const base of bases){
+    try{
+      const res = await fetch(`${base}/api/call/signal`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify(Object.assign({}, body, { ttl_sec: ttlSec }))
+      });
+      if(res.ok) return;
+    }catch(_){ }
+  }
+}
+
+async function pollRemoteCallSignals(force){
+  if(!myUid || !otherUid) return;
+  if(document.hidden && !force) return;
+  const params = new URLSearchParams();
+  params.set("user_id", String(myUid || ""));
+  params.set("with_user_id", String(otherUid || ""));
+  params.set("limit", "25");
+  const bases = buildAutomationApiBases();
+  for(const base of bases){
+    try{
+      const res = await fetch(`${base}/api/call/signals?${params.toString()}`, { cache: "no-store" });
+      const out = await res.json().catch(() => null);
+      if(!res.ok || !out?.ok){
+        continue;
+      }
+      const rows = Array.isArray(out.signals) ? out.signals : [];
+      rows.forEach((row) => {
+        const signalId = String(row?.id || "").trim();
+        if(signalId){
+          if(callSignalSeenIds.has(signalId)) return;
+          callSignalSeenIds.add(signalId);
+          if(callSignalSeenIds.size > 600){
+            const keep = Array.from(callSignalSeenIds).slice(-300);
+            callSignalSeenIds = new Set(keep);
+          }
+        }
+        const payload = normalizeCallSignalPayload(row?.payload || row);
+        if(payload){
+          handleCallSignal(payload);
+        }
+      });
+      return;
+    }catch(_){ }
+  }
+}
+
+function startCallSignalPolling(){
+  if(callSignalPollTimer){
+    clearInterval(callSignalPollTimer);
+    callSignalPollTimer = null;
+  }
+  callSignalPollTimer = setInterval(() => {
+    pollRemoteCallSignals(false).catch(() => {});
+  }, CALL_SIGNAL_POLL_MS);
+}
+
+function stopCallSignalPolling(){
+  if(callSignalPollTimer){
+    clearInterval(callSignalPollTimer);
+    callSignalPollTimer = null;
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if(document.visibilityState === "visible"){
+    pollRemoteCallSignals(true).catch(() => {});
+  }
+});
+
+function maybeAutoAnswerFromQuery(){
+  if(callActionFromQuery !== "answer") return;
+  if(autoCallAnswerAttempted) return;
+  if(!activeCall || activeCall.state !== "ringing") return;
+  if(callIdFromQuery && String(activeCall.id || "") !== callIdFromQuery) return;
+  autoCallAnswerAttempted = true;
+  acceptCall().catch(() => {
+    autoCallAnswerAttempted = false;
+  });
+}
+
 async function getUserSummary(userId){
   if(!userId) return { name:"Member", photo:"", username:"", verified:false, trust_score:0 };
   if(userCache.has(userId)) return userCache.get(userId);
@@ -1771,6 +1896,8 @@ async function upsertChatListEntry(m){
     await loadMessages();
     await loadChatList();
     ensureCallChannel();
+    startCallSignalPolling();
+    pollRemoteCallSignals(true).catch(()=>{});
   }else{
     otherSeenAt = "";
     lastSentReadAt = "";
@@ -1797,6 +1924,7 @@ async function upsertChatListEntry(m){
     if(videoCallBtn) videoCallBtn.disabled = true;
     if(chatMoreBtn) chatMoreBtn.disabled = true;
     endCall(false);
+    stopCallSignalPolling();
   }
 })();
 
@@ -2382,10 +2510,13 @@ async function ensureCallChannel(){
 }
 
 function sendCallSignal(payload){
-  if(!callChannel || !payload) return;
-  try{
-    callChannel.send({ type:"broadcast", event:"signal", payload });
-  }catch(_){}
+  if(!payload) return;
+  if(callChannel){
+    try{
+      callChannel.send({ type:"broadcast", event:"signal", payload });
+    }catch(_){}
+  }
+  sendCallSignalRemote(payload).catch(()=>{});
 }
 
 function resetCallState(){
@@ -2710,12 +2841,13 @@ async function startCall(kind){
     sendRemotePush(otherUid, `${myName || "Someone"} is calling`, kind === "video" ? "Incoming video call" : "Incoming call", {
       type: "call_invite",
       call_type: kind,
+      call_id: callId,
       from_user_id: myUid,
-      link: `chat.html?uid=${encodeURIComponent(myUid)}`
+      link: `chat.html?uid=${encodeURIComponent(myUid)}&call_action=answer&call_id=${encodeURIComponent(callId)}`
     }).catch(()=>{});
     callTimeout = setTimeout(() => {
       endCall(true, "timeout");
-    }, 20000);
+    }, 60000);
   }catch(err){
     alert(err.message || "Unable to start call.");
     endCall(false, "failed");
@@ -2792,6 +2924,9 @@ function handleCallSignal(payload){
   if(!payload || payload.to !== myUid) return;
   if(payload.type === "call-offer"){
     if(activeCall){
+      if(String(activeCall.id || "") === String(payload.callId || "")){
+        return;
+      }
       sendCallSignal({
         type:"call-busy",
         callId: payload.callId,
@@ -2812,10 +2947,16 @@ function handleCallSignal(payload){
     updateCallProfile(payload.from);
     updateCallUiState("ringing");
     startRingtone();
+    setTimeout(() => {
+      maybeAutoAnswerFromQuery();
+    }, 120);
     return;
   }
   if(!activeCall || payload.callId !== activeCall.id) return;
   if(payload.type === "call-answer"){
+    if(activeCall && activeCall.connected){
+      return;
+    }
     if(activeCall.isCaller && payload.sdp){
       rtcPeer.setRemoteDescription(new RTCSessionDescription(payload.sdp))
         .then(() => {

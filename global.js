@@ -594,6 +594,68 @@ window.translateProductName = function(name){
 };
 
 /* =====================================
+   DEVICE SAFE-AREA + NAV LIFT
+===================================== */
+(function(){
+  function detectInAppShell(){
+    const ua = String(navigator.userAgent || "");
+    const isAndroid = /android/i.test(ua);
+    const webView = /\bwv\b|; wv\)|webview/i.test(ua);
+    const standalone = !!(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+    return { isAndroid, inShell: webView || standalone };
+  }
+
+  function computeLiftPx(){
+    const info = detectInAppShell();
+    if(!info.inShell) return 0;
+    if(info.isAndroid) return 12;
+    return 6;
+  }
+
+  function syncBottomNavClearance(liftPx){
+    const body = document.body;
+    if(!body) return;
+    const navNodes = Array.from(document.querySelectorAll(".bottom-nav, .nav"));
+    if(!navNodes.length) return;
+    let required = 0;
+    navNodes.forEach((node) => {
+      if(!(node instanceof HTMLElement)) return;
+      const rect = node.getBoundingClientRect();
+      const cs = getComputedStyle(node);
+      const height = Math.max(48, Math.round(rect.height || 0));
+      const padBottom = Math.max(0, Math.round(parseFloat(cs.paddingBottom || "0") || 0));
+      required = Math.max(required, height + liftPx + Math.min(24, padBottom) + 10);
+    });
+    if(required <= 0) return;
+    const current = Math.round(parseFloat(getComputedStyle(body).paddingBottom || "0") || 0);
+    if(required > current){
+      body.style.paddingBottom = `${required}px`;
+    }
+  }
+
+  function applySafeAreaVars(){
+    const root = document.documentElement;
+    if(!root) return;
+    const liftPx = computeLiftPx();
+    root.style.setProperty("--nova-nav-lift", `${liftPx}px`);
+    root.style.setProperty("--nova-safe-bottom", "env(safe-area-inset-bottom, 0px)");
+    syncBottomNavClearance(liftPx);
+  }
+
+  function scheduleApply(){
+    setTimeout(applySafeAreaVars, 0);
+    setTimeout(applySafeAreaVars, 220);
+  }
+
+  document.addEventListener("DOMContentLoaded", scheduleApply);
+  window.addEventListener("resize", scheduleApply, { passive:true });
+  window.addEventListener("orientationchange", scheduleApply, { passive:true });
+  if(window.visualViewport){
+    window.visualViewport.addEventListener("resize", scheduleApply, { passive:true });
+  }
+})();
+
+/* =====================================
    BOTTOM NAV DOWNLOAD ICON
 ===================================== */
 (function(){
