@@ -21,7 +21,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif
 .top-search input{flex:1;border:none;outline:none;font-size:14px}
 .top-search button{border:none;border-radius:10px;background:#111;color:#fff;padding:9px 12px;font-weight:700;cursor:pointer}
 .float-loc{position:absolute;right:12px;top:74px;z-index:20;border:none;border-radius:999px;background:#fff;padding:10px 12px;font-weight:700;box-shadow:0 6px 18px rgba(0,0,0,.18);cursor:pointer}
-.sheet{position:absolute;left:0;right:0;bottom:58px;z-index:25;background:#fff;border-top:1px solid #e2e8f0;border-radius:18px 18px 0 0;max-height:58vh;overflow:auto;padding:12px}
+.sheet{position:absolute;left:0;right:0;bottom:58px;z-index:25;background:#fff;border-top:1px solid #e2e8f0;border-radius:18px 18px 0 0;max-height:50vh;overflow:auto;padding:12px}
 .panel{display:block}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .input,select{width:100%;padding:11px;border:1px solid #d6deea;border-radius:10px;font-size:14px;background:#fff}
@@ -47,6 +47,29 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif
 .bottom-nav{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid #dbe2ee;display:grid;grid-template-columns:repeat(5,1fr);z-index:60}
 .nav-item{border:none;background:transparent;padding:8px 4px;font-size:11px;color:#475569;cursor:pointer;text-align:center}
 .nav-item.active{color:var(--brand);font-weight:700}
+.suggest-popup{
+  position:fixed;
+  z-index:120;
+  background:#fff;
+  border:1px solid #d8e1ef;
+  border-radius:12px;
+  box-shadow:0 14px 28px rgba(0,0,0,.18);
+  max-height:220px;
+  overflow:auto;
+}
+.suggest-item{
+  width:100%;
+  border:none;
+  text-align:left;
+  background:#fff;
+  padding:10px;
+  font-size:13px;
+  color:#0f172a;
+  cursor:pointer;
+  border-bottom:1px solid #edf2f8;
+}
+.suggest-item:last-child{border-bottom:none}
+.suggest-item:hover{background:#f8fafc}
 </style>
 </head>
 <body>
@@ -185,6 +208,9 @@ const state = {
   matchSecond: 0,
   matchAttempt: 1,
   lastRematchAt: 0,
+  gpsLastFixAt: 0,
+  gpsFailCount: 0,
+  gpsRefreshTimer: null,
   driverLat: null,
   driverLng: null
 };
@@ -196,6 +222,9 @@ let routeLine = null;
 let nearbyLayer = null;
 let driverMarker = null;
 let driverGuideLine = null;
+let suggestPopup = null;
+let suggestSeq = 0;
+let suggestDebounceTimer = null;
 
 function money(v){ return "INR " + Number(v || 0).toFixed(2); }
 function haversineKm(lat1, lon1, lat2, lon2){
@@ -312,10 +341,22 @@ async function ensureMe(){
 function initMap(){
   if(map) return;
   map = L.map("rideMap", { zoomControl: true }).setView([18.5204, 73.8567], 14);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  const primaryTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+    subdomains: "abcd",
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
+  });
+  const fallbackTiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap contributors"
-  }).addTo(map);
+  });
+  let fallbackAdded = false;
+  primaryTiles.on("tileerror", () => {
+    if(fallbackAdded) return;
+    fallbackAdded = true;
+    fallbackTiles.addTo(map);
+  });
+  primaryTiles.addTo(map);
   nearbyLayer = L.layerGroup().addTo(map);
   map.on("click", (e) => {
     const lat = Number(e.latlng?.lat);
@@ -386,6 +427,15 @@ async function reverseGeocode(lat, lng){
 async function geocode(text){
   const q = String(text || "").trim();
   if(!q) return null;
+  const fast = await searchLandmarkSuggestions(q, 1);
+  if(fast.length){
+    const first = fast[0];
+    return {
+      lat: Number(first.lat),
+      lng: Number(first.lng),
+      name: String(first.name || q).slice(0, 120)
+    };
+  }
   try{
     const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(q)}`;
     const res = await fetch(url, { cache: "no-store" });
@@ -398,6 +448,98 @@ async function geocode(text){
     }
   }catch(_){ }
   return null;
+}
+
+function buildPlaceName(parts){
+  return parts.map((item) => String(item || "").trim()).filter(Boolean).join(", ").slice(0, 140);
+}
+
+function normalizeSuggestion(name, lat, lng){
+  const la = Number(lat);
+  const ln = Number(lng);
+  const nm = String(name || "").trim();
+  if(!nm || !Number.isFinite(la) || !Number.isFinite(ln)) return null;
+  return { name: nm.slice(0, 140), lat: la, lng: ln };
+}
+
+function dedupeSuggestions(list){
+  const out = [];
+  const seen = new Set();
+  (Array.isArray(list) ? list : []).forEach((item) => {
+    const row = normalizeSuggestion(item?.name, item?.lat, item?.lng);
+    if(!row) return;
+    const key = `${row.name.toLowerCase()}|${row.lat.toFixed(6)}|${row.lng.toFixed(6)}`;
+    if(seen.has(key)) return;
+    seen.add(key);
+    out.push(row);
+  });
+  return out;
+}
+
+async function searchLandmarkSuggestions(query, limitCount){
+  const q = String(query || "").trim();
+  const limit = Math.max(1, Math.min(8, Number(limitCount || 6)));
+  if(q.length < 2) return [];
+  const merged = [];
+
+  try{
+    const photon = new URL("https://photon.komoot.io/api/");
+    photon.searchParams.set("q", q);
+    photon.searchParams.set("limit", String(limit));
+    if(Number.isFinite(state.liveLat) && Number.isFinite(state.liveLng)){
+      photon.searchParams.set("lat", String(state.liveLat));
+      photon.searchParams.set("lon", String(state.liveLng));
+    }
+    const res = await fetch(photon.toString(), { cache: "no-store" });
+    if(res.ok){
+      const data = await res.json().catch(() => null);
+      const features = Array.isArray(data?.features) ? data.features : [];
+      features.forEach((feature) => {
+        const coords = Array.isArray(feature?.geometry?.coordinates) ? feature.geometry.coordinates : [];
+        const lng = Number(coords[0]);
+        const lat = Number(coords[1]);
+        const p = feature?.properties || {};
+        const name = buildPlaceName([
+          p.name || p.street || "",
+          p.city || p.district || p.county || "",
+          p.state || "",
+          p.country || ""
+        ]);
+        const row = normalizeSuggestion(name, lat, lng);
+        if(row) merged.push(row);
+      });
+    }
+  }catch(_){ }
+
+  if(merged.length < limit){
+    try{
+      const nom = new URL("https://nominatim.openstreetmap.org/search");
+      nom.searchParams.set("format", "jsonv2");
+      nom.searchParams.set("addressdetails", "1");
+      nom.searchParams.set("limit", String(limit));
+      nom.searchParams.set("q", q);
+      const res = await fetch(nom.toString(), {
+        cache: "no-store",
+        headers: { "Accept": "application/json" }
+      });
+      if(res.ok){
+        const rows = await res.json().catch(() => []);
+        (Array.isArray(rows) ? rows : []).forEach((row) => {
+          const a = row?.address || {};
+          const name = buildPlaceName([
+            a.road || a.neighbourhood || a.suburb || a.hamlet || a.city || a.town || a.village || "",
+            a.city || a.town || a.village || a.county || "",
+            a.state || "",
+            a.country || ""
+          ]) || String(row?.display_name || "").slice(0, 140);
+          const item = normalizeSuggestion(name, row?.lat, row?.lon);
+          if(item) merged.push(item);
+        });
+      }
+    }catch(_){ }
+  }
+
+  return dedupeSuggestions(merged).slice(0, limit);
 }
 
 function estimateFare(vehicleType){
@@ -538,6 +680,82 @@ function ensureRideExtrasUI(){
     timer.textContent = "Elapsed: 0s";
     matchingText.insertAdjacentElement("afterend", timer);
   }
+}
+
+function ensureSuggestPopup(){
+  if(suggestPopup) return suggestPopup;
+  suggestPopup = document.createElement("div");
+  suggestPopup.id = "globalSuggestPopup";
+  suggestPopup.className = "suggest-popup hide";
+  document.body.appendChild(suggestPopup);
+
+  const hideSoon = () => setTimeout(() => hideSuggestPopup(), 120);
+  window.addEventListener("scroll", hideSoon, { passive: true });
+  window.addEventListener("resize", hideSoon);
+  document.addEventListener("click", (event) => {
+    if(!suggestPopup || suggestPopup.classList.contains("hide")) return;
+    const t = event.target;
+    if(t instanceof Element && (t.closest("#globalSuggestPopup") || t.closest("#whereToInput") || t.closest("#dropInput") || t.closest("#pickupInput"))){
+      return;
+    }
+    hideSuggestPopup();
+  });
+  return suggestPopup;
+}
+
+function hideSuggestPopup(){
+  const box = ensureSuggestPopup();
+  box.classList.add("hide");
+  box.innerHTML = "";
+  box.style.left = "0px";
+  box.style.top = "0px";
+  box.style.width = "0px";
+}
+
+function showSuggestPopup(inputEl, items, onPick){
+  const input = inputEl instanceof HTMLElement ? inputEl : null;
+  const list = Array.isArray(items) ? items : [];
+  if(!input || !list.length){
+    hideSuggestPopup();
+    return;
+  }
+  const box = ensureSuggestPopup();
+  box.innerHTML = "";
+  const rect = input.getBoundingClientRect();
+  box.style.left = `${Math.max(8, rect.left)}px`;
+  box.style.top = `${Math.max(8, rect.bottom + 4)}px`;
+  box.style.width = `${Math.max(180, rect.width)}px`;
+  list.forEach((item) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "suggest-item";
+    row.textContent = String(item?.name || "").trim().slice(0, 140);
+    row.onclick = () => {
+      if(typeof onPick === "function"){
+        onPick(item);
+      }
+      hideSuggestPopup();
+    };
+    box.appendChild(row);
+  });
+  box.classList.remove("hide");
+}
+
+function scheduleLandmarkSuggest(inputId, pickHandler){
+  const input = document.getElementById(inputId);
+  if(!input) return;
+  const query = String(input.value || "").trim();
+  if(query.length < 2){
+    hideSuggestPopup();
+    return;
+  }
+  clearTimeout(suggestDebounceTimer);
+  suggestDebounceTimer = setTimeout(async () => {
+    const seq = ++suggestSeq;
+    const list = await searchLandmarkSuggestions(query, 7);
+    if(seq !== suggestSeq) return;
+    showSuggestPopup(input, list, pickHandler);
+  }, 220);
 }
 
 function loadRecentDestinations(){
@@ -709,13 +927,53 @@ async function setDrop(lat, lng, fromMap, explicitName){
 
 function updateGpsBadgeLive(accuracy){
   const badge = document.getElementById("gpsBadge");
-  const accTxt = Number.isFinite(accuracy) ? ` (${Math.round(accuracy)}m)` : "";
-  badge.textContent = `GPS: live${accTxt}`;
+  const acc = Number(accuracy);
+  const accTxt = Number.isFinite(acc) ? ` (${Math.round(acc)}m)` : "";
+  const quality = Number.isFinite(acc) ? (acc <= 40 ? "accurate" : (acc <= 120 ? "ok" : "weak")) : "live";
+  badge.textContent = `GPS: ${quality}${accTxt}`;
 }
 
 function updateGpsBadgeBlocked(){
+  state.gpsFailCount = (Number(state.gpsFailCount || 0) + 1);
   document.getElementById("gpsBadge").textContent = "GPS: blocked";
   updateLiveAddressLabel("permission required");
+}
+
+async function applyGpsFix(pos, shouldCenter){
+  const lat = Number(pos?.coords?.latitude);
+  const lng = Number(pos?.coords?.longitude);
+  const acc = Number(pos?.coords?.accuracy);
+  if(!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  state.gpsFailCount = 0;
+  state.gpsLastFixAt = Date.now();
+  state.liveLat = lat;
+  state.liveLng = lng;
+  updateGpsBadgeLive(acc);
+  if(state.phase === "idle" && state.pickupMode !== "manual"){
+    await setPickup(lat, lng, true);
+  }else if(shouldCenter && map){
+    map.setView([lat, lng], Math.max(15, map.getZoom()));
+  }
+  return true;
+}
+
+async function tryApproxLocationFallback(){
+  if(state.gpsLastFixAt && (Date.now() - state.gpsLastFixAt) < 15000) return;
+  try{
+    const res = await fetch("https://ipapi.co/json/", { cache: "no-store" });
+    const data = await res.json().catch(() => null);
+    const lat = Number(data?.latitude);
+    const lng = Number(data?.longitude);
+    if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    state.liveLat = lat;
+    state.liveLng = lng;
+    if(state.phase === "idle" && state.pickupMode !== "manual"){
+      await setPickup(lat, lng, false);
+    }else if(map){
+      map.setView([lat, lng], Math.max(13, map.getZoom()));
+    }
+    document.getElementById("gpsBadge").textContent = "GPS: approx";
+  }catch(_){ }
 }
 
 async function fetchNearbyDrivers(){
@@ -773,25 +1031,36 @@ function startGpsWatch(){
   if(!navigator.geolocation){
     document.getElementById("gpsBadge").textContent = "GPS: unsupported";
     updateLiveAddressLabel("unsupported on this device");
+    tryApproxLocationFallback().catch(() => {});
     return;
   }
 
-  navigator.geolocation.getCurrentPosition(
-    async (pos) => {
-      const lat = Number(pos?.coords?.latitude);
-      const lng = Number(pos?.coords?.longitude);
-      const acc = Number(pos?.coords?.accuracy);
-      if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-      state.liveLat = lat;
-      state.liveLng = lng;
-      updateGpsBadgeLive(acc);
-      if(state.phase === "idle" && state.pickupMode !== "manual"){
-        await setPickup(lat, lng, true);
+  const requestCurrent = (centerNow) => {
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        await applyGpsFix(pos, Boolean(centerNow));
+      },
+      async () => {
+        updateGpsBadgeBlocked();
+        if(state.gpsFailCount >= 2){
+          await tryApproxLocationFallback();
+        }
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  };
+
+  if(navigator.permissions?.query){
+    navigator.permissions.query({ name: "geolocation" }).then((perm) => {
+      if(perm?.state === "denied"){
+        updateGpsBadgeBlocked();
+      }else{
+        requestCurrent(true);
       }
-    },
-    () => updateGpsBadgeBlocked(),
-    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-  );
+    }).catch(() => requestCurrent(true));
+  }else{
+    requestCurrent(true);
+  }
 
   if(state.watchId != null){
     navigator.geolocation.clearWatch(state.watchId);
@@ -800,26 +1069,33 @@ function startGpsWatch(){
 
   state.watchId = navigator.geolocation.watchPosition(
     async (pos) => {
-      const lat = Number(pos?.coords?.latitude);
-      const lng = Number(pos?.coords?.longitude);
-      const acc = Number(pos?.coords?.accuracy);
-      if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-      state.liveLat = lat;
-      state.liveLng = lng;
-      updateGpsBadgeLive(acc);
-      if(state.phase === "idle" && state.pickupMode !== "manual"){
-        await setPickup(lat, lng, true);
+      await applyGpsFix(pos, false);
+    },
+    async () => {
+      updateGpsBadgeBlocked();
+      if(state.gpsFailCount >= 3){
+        await tryApproxLocationFallback();
       }
     },
-    () => updateGpsBadgeBlocked(),
-    { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 1000 }
   );
+
+  if(state.gpsRefreshTimer){
+    clearInterval(state.gpsRefreshTimer);
+    state.gpsRefreshTimer = null;
+  }
+  state.gpsRefreshTimer = setInterval(() => {
+    if(state.phase !== "idle") return;
+    const stale = !state.gpsLastFixAt || (Date.now() - state.gpsLastFixAt) > 15000;
+    if(!stale) return;
+    requestCurrent(false);
+  }, 8000);
 }
 
 async function focusCurrentLocation(){
+  state.pickupMode = "gps";
   if(state.liveLat != null && state.liveLng != null){
     if(map) map.setView([state.liveLat, state.liveLng], Math.max(15, map.getZoom()));
-    state.pickupMode = "gps";
     if(state.phase === "idle"){
       await setPickup(state.liveLat, state.liveLng, true);
     }
@@ -828,25 +1104,31 @@ async function focusCurrentLocation(){
 
   if(!navigator.geolocation){
     updateGpsBadgeBlocked();
+    await tryApproxLocationFallback();
     return;
   }
 
   navigator.geolocation.getCurrentPosition(
     async (pos) => {
-      const lat = Number(pos?.coords?.latitude);
-      const lng = Number(pos?.coords?.longitude);
-      const acc = Number(pos?.coords?.accuracy);
-      if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-      state.liveLat = lat;
-      state.liveLng = lng;
-      updateGpsBadgeLive(acc);
-      if(map) map.setView([lat, lng], 15);
-      state.pickupMode = "gps";
-      await setPickup(lat, lng, true);
+      await applyGpsFix(pos, true);
     },
-    () => updateGpsBadgeBlocked(),
+    async () => {
+      updateGpsBadgeBlocked();
+      await tryApproxLocationFallback();
+    },
     { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
   );
+}
+
+function stopGpsWatch(){
+  if(state.watchId != null && navigator.geolocation){
+    navigator.geolocation.clearWatch(state.watchId);
+  }
+  state.watchId = null;
+  if(state.gpsRefreshTimer){
+    clearInterval(state.gpsRefreshTimer);
+    state.gpsRefreshTimer = null;
+  }
 }
 
 async function handleDestinationInput(text){
@@ -1239,28 +1521,59 @@ async function restoreStateIfPresent(){
 }
 
 function bindRideEvents(){
+  const whereInput = document.getElementById("whereToInput");
+  const dropInput = document.getElementById("dropInput");
+  const pickupInput = document.getElementById("pickupInput");
+
   document.getElementById("whereSetBtn").onclick = () => {
-    handleDestinationInput(document.getElementById("whereToInput").value).catch(() => {});
+    handleDestinationInput(whereInput.value).catch(() => {});
   };
 
-  document.getElementById("whereToInput").addEventListener("keydown", (e) => {
+  whereInput.addEventListener("keydown", (e) => {
     if(e.key === "Enter"){
       e.preventDefault();
-      handleDestinationInput(document.getElementById("whereToInput").value).catch(() => {});
+      hideSuggestPopup();
+      handleDestinationInput(whereInput.value).catch(() => {});
     }
   });
-
-  document.getElementById("dropInput").addEventListener("keydown", (e) => {
-    if(e.key === "Enter"){
-      e.preventDefault();
-      handleDestinationInput(document.getElementById("dropInput").value).catch(() => {});
-    }
+  whereInput.addEventListener("input", () => {
+    scheduleLandmarkSuggest("whereToInput", async (place) => {
+      await setDrop(Number(place?.lat), Number(place?.lng), true, String(place?.name || ""));
+      await loadRouteAndFare();
+    });
+  });
+  whereInput.addEventListener("focus", () => {
+    scheduleLandmarkSuggest("whereToInput", async (place) => {
+      await setDrop(Number(place?.lat), Number(place?.lng), true, String(place?.name || ""));
+      await loadRouteAndFare();
+    });
   });
 
-  document.getElementById("pickupInput").addEventListener("keydown", (e) => {
+  dropInput.addEventListener("keydown", (e) => {
     if(e.key === "Enter"){
       e.preventDefault();
-      const q = String(document.getElementById("pickupInput").value || "").trim();
+      hideSuggestPopup();
+      handleDestinationInput(dropInput.value).catch(() => {});
+    }
+  });
+  dropInput.addEventListener("input", () => {
+    scheduleLandmarkSuggest("dropInput", async (place) => {
+      await setDrop(Number(place?.lat), Number(place?.lng), true, String(place?.name || ""));
+      await loadRouteAndFare();
+    });
+  });
+  dropInput.addEventListener("focus", () => {
+    scheduleLandmarkSuggest("dropInput", async (place) => {
+      await setDrop(Number(place?.lat), Number(place?.lng), true, String(place?.name || ""));
+      await loadRouteAndFare();
+    });
+  });
+
+  pickupInput.addEventListener("keydown", (e) => {
+    if(e.key === "Enter"){
+      e.preventDefault();
+      hideSuggestPopup();
+      const q = String(pickupInput.value || "").trim();
       if(!q) return;
       geocode(q).then(async (found) => {
         if(!found) return;
@@ -1269,6 +1582,20 @@ function bindRideEvents(){
         await setPickup(Number(found.lat), Number(found.lng), false);
       }).catch(() => {});
     }
+  });
+  pickupInput.addEventListener("input", () => {
+    scheduleLandmarkSuggest("pickupInput", async (place) => {
+      state.pickupMode = "manual";
+      state.pickupText = String(place?.name || "").slice(0, 160);
+      await setPickup(Number(place?.lat), Number(place?.lng), false);
+    });
+  });
+  pickupInput.addEventListener("focus", () => {
+    scheduleLandmarkSuggest("pickupInput", async (place) => {
+      state.pickupMode = "manual";
+      state.pickupText = String(place?.name || "").slice(0, 160);
+      await setPickup(Number(place?.lat), Number(place?.lng), false);
+    });
   });
 
   document.getElementById("locBtn").onclick = () => {
@@ -1335,6 +1662,7 @@ function bindRideEvents(){
 
 async function bootRidePage(){
   ensureRideExtrasUI();
+  ensureSuggestPopup();
   renderRecentDestinations();
   initMap();
   bindRideEvents();
@@ -1351,6 +1679,21 @@ async function bootRidePage(){
   if(state.phase === "idle"){
     await fetchNearbyDrivers();
   }
+
+  window.addEventListener("beforeunload", () => {
+    stopGpsWatch();
+    stopNearbyLoop();
+    hideSuggestPopup();
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if(document.visibilityState === "visible"){
+      startGpsWatch();
+      if(state.phase === "idle"){
+        fetchNearbyDrivers().catch(() => {});
+      }
+    }
+  });
 }
 
 bootRidePage().catch((err) => {
