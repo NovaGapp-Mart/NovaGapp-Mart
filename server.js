@@ -6118,6 +6118,109 @@ app.post("/api/local/rides/request", async (req, res) => {
   }
 });
 
+function ridePricingConfig(vehicleType){
+  const key = String(vehicleType || "auto").trim().toLowerCase();
+  if(key === "bike") return { vehicle_type:"bike", base:30, per_km:8, per_min:1.5, speed_kmph:28 };
+  if(key === "car") return { vehicle_type:"car", base:70, per_km:15, per_min:2.8, speed_kmph:30 };
+  return { vehicle_type:"auto", base:45, per_km:11, per_min:2, speed_kmph:24 };
+}
+
+function computeRideFareBreakdown(input){
+  const cfg = ridePricingConfig(input?.vehicle_type);
+  const pickupLat = sanitizeGeoNumber(input?.pickup_lat);
+  const pickupLng = sanitizeGeoNumber(input?.pickup_lng);
+  const dropLat = sanitizeGeoNumber(input?.drop_lat);
+  const dropLng = sanitizeGeoNumber(input?.drop_lng);
+  let distanceKm = Number(input?.distance_km || 0);
+  let durationMin = Number(input?.duration_min || 0);
+  if((!Number.isFinite(distanceKm) || distanceKm <= 0) && pickupLat !== null && pickupLng !== null && dropLat !== null && dropLng !== null){
+    distanceKm = localDistanceKm(pickupLat, pickupLng, dropLat, dropLng);
+  }
+  if(!Number.isFinite(distanceKm) || distanceKm < 0) distanceKm = 0;
+  if(!Number.isFinite(durationMin) || durationMin <= 0){
+    const speed = Number(cfg.speed_kmph || 24);
+    durationMin = speed > 0 ? (distanceKm / speed) * 60 : 0;
+  }
+  durationMin = Math.max(durationMin, 3);
+  const fare = cfg.base + (distanceKm * cfg.per_km) + (durationMin * cfg.per_min);
+  const commission = fare * 0.10;
+  const driver = fare - commission;
+  return {
+    vehicle_type: cfg.vehicle_type,
+    distance_km: Number(distanceKm.toFixed(3)),
+    duration_min: Number(durationMin.toFixed(2)),
+    base_fare_inr: Number(cfg.base.toFixed(2)),
+    fare_inr: Number(fare.toFixed(2)),
+    commission_inr: Number(commission.toFixed(2)),
+    driver_earning_inr: Number(driver.toFixed(2))
+  };
+}
+
+app.post("/api/local/rides/fare-estimate", async (req, res) => {
+  const pickupLat = sanitizeGeoNumber(req.body?.pickup_lat);
+  const pickupLng = sanitizeGeoNumber(req.body?.pickup_lng);
+  const dropLat = sanitizeGeoNumber(req.body?.drop_lat);
+  const dropLng = sanitizeGeoNumber(req.body?.drop_lng);
+  if(pickupLat === null || pickupLng === null || dropLat === null || dropLng === null){
+    return res.status(400).json({ ok:false, error:"invalid_ride_estimate_payload" });
+  }
+  const summary = computeRideFareBreakdown({
+    vehicle_type: req.body?.vehicle_type,
+    pickup_lat: pickupLat,
+    pickup_lng: pickupLng,
+    drop_lat: dropLat,
+    drop_lng: dropLng,
+    distance_km: req.body?.distance_km,
+    duration_min: req.body?.duration_min
+  });
+  return res.json({ ok:true, estimate: summary });
+});
+
+app.get("/api/local/rides/summary", async (req, res) => {
+  const requestId = String(req.query?.request_id || "").trim();
+  const tipRaw = Number(req.query?.tip_inr || 0);
+  if(!requestId){
+    return res.status(400).json({ ok:false, error:"request_id_required" });
+  }
+  try{
+    const rows = await localServicesSupabaseRequest("local_ride_requests", "GET", {
+      query: {
+        select: "id,pickup_lat,pickup_lng,drop_lat,drop_lng,status",
+        id: `eq.${requestId}`,
+        limit: "1"
+      }
+    });
+    const ride = Array.isArray(rows) ? rows[0] || null : null;
+    if(!ride){
+      return res.status(404).json({ ok:false, error:"ride_not_found" });
+    }
+    const base = computeRideFareBreakdown({
+      vehicle_type: req.query?.vehicle_type,
+      pickup_lat: ride.pickup_lat,
+      pickup_lng: ride.pickup_lng,
+      drop_lat: ride.drop_lat,
+      drop_lng: ride.drop_lng
+    });
+    const tip = Number.isFinite(tipRaw) && tipRaw > 0 ? tipRaw : 0;
+    const total = base.fare_inr + tip;
+    const commission = total * 0.10;
+    const driver = total - commission;
+    return res.json({
+      ok:true,
+      ride_status: String(ride.status || ""),
+      summary: {
+        ...base,
+        tip_inr: Number(tip.toFixed(2)),
+        total_fare_inr: Number(total.toFixed(2)),
+        commission_inr: Number(commission.toFixed(2)),
+        driver_earning_inr: Number(driver.toFixed(2))
+      }
+    });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_ride_summary_failed", message:String(err?.message || "") });
+  }
+});
+
 app.post("/api/local/rides/accept", async (req, res) => {
   const requestId = String(req.body?.request_id || "").trim();
   const driverUserId = sanitizeUserId(req.body?.driver_user_id);
@@ -6520,6 +6623,58 @@ app.post("/api/local/rides/status", async (req, res) => {
     return res.json({ ok:true, ride_request: Array.isArray(patched) ? patched[0] || null : null });
   }catch(err){
     return res.status(500).json({ ok:false, error:"local_ride_status_failed", message:String(err?.message || "") });
+  }
+});
+
+app.post("/api/local/rides/cancel", async (req, res) => {
+  const requestId = String(req.body?.request_id || "").trim();
+  const userId = sanitizeUserId(req.body?.user_id);
+  const by = String(req.body?.by || "rider").trim().toLowerCase();
+  if(!requestId || !userId || !["rider","driver","system"].includes(by)){
+    return res.status(400).json({ ok:false, error:"invalid_ride_cancel_payload" });
+  }
+  try{
+    const rows = await localServicesSupabaseRequest("local_ride_requests", "GET", {
+      query: {
+        select: "id,rider_user_id,driver_user_id,status",
+        id: `eq.${requestId}`,
+        limit: "1"
+      }
+    });
+    const ride = Array.isArray(rows) ? rows[0] || null : null;
+    if(!ride){
+      return res.status(404).json({ ok:false, error:"ride_not_found" });
+    }
+    const riderId = sanitizeUserId(ride.rider_user_id);
+    const driverId = sanitizeUserId(ride.driver_user_id);
+    const current = String(ride.status || "").trim().toLowerCase();
+    const allowedCurrent = new Set(["searching","accepted","arriving","on_trip"]);
+    if(!allowedCurrent.has(current)){
+      return res.status(409).json({ ok:false, error:"ride_not_cancellable" });
+    }
+    if(by === "rider"){
+      if(riderId !== userId){
+        return res.status(403).json({ ok:false, error:"ride_cancel_forbidden" });
+      }
+      if(!["searching","accepted","arriving"].includes(current)){
+        return res.status(409).json({ ok:false, error:"rider_cancel_not_allowed_in_current_status" });
+      }
+    }else if(by === "driver"){
+      if(driverId !== userId){
+        return res.status(403).json({ ok:false, error:"ride_cancel_forbidden" });
+      }
+    }
+    const patched = await localServicesSupabaseRequest("local_ride_requests", "PATCH", {
+      query: { id: `eq.${requestId}` },
+      body: {
+        status: "cancelled",
+        updated_at: new Date().toISOString()
+      },
+      prefer: "return=representation"
+    });
+    return res.json({ ok:true, ride_request: Array.isArray(patched) ? patched[0] || null : null });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"local_ride_cancel_failed", message:String(err?.message || "") });
   }
 });
 
@@ -7003,6 +7158,7 @@ app.get("/api/local/rides/track", async (req, res) => {
     }
     let driverLocation = null;
     let driverPhone = "";
+    let driverProfile = null;
     if(request.driver_user_id){
       const locRows = await localServicesSupabaseRequest("local_rider_locations", "GET", {
         query: {
@@ -7014,15 +7170,26 @@ app.get("/api/local/rides/track", async (req, res) => {
       driverLocation = Array.isArray(locRows) ? locRows[0] || null : null;
       const driverListingRows = await localServicesSupabaseRequest("local_listings", "GET", {
         query: {
-          select: "phone,listing_type,user_id",
+          select: "phone,listing_type,user_id,store_name,image_url",
           user_id: `eq.${sanitizeUserId(request.driver_user_id)}`,
           listing_type: "eq.ride",
           limit: "1"
         }
       });
-      driverPhone = String((Array.isArray(driverListingRows) && driverListingRows[0]?.phone) || "").trim();
+      const listing = Array.isArray(driverListingRows) ? driverListingRows[0] || null : null;
+      driverPhone = String(listing?.phone || "").trim();
+      driverProfile = listing ? {
+        name: String(listing.store_name || "").trim(),
+        image_url: String(listing.image_url || "").trim()
+      } : null;
     }
-    return res.json({ ok:true, ride_request: request, driver_location: driverLocation, driver_phone: driverPhone });
+    return res.json({
+      ok:true,
+      ride_request: request,
+      driver_location: driverLocation,
+      driver_phone: driverPhone,
+      driver_profile: driverProfile
+    });
   }catch(err){
     return res.status(500).json({ ok:false, error:"local_ride_track_failed", message:String(err?.message || "") });
   }

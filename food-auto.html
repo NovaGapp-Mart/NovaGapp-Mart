@@ -3,872 +3,292 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, viewport-fit=cover">
-<title>Food/Auto - NovaGapp Mart</title>
+<title>Ride - NovaGapp Mart</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="global.js"></script>
 <script src="public-config.js"></script>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
-  body{
-    margin:0;
-    font-family:Arial,sans-serif;
-    background:#f5f5f5;
-    padding-bottom:90px;
-  }
-  .top{
-    background:#ff6a00;
-    color:#fff;
-    padding:12px;
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    font-weight:700;
-  }
-  .section{
-    background:#fff;
-    margin:10px;
-    border-radius:12px;
-    padding:12px;
-    box-shadow:0 4px 14px rgba(0,0,0,.06);
-  }
-  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .btn{
-    border:none;
-    border-radius:10px;
-    padding:10px 12px;
-    background:#111;
-    color:#fff;
-    cursor:pointer;
-  }
-  .btn.orange{background:#ff6a00}
-  .chip{
-    border:none;
-    border-radius:999px;
-    padding:7px 12px;
-    background:#eee;
-    cursor:pointer;
-    font-weight:600;
-  }
-  .chip.active{
-    background:#ff6a00;
-    color:#fff;
-  }
-  .list{
-    display:grid;
-    gap:10px;
-  }
-  .card{
-    border:1px solid #eee;
-    border-radius:12px;
-    overflow:hidden;
-    background:#fff;
-  }
-  .card img{
-    width:100%;
-    height:140px;
-    object-fit:cover;
-    background:#ececec;
-  }
-  .meta{padding:10px}
-  .meta h4{margin:0 0 6px 0;font-size:15px}
-  .muted{color:#666;font-size:12px}
-  .fee{
-    display:none;
-  }
-  .input{
-    width:100%;
-    padding:10px;
-    border:1px solid #ddd;
-    border-radius:8px;
-    box-sizing:border-box;
-  }
-  .hide{display:none}
-  .service-tabs{
-    position:fixed;
-    left:0;right:0;bottom:58px;
-    background:#fff;
-    border-top:1px solid #eee;
-    border-bottom:1px solid #eee;
-    padding:8px 10px;
-    z-index:98;
-    display:flex;
-    gap:8px;
-    overflow-x:auto;
-  }
-  .ride-form .input{margin-top:6px}
-  .ride-form .btn{margin-top:8px}
-  #rideMap{width:100%;height:520px;border-radius:12px;border:1px solid #e5e5e5;margin-top:8px}
-  .bottom-nav{
-    position:fixed;
-    left:0;right:0;bottom:0;
-    background:#fff;
-    border-top:1px solid #ddd;
-    display:flex;
-    justify-content:space-around;
-    z-index:99;
-  }
-  .nav-item{
-    flex:1;
-    text-align:center;
-    padding:8px 4px;
-    font-size:11px;
-    color:#444;
-  }
-  .nav-item img{display:block;margin:0 auto 4px auto}
-  .nav-item.active{color:#ff6a00;font-weight:700}
+:root{--brand:#ff6a00;--text:#1f2937;--muted:#64748b;--line:#e2e8f0;--bg:#f1f5f9;--ok:#16a34a;--warn:#dc2626}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:var(--text);padding-bottom:78px}
+.top{position:sticky;top:0;z-index:50;background:linear-gradient(130deg,#ff8b40,#ff6000);color:#fff;padding:14px 12px;font-weight:700}
+.wrap{padding:10px}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px}
+.hide{display:none!important}
+.input,select{width:100%;padding:11px;border:1px solid #d6deea;border-radius:10px;font-size:14px;background:#fff}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{border:none;border-radius:10px;padding:11px 12px;font-weight:700;cursor:pointer}
+.btn.brand{background:var(--brand);color:#fff}
+.btn.dark{background:#111;color:#fff}
+.btn.warn{background:var(--warn);color:#fff}
+.btn.full{width:100%}
+.muted{font-size:12px;color:var(--muted)}
+.vehicle-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+.vehicle{border:1px solid #d8e0ec;border-radius:11px;padding:10px;text-align:center;background:#fff;cursor:pointer;font-weight:700}
+.vehicle.active{border-color:var(--brand);background:#fff1e8;color:#9a3b00}
+#rideMap{height:260px;border-radius:12px;border:1px solid #dbe2ef;margin-top:8px}
+.ride-type{display:flex;justify-content:space-between;align-items:center;border:1px solid #dce3f0;border-radius:11px;padding:10px;margin-top:8px;cursor:pointer}
+.ride-type.active{border-color:var(--brand);background:#fff4ec}
+.pulse{width:10px;height:10px;border-radius:99px;background:var(--brand);animation:p 1.2s infinite}
+@keyframes p{0%{transform:scale(1)}60%{transform:scale(2);opacity:.25}100%{transform:scale(1)}}
+.driver{display:grid;grid-template-columns:58px 1fr auto;gap:10px;align-items:center}
+.avatar{height:58px;width:58px;border-radius:999px;background:#ffe4d5;display:flex;align-items:center;justify-content:center;font-weight:700}
+.tag{font-size:11px;background:#eaf3ff;color:#1e40af;padding:4px 8px;border-radius:999px;font-weight:700;display:inline-block}
+.kv{display:flex;justify-content:space-between;margin:6px 0;font-size:14px}
+.kv.total{font-size:16px;font-weight:700;border-top:1px dashed #cfd8e5;padding-top:8px}
+.bottom-nav{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid #dbe2ee;display:grid;grid-template-columns:repeat(5,1fr);z-index:60}
+.nav-item{border:none;background:transparent;padding:8px 4px;font-size:11px;color:#475569;cursor:pointer;text-align:center}
+.nav-item.active{color:var(--brand);font-weight:700}
 </style>
 </head>
 <body>
-  <div class="top">
-    <span>Food / Auto Nearby</span>
-    <div class="row">
-      <button class="btn orange" id="openListingTopBtn">+ Add Listing</button>
-      <button class="btn" onclick="location.href='F-account.html'">F-Account</button>
-      <button class="btn" onclick="location.href='index.html'">Home</button>
+<div class="top" id="headerTitle">Book a Ride</div>
+<div class="wrap">
+  <section id="rideSection">
+    <div class="card" id="entryCard">
+      <b>Ride Home</b>
+      <div class="muted" style="margin-top:6px">Pickup is auto-detected from GPS.</div>
+      <div class="vehicle-grid">
+        <button class="vehicle" data-vehicle="bike">Bike</button>
+        <button class="vehicle" data-vehicle="auto">Auto</button>
+        <button class="vehicle" data-vehicle="car">Car</button>
+      </div>
+      <input class="input" id="entryDestination" placeholder="Enter Destination" style="margin-top:8px">
+      <div class="muted" id="pickupText" style="margin-top:6px">Pickup: detecting...</div>
+      <div style="margin-top:8px"><b>Recent locations</b></div>
+      <div id="recentList"></div>
+      <button class="btn brand full" id="entryContinueBtn" style="margin-top:8px">Continue</button>
     </div>
-  </div>
 
-  <div class="section">
-    <div class="row" style="justify-content:space-between">
-      <strong>Current Location</strong>
-      <button class="btn orange" id="locBtn">Refresh GPS</button>
+    <div class="card hide" id="bookingCard">
+      <div class="tag">Step: Pickup -> Drop -> Confirm</div>
+      <div class="row" style="margin-top:8px">
+        <input class="input" id="pickupInput" placeholder="Pickup">
+        <input class="input" id="dropInput" placeholder="Drop">
+      </div>
+      <div id="rideMap"></div>
+      <div style="margin-top:8px"><b>Ride types</b></div>
+      <div id="rideTypes"></div>
+      <div class="row" style="margin-top:8px">
+        <select id="paymentMethod">
+          <option value="cash">Cash</option>
+          <option value="upi">UPI</option>
+          <option value="card">Card</option>
+        </select>
+      </div>
+      <button class="btn brand full" id="confirmBtn" style="margin-top:8px">Confirm Ride</button>
     </div>
-    <div id="locText" class="muted" style="margin-top:8px">Detecting your current location...</div>
-  </div>
 
-  <div class="section">
-    <div class="row" style="justify-content:space-between"><strong>Nearby Partners</strong></div>
-    <div id="resultsInfo" class="muted" style="margin-top:8px"></div>
-    <div class="list" id="listingBox" style="margin-top:10px"></div>
-  </div>
+    <div class="card hide" id="matchingCard">
+      <div class="row"><div class="pulse"></div><b>Finding nearby drivers...</b></div>
+      <div class="muted" id="matchText" style="margin-top:8px">Searching in 3km radius</div>
+      <button class="btn warn full" id="cancelSearchBtn" style="margin-top:8px">Cancel Search</button>
+    </div>
 
-  <div class="section hide" id="listingFormWrap">
-    <strong>Create Listing</strong>
-    <div class="muted" style="margin:6px 0 10px 0">Upload your own photo, or use quick auto-enhance preview.</div>
-    <div class="row">
-      <input id="storeName" class="input" placeholder="Store / Driver name">
+    <div class="card hide" id="confirmedCard">
+      <div class="driver">
+        <div class="avatar" id="driverAvatar">DR</div>
+        <div>
+          <div><b id="driverName">Driver</b></div>
+          <div class="muted" id="driverMeta">Rating 4.8 | Vehicle</div>
+        </div>
+        <div class="tag" id="etaTag">ETA -</div>
+      </div>
+      <div class="muted" id="rideStatus" style="margin-top:8px">Status: accepted</div>
+      <div class="muted" id="driverPhone" style="margin-top:4px">Phone: -</div>
+      <div class="row" style="margin-top:8px">
+        <input class="input" id="otpInput" placeholder="Enter start OTP">
+        <button class="btn dark" id="otpVerifyBtn">Start Ride</button>
+      </div>
+      <button class="btn warn full" id="cancelAfterAcceptBtn" style="margin-top:8px">Cancel Ride Request</button>
     </div>
-    <div class="row" style="margin-top:8px">
-      <select id="storeType" class="input">
-        <option value="food">Food</option>
-        <option value="grocery">Grocery</option>
-        <option value="ride">Ride / Auto</option>
-        <option value="agent">Agent (Plumber/Electrician)</option>
-      </select>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <input id="storePhone" class="input" placeholder="Phone number">
-    </div>
-    <div class="row" style="margin-top:8px">
-      <input id="storeImage" type="file" accept="image/*" class="input">
-    </div>
-    <div class="row" style="margin-top:8px">
-      <button class="btn" id="enhanceBtn">Auto Enhance Photo</button>
-      <button class="btn orange" id="saveListingBtn">Pay INR 500 & Submit</button>
-    </div>
-    <div id="enhanceText" class="muted" style="margin-top:8px"></div>
-  </div>
 
-  <div class="section hide ride-form" id="rideFormSection">
-    <strong>Book Ride</strong>
-    <div class="muted" style="margin-top:6px">Pickup is auto-set from your current GPS location.</div>
-    <input id="dropTextInput" class="input" placeholder="Drop location text (e.g. Hinjewadi Phase 1)">
-    <button class="btn" id="dropGeoBtn" type="button">Find Drop On Map</button>
-    <div id="rideMap"></div>
-    <input id="dropLatInput" type="hidden">
-    <input id="dropLngInput" type="hidden">
-    <button class="btn orange" id="rideRequestBtn" type="button">Request Ride Now</button>
-    <div id="rideTrackText" class="muted" style="margin-top:8px"></div>
-    <div class="row">
-      <input id="rideTrackIdInput" class="input" placeholder="Ride request id for tracking">
-      <button class="btn" id="rideTrackBtn" type="button">Track</button>
+    <div class="card hide" id="inRideCard">
+      <div class="tag">Ride Started</div>
+      <div class="muted" id="remainText" style="margin-top:8px">Distance remaining: -</div>
+      <div class="muted" id="inRideEta" style="margin-top:4px">ETA: -</div>
+      <button class="btn warn full" id="sosBtn" style="margin-top:8px">Emergency SOS</button>
+      <button class="btn brand full" id="completeBtn" style="margin-top:8px">Complete Ride (Rider side)</button>
     </div>
-    <div class="row">
-      <input id="rideOtpInput" class="input" placeholder="Enter start OTP">
-      <button class="btn" id="rideOtpBtn" type="button">Verify OTP</button>
-    </div>
-  </div>
 
-  <div class="service-tabs" id="serviceTabs">
-    <button class="chip active" data-type="food">Food</button>
-    <button class="chip" data-type="grocery">Grocery</button>
-    <button class="chip" data-type="ride">Ride / Auto</button>
-    <button class="chip" data-type="agent">Agent</button>
-  </div>
+    <div class="card hide" id="completeCard">
+      <b>Ride Complete</b>
+      <div class="kv"><span>Ride fare</span><b id="fareOut">INR 0.00</b></div>
+      <div class="kv"><span>Platform fee (10%)</span><b id="commissionOut">INR 0.00</b></div>
+      <div class="kv"><span>Driver earning</span><b id="driverOut">INR 0.00</b></div>
+      <div class="kv total"><span>Total payable</span><b id="totalOut">INR 0.00</b></div>
+      <div class="row" style="margin-top:8px">
+        <select id="rateInput">
+          <option value="5">Rate 5</option>
+          <option value="4">Rate 4</option>
+          <option value="3">Rate 3</option>
+          <option value="2">Rate 2</option>
+          <option value="1">Rate 1</option>
+        </select>
+        <input class="input" id="tipInput" placeholder="Tip amount">
+      </div>
+      <button class="btn brand full" id="bookAgainBtn" style="margin-top:8px">Book Again</button>
+    </div>
+  </section>
 
-  <div class="bottom-nav">
-    <div class="nav-item" onclick="location.href='index.html'">
-      <img src="https://img.icons8.com/ios-filled/24/000000/home.png" alt="">
-      <span>Home</span>
-    </div>
-    <div class="nav-item active">
-      <img src="https://img.icons8.com/ios-filled/24/ff6a00/marker.png" alt="">
-      <span>Food/Auto</span>
-    </div>
-    <div class="nav-item" onclick="location.href='account.html'">
-      <img src="https://img.icons8.com/ios-filled/24/000000/user.png" alt="">
-      <span>Account</span>
-    </div>
-  </div>
+  <section id="foodSection" class="card hide"><b>Food/Grocery</b><div class="muted" style="margin-top:8px">This tab is available. Ride section is fully active now.</div></section>
+  <section id="agentSection" class="card hide"><b>Agent</b><div class="muted" style="margin-top:8px">This tab is available. Ride section is fully active now.</div></section>
+</div>
+
+<nav class="bottom-nav">
+  <button class="nav-item" data-nav="home">HM<br>Home</button>
+  <button class="nav-item active" data-nav="ride">RD<br>Ride</button>
+  <button class="nav-item" data-nav="food">FG<br>Food/Grocery</button>
+  <button class="nav-item" data-nav="agent">AG<br>Agent</button>
+  <button class="nav-item" data-nav="account">FA<br>F-Account</button>
+</nav>
 
 <script>
 const supa = window.supa || window.novaCreateSupabaseClient();
-const listingBox = document.getElementById("listingBox");
-const locText = document.getElementById("locText");
-const resultsInfo = document.getElementById("resultsInfo");
-const listingFormWrap = document.getElementById("listingFormWrap");
-const chips = Array.from(document.querySelectorAll("#serviceTabs .chip"));
-let activeType = "food";
-let myLat = null;
-let myLng = null;
-const radiusKm = 30;
-let user = null;
-let rideMap = null;
-let ridePickupMarker = null;
-let rideDropMarker = null;
-let rideTrackTimer = null;
-let geoWatchId = null;
-let ridePickupCircle = null;
+const state = {
+  me:null,
+  vehicle:"auto",
+  pickupLat:null,pickupLng:null,dropLat:null,dropLng:null,
+  pickupText:"",dropText:"",
+  distanceKm:0,durationMin:0,fare:0,
+  requestId:"",trackTimer:null,matchSecond:0,
+  driverWallet:0,platformWallet:0
+};
+const pricing={bike:{base:30,perKm:8,perMin:1.5,speed:28,label:"Bike"},auto:{base:45,perKm:11,perMin:2,label:"Auto"},car:{base:70,perKm:15,perMin:2.8,label:"Car"}};
+const recent=["Hinjewadi Phase 1, Pune","Balewadi High Street, Pune","Pimpri Station"];
+let map=null,pickupMarker=null,dropMarker=null,routeLine=null,driverMarker=null;
 
-function moneyInr(value){
-  return "INR " + Number(value || 0).toFixed(2);
+function money(v){return "INR "+Number(v||0).toFixed(2)}
+function setScreen(id){["entryCard","bookingCard","matchingCard","confirmedCard","inRideCard","completeCard"].forEach(x=>document.getElementById(x).classList.toggle("hide",x!==id));}
+function haversineKm(a,b,c,d){const r=x=>x*Math.PI/180;const R=6371;const dLat=r(c-a),dLng=r(d-b);const q=Math.sin(dLat/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dLng/2)**2;return R*(2*Math.atan2(Math.sqrt(q),Math.sqrt(1-q)));}
+function bases(){const out=[];const p=v=>{v=String(v||"").trim().replace(/\/+$/g,"");if(v&&/^https?:\/\//i.test(v)&&!out.includes(v))out.push(v)};p(window.CONTEST_API_BASE||window.API_BASE||"");try{p(localStorage.getItem("contest_api_base"));p(localStorage.getItem("api_base"));}catch(_){ }if(/^https?:\/\//i.test(location.origin||""))p(location.origin);p("https://novagapp-mart.onrender.com");return out;}
+async function apiGet(path){for(const b of bases()){try{const r=await fetch(b+path,{cache:"no-store"});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok)return j;}catch(_){}}return null;}
+async function apiPost(path,body){for(const b of bases()){try{const r=await fetch(b+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok)return j;}catch(_){}}return null;}
+
+async function ensureUser(){if(state.me)return state.me;const {data}=await supa.auth.getSession();state.me=data?.session?.user||null;if(!state.me){location.href="login.html";return null;}return state.me;}
+function renderRecent(){const box=document.getElementById("recentList");box.innerHTML="";recent.forEach(name=>{const d=document.createElement("div");d.className="muted";d.style.marginTop="6px";d.style.padding="8px";d.style.border="1px solid #e4e9f3";d.style.borderRadius="10px";d.style.cursor="pointer";d.textContent="LOC: "+name;d.onclick=()=>{document.getElementById("entryDestination").value=name;};box.appendChild(d);});}
+function setVehicle(v){state.vehicle=v;document.querySelectorAll(".vehicle").forEach(btn=>btn.classList.toggle("active",btn.dataset.vehicle===v));renderRideTypes();}
+
+async function detectPickup(){if(!navigator.geolocation){document.getElementById("pickupText").textContent="Pickup: GPS unsupported";return;}
+navigator.geolocation.getCurrentPosition(async pos=>{state.pickupLat=Number(pos.coords.latitude);state.pickupLng=Number(pos.coords.longitude);state.pickupText=`Current (${state.pickupLat.toFixed(5)}, ${state.pickupLng.toFixed(5)})`;document.getElementById("pickupText").textContent="Pickup: "+state.pickupText;document.getElementById("pickupInput").value=state.pickupText;await updateDriverLocation(true);},()=>{state.pickupLat=18.5204;state.pickupLng=73.8567;state.pickupText="Current (fallback Pune)";document.getElementById("pickupText").textContent="Pickup: "+state.pickupText;document.getElementById("pickupInput").value=state.pickupText;},{enableHighAccuracy:true,timeout:15000,maximumAge:0});}
+
+async function updateDriverLocation(isOnline){const me=await ensureUser();if(!me||state.pickupLat==null||state.pickupLng==null)return;await apiPost("/api/local/riders/location",{user_id:me.id,lat:state.pickupLat,lng:state.pickupLng,is_online:Boolean(isOnline)});}
+
+function initMap(){if(map)return;map=L.map("rideMap",{zoomControl:true}).setView([state.pickupLat||18.5204,state.pickupLng||73.8567],13);L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"&copy; OpenStreetMap contributors"}).addTo(map);map.on("click",e=>{state.dropLat=Number(e.latlng.lat);state.dropLng=Number(e.latlng.lng);drawRoute();updateFare();});}
+function drawRoute(){if(!map||state.pickupLat==null||state.pickupLng==null)return;const p=[state.pickupLat,state.pickupLng];if(!pickupMarker){pickupMarker=L.marker(p).addTo(map).bindPopup("Pickup");}else{pickupMarker.setLatLng(p);}if(state.dropLat!=null&&state.dropLng!=null){const d=[state.dropLat,state.dropLng];if(!dropMarker){dropMarker=L.marker(d,{draggable:true}).addTo(map).bindPopup("Drop");dropMarker.on("dragend",()=>{const m=dropMarker.getLatLng();state.dropLat=Number(m.lat);state.dropLng=Number(m.lng);drawRoute();updateFare();});}else{dropMarker.setLatLng(d);}if(routeLine){map.removeLayer(routeLine);}routeLine=L.polyline([p,d],{color:"#1d4ed8",weight:5}).addTo(map);map.fitBounds(routeLine.getBounds(),{padding:[20,20]});}}
+
+async function geocode(text){try{const r=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(text)}`,{cache:"no-store"});const j=await r.json().catch(()=>[]);const x=Array.isArray(j)?j[0]:null;const lat=Number(x?.lat),lng=Number(x?.lon);if(Number.isFinite(lat)&&Number.isFinite(lng))return {lat,lng,name:String(x?.display_name||text).slice(0,120)};}catch(_){ }return null;}
+async function routeApiDistanceDuration(){if(state.pickupLat==null||state.pickupLng==null||state.dropLat==null||state.dropLng==null)return null;try{const url=`https://router.project-osrm.org/route/v1/driving/${state.pickupLng},${state.pickupLat};${state.dropLng},${state.dropLat}?overview=false`;const r=await fetch(url,{cache:"no-store"});const j=await r.json().catch(()=>null);const rt=j?.routes?.[0];const distKm=Number(rt?.distance||0)/1000;const durMin=Number(rt?.duration||0)/60;if(distKm>0&&durMin>0)return {distanceKm:distKm,durationMin:durMin};}catch(_){ }const d=haversineKm(state.pickupLat,state.pickupLng,state.dropLat,state.dropLng);return {distanceKm:d,durationMin:Math.max((d/pricing[state.vehicle].speed)*60,3)};}
+
+async function updateFare(){const r=await routeApiDistanceDuration();if(!r)return;state.distanceKm=r.distanceKm;state.durationMin=r.durationMin;renderRideTypes();}
+function estimate(type){if(state.distanceKm<=0||state.durationMin<=0)return null;const c=pricing[type];const f=c.base+(state.distanceKm*c.perKm)+(state.durationMin*c.perMin);return {fare:f,eta:Math.max(2,Math.round(state.durationMin*1.15))};}
+function renderRideTypes(){const box=document.getElementById("rideTypes");box.innerHTML="";Object.keys(pricing).forEach(type=>{const c=pricing[type];const e=estimate(type);const d=document.createElement("div");d.className="ride-type"+(state.vehicle===type?" active":"");d.innerHTML=`<div><b>${c.label}</b><div class='muted'>ETA ${e?e.eta:"-"} min</div></div><div><b>${e?money(e.fare):"Set drop"}</b></div>`;d.onclick=()=>{state.vehicle=type;renderRideTypes();};box.appendChild(d);});const s=estimate(state.vehicle);if(s){state.fare=s.fare;}}
+
+async function startBookingFromEntry(){const dest=String(document.getElementById("entryDestination").value||"").trim();if(!dest){alert("Enter destination");return;}state.dropText=dest;document.getElementById("dropInput").value=dest;setScreen("bookingCard");initMap();const g=await geocode(dest);if(g){state.dropLat=g.lat;state.dropLng=g.lng;state.dropText=g.name;document.getElementById("dropInput").value=g.name;drawRoute();}await updateFare();}
+
+async function createRideRequest(){const me=await ensureUser();if(!me)return;if(state.pickupLat==null||state.pickupLng==null||state.dropLat==null||state.dropLng==null){alert("Set pickup and drop first");return;}
+const estimatePayload={vehicle_type:state.vehicle,pickup_lat:state.pickupLat,pickup_lng:state.pickupLng,drop_lat:state.dropLat,drop_lng:state.dropLng,distance_km:state.distanceKm,duration_min:state.durationMin};
+const est=await apiPost("/api/local/rides/fare-estimate",estimatePayload);
+if(est?.estimate?.fare_inr){state.fare=Number(est.estimate.fare_inr||0);}
+const r=await apiPost("/api/local/rides/request",{user_id:me.id,pickup_lat:state.pickupLat,pickup_lng:state.pickupLng,drop_lat:state.dropLat,drop_lng:state.dropLng,pickup_text:state.pickupText||"Current",drop_text:state.dropText||document.getElementById("dropInput").value||"Drop",vehicle_type:state.vehicle});if(!r){alert("Ride request failed. Ensure consumer role + backend ready.");return;}state.requestId=String(r.ride_request?.id||"");state.matchSecond=0;setScreen("matchingCard");startTracking();}
+
+function startTracking(){stopTracking();state.trackTimer=setInterval(async()=>{if(!state.requestId)return;state.matchSecond+=3;const msg=document.getElementById("matchText");if(msg){const round=Math.max(1,Math.ceil(state.matchSecond/10));msg.textContent=`Searching in 3km radius | Attempt ${round} | ${state.matchSecond}s`;}
+const t=await apiGet(`/api/local/rides/track?request_id=${encodeURIComponent(state.requestId)}`);if(!t)return;const status=String(t.ride_request?.status||"");const phone=String(t.driver_phone||"").trim();const loc=t.driver_location||null;if(status==="searching")return;
+if(status==="accepted"||status==="arriving"){
+ setScreen("confirmedCard");
+ document.getElementById("rideStatus").textContent=`Status: ${status}`;
+ document.getElementById("driverPhone").textContent=`Phone: ${phone||"-"}`;
+ const driverName = String(t.driver_profile?.name || "").trim();
+ document.getElementById("driverName").textContent=driverName || "Assigned Driver";
+ document.getElementById("driverMeta").textContent="Verified ride partner";
+ const eta=Math.max(2,Math.round(state.durationMin*0.5));document.getElementById("etaTag").textContent=`ETA ${eta}m`;
+ if(loc&&Number.isFinite(Number(loc.lat))&&Number.isFinite(Number(loc.lng))){if(!driverMarker){driverMarker=L.circleMarker([Number(loc.lat),Number(loc.lng)],{radius:7,color:"#dc2626"}).addTo(map);}else{driverMarker.setLatLng([Number(loc.lat),Number(loc.lng)]);} }
+ return;
+}
+if(status==="on_trip"){
+ setScreen("inRideCard");
+ document.getElementById("remainText").textContent=`Distance remaining: ${Math.max(0,state.distanceKm-(state.matchSecond/120)).toFixed(1)} km`;
+ document.getElementById("inRideEta").textContent=`ETA: ${Math.max(1,Math.round(state.durationMin-(state.matchSecond/60)))} min`;
+ return;
+}
+if(status==="completed"){
+ stopTracking();
+ await finishRideBreakdown();
+ return;
+}
+if(status==="cancelled"){
+ stopTracking();
+ alert("Ride cancelled.");
+ resetRide();
+}
+},3000);}
+function stopTracking(){if(state.trackTimer){clearInterval(state.trackTimer);state.trackTimer=null;}}
+
+async function verifyOtpStart(){const me=await ensureUser();if(!me)return;const otp=String(document.getElementById("otpInput").value||"").trim();if(!otp){alert("Enter OTP");return;}const r=await apiPost("/api/local/rides/otp/verify",{request_id:state.requestId,rider_user_id:me.id,otp});if(!r){alert("OTP verify failed");return;}setScreen("inRideCard");}
+
+async function completeRideRiderSide(){
+ const t = state.requestId ? await apiGet(`/api/local/rides/track?request_id=${encodeURIComponent(state.requestId)}`) : null;
+ const status = String(t?.ride_request?.status || "").trim().toLowerCase();
+ if(status && status !== "completed"){
+   alert("Driver must end ride first. Current status: " + status);
+   return;
+ }
+ await finishRideBreakdown();
 }
 
-function haversineKm(lat1, lon1, lat2, lon2){
-  const toRad = d => d * Math.PI / 180;
-  const R = 6371;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a = Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+async function finishRideBreakdown(){setScreen("completeCard");const tip=Number(document.getElementById("tipInput")?.value||0);
+const tipClean=(Number.isFinite(tip)&&tip>0)?tip:0;
+const summary=state.requestId?await apiGet(`/api/local/rides/summary?request_id=${encodeURIComponent(state.requestId)}&vehicle_type=${encodeURIComponent(state.vehicle)}&tip_inr=${encodeURIComponent(String(tipClean))}`):null;
+if(summary?.summary){
+  const s=summary.summary;
+  state.fare=Number(s.fare_inr||0);
+  document.getElementById("fareOut").textContent=money(s.fare_inr);
+  document.getElementById("commissionOut").textContent=money(s.commission_inr);
+  document.getElementById("driverOut").textContent=money(s.driver_earning_inr);
+  document.getElementById("totalOut").textContent=money(s.total_fare_inr);
+  state.driverWallet+=Number(s.driver_earning_inr||0);
+  state.platformWallet+=Number(s.commission_inr||0);
+  return;
+}
+const total=Math.max(0,state.fare+tipClean);const comm=total*0.10;const drv=total-comm;state.driverWallet+=drv;state.platformWallet+=comm;document.getElementById("fareOut").textContent=money(state.fare);document.getElementById("commissionOut").textContent=money(comm);document.getElementById("driverOut").textContent=money(drv);document.getElementById("totalOut").textContent=money(total);}
+function resetRide(){stopTracking();state.requestId="";state.dropLat=null;state.dropLng=null;state.distanceKm=0;state.durationMin=0;state.fare=0;document.getElementById("entryDestination").value="";document.getElementById("dropInput").value="";setScreen("entryCard");}
+
+async function cancelSearching(){
+  const me=await ensureUser();if(!me)return;
+  if(!state.requestId){resetRide();return;}
+  const r=await apiPost("/api/local/rides/cancel",{request_id:state.requestId,user_id:me.id,by:"rider"});
+  if(!r){alert("Cancel failed. Please try again.");return;}
+  stopTracking();
+  alert("Ride request cancelled.");
+  resetRide();
+}
+async function cancelAfterAccept(){
+  const me=await ensureUser();if(!me)return;
+  if(!state.requestId){resetRide();return;}
+  const r=await apiPost("/api/local/rides/cancel",{request_id:state.requestId,user_id:me.id,by:"rider"});
+  if(!r){alert("Cancel failed for current status.");return;}
+  stopTracking();
+  alert("Ride cancelled.");
+  resetRide();
 }
 
-function renderRows(rows){
-  listingBox.innerHTML = "";
-  if(!rows.length){
-    listingBox.innerHTML = '<div class="muted">No partners found in selected radius.</div>';
-    return;
-  }
-  rows.forEach(row => {
-    const distance = (myLat != null && myLng != null && Number.isFinite(Number(row.lat)) && Number.isFinite(Number(row.lng)))
-      ? haversineKm(myLat, myLng, Number(row.lat), Number(row.lng))
-      : null;
-    const actionLabel = row.listing_type === "ride"
-      ? "Request Ride"
-      : (row.listing_type === "agent" ? "Book Agent" : "Order Now");
-    const div = document.createElement("div");
-    div.className = "card";
-    div.innerHTML = `
-      <img src="${row.image_url || "Images/no-image.jpg"}" alt="">
-      <div class="meta">
-        <h4>${row.store_name || "Listing"}</h4>
-        <div class="muted">Type: ${(row.listing_type || "").toUpperCase()} | ${row.open_now ? "Open now" : "Closed"}</div>
-        <div class="muted">Phone: ${row.phone || "-"}</div>
-        <div class="muted">${distance == null ? "Distance unknown" : ("Distance: " + distance.toFixed(1) + " km")}</div>
-        <div class="row" style="margin-top:8px">
-          <button
-            class="btn orange action-btn"
-            data-id="${String(row.id || "")}"
-            data-type="${String(row.listing_type || "")}"
-            data-name="${String(row.store_name || "").replace(/"/g, "&quot;")}"
-          >${actionLabel}</button>
-        </div>
-      </div>
-    `;
-    listingBox.appendChild(div);
-  });
-}
+function setTab(tab){document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.nav===tab));document.getElementById("rideSection").classList.toggle("hide",tab!=="ride");document.getElementById("foodSection").classList.toggle("hide",tab!=="food");document.getElementById("agentSection").classList.toggle("hide",tab!=="agent");document.getElementById("headerTitle").textContent=tab==="ride"?"Book a Ride":(tab==="food"?"Food & Groceries":"Book an Agent");}
 
-async function loadListings(){
-  if(myLat == null || myLng == null){
-    resultsInfo.textContent = "Getting your live location...";
-    listingBox.innerHTML = '<div class="muted">Please allow location access to see nearby services.</div>';
-    return;
-  }
-  let rows = [];
-  const bases = buildApiBases();
-  const endpoint = activeType === "agent" ? "/api/local/agents/nearby" : "/api/local/nearby";
-  for(const base of bases){
-    try{
-      const url = activeType === "agent"
-        ? `${base}${endpoint}?service_category=&lat=${encodeURIComponent(String(myLat))}&lng=${encodeURIComponent(String(myLng))}&radius_km=${encodeURIComponent(String(radiusKm))}`
-        : `${base}${endpoint}?type=${encodeURIComponent(activeType)}&lat=${encodeURIComponent(String(myLat))}&lng=${encodeURIComponent(String(myLng))}&radius_km=${encodeURIComponent(String(radiusKm))}&limit=80`;
-      const res = await fetch(url, { cache:"no-store" });
-      if(!res.ok) continue;
-      const payload = await res.json().catch(() => null);
-      if(payload?.ok && Array.isArray(payload.listings || payload.agents)){
-        rows = (payload.listings || payload.agents || []).map((item) => {
-          if(activeType !== "agent") return item;
-          return {
-            id: item.id,
-            store_name: item.title || "Agent",
-            listing_type: "agent",
-            phone: item.phone || "",
-            image_url: item.image_url || "Images/no-image.jpg",
-            lat: item.lat,
-            lng: item.lng,
-            open_now: !!item.available_now
-          };
-        });
-        break;
-      }
-    }catch(_){ }
-  }
-  if(myLat != null && myLng != null){
-    rows = rows.filter(row => {
-      if(!Number.isFinite(Number(row.lat)) || !Number.isFinite(Number(row.lng))) return false;
-      const d = haversineKm(myLat, myLng, Number(row.lat), Number(row.lng));
-      return d <= radiusKm;
-    });
-  }
-  resultsInfo.textContent = `${rows.length} result(s) in ${radiusKm} km radius`;
-  const rideForm = document.getElementById("rideFormSection");
-  if(rideForm) rideForm.classList.toggle("hide", activeType !== "ride");
-  renderRows(rows);
-}
+document.querySelectorAll(".vehicle").forEach(v=>v.onclick=()=>setVehicle(v.dataset.vehicle));
+document.getElementById("entryContinueBtn").onclick=startBookingFromEntry;
+document.getElementById("dropInput").addEventListener("change",async e=>{const g=await geocode(String(e.target.value||"").trim());if(!g)return;state.dropLat=g.lat;state.dropLng=g.lng;state.dropText=g.name;drawRoute();updateFare();});
+document.getElementById("confirmBtn").onclick=createRideRequest;
+document.getElementById("cancelSearchBtn").onclick=cancelSearching;
+document.getElementById("otpVerifyBtn").onclick=verifyOtpStart;
+document.getElementById("cancelAfterAcceptBtn").onclick=cancelAfterAccept;
+document.getElementById("completeBtn").onclick=completeRideRiderSide;
+document.getElementById("sosBtn").onclick=()=>alert("SOS sent to emergency contact and support");
+document.getElementById("bookAgainBtn").onclick=resetRide;
+document.querySelectorAll(".nav-item").forEach(n=>n.onclick=()=>{const t=n.dataset.nav;if(t==="home")return location.href="index.html";if(t==="account")return location.href="F-account.html";setTab(t);});
 
-async function setDropPoint(lat, lng, resolveName){
-  document.getElementById("dropLatInput").value = lat.toFixed(6);
-  document.getElementById("dropLngInput").value = lng.toFixed(6);
-  if(rideMap && window.L){
-    if(rideDropMarker){
-      rideDropMarker.setLatLng([lat, lng]);
-    }else{
-      rideDropMarker = window.L.marker([lat, lng], { draggable:true }).addTo(rideMap);
-      rideDropMarker.on("dragend", async () => {
-        const p = rideDropMarker.getLatLng();
-        const dlat = Number(p?.lat);
-        const dlng = Number(p?.lng);
-        if(!Number.isFinite(dlat) || !Number.isFinite(dlng)) return;
-        await setDropPoint(dlat, dlng, true);
-      });
-    }
-    rideMap.panTo([lat, lng], { animate:true });
-  }
-  if(resolveName){
-    const place = await resolvePlaceName(lat, lng);
-    if(place){
-      document.getElementById("dropTextInput").value = place;
-    }
-  }
-}
-
-async function initRideMap(){
-  if(rideMap) return;
-  if(typeof window.L === "undefined"){
-    const mapWrap = document.getElementById("rideMap");
-    if(mapWrap){
-      mapWrap.innerHTML = '<div class="muted" style="padding:14px">Map unavailable on this device right now.</div>';
-    }
-    return;
-  }
-  const center = [myLat ?? 18.5204, myLng ?? 73.8567];
-  rideMap = window.L.map("rideMap", { zoomControl:true }).setView(center, 15);
-  window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors"
-  }).addTo(rideMap);
-  rideMap.on("click", async (event) => {
-    const lat = Number(event?.latlng?.lat);
-    const lng = Number(event?.latlng?.lng);
-    if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    await setDropPoint(lat, lng, true);
-  });
-  updateRideMapMarkers();
-}
-
-function updateRideMapMarkers(){
-  if(!rideMap || typeof window.L === "undefined" || myLat == null || myLng == null) return;
-  const pickup = [myLat, myLng];
-  if(ridePickupMarker){
-    ridePickupMarker.setLatLng(pickup);
-  }else{
-    ridePickupMarker = window.L.marker(pickup).addTo(rideMap);
-    ridePickupMarker.bindPopup("Pickup (Current Location)");
-  }
-  if(ridePickupCircle){
-    ridePickupCircle.setLatLng(pickup);
-  }else{
-    ridePickupCircle = window.L.circle(pickup, {
-      radius: 120,
-      color: "#1d5cff",
-      fillColor: "#1d5cff",
-      fillOpacity: 0.12
-    }).addTo(rideMap);
-  }
-  rideMap.setView(pickup, Math.max(rideMap.getZoom(), 15));
-}
-
-async function resolvePlaceName(lat, lng){
-  try{
-    const bdc = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(String(lat))}&longitude=${encodeURIComponent(String(lng))}&localityLanguage=en`;
-    const bdcRes = await fetch(bdc, { cache:"no-store" });
-    if(bdcRes.ok){
-      const data = await bdcRes.json().catch(() => null);
-      const parts = [
-        data?.locality || data?.city || data?.principalSubdivision || "",
-        data?.principalSubdivision || "",
-        data?.countryName || ""
-      ].filter(Boolean);
-      if(parts.length) return parts.join(", ").slice(0, 140);
-    }
-  }catch(_){ }
-  try{
-    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}`;
-    const res = await fetch(url, { headers:{ "Accept":"application/json" }, cache:"no-store" });
-    if(res.ok){
-      const json = await res.json().catch(() => null);
-      const addr = json?.address || {};
-      const name = [
-        addr.road || addr.suburb || addr.neighbourhood || addr.village || addr.town || addr.city || "",
-        addr.state || "",
-        addr.country || ""
-      ].filter(Boolean).join(", ").slice(0, 140);
-      if(name) return name;
-    }
-  }catch(_){ }
-  return "";
-}
-
-async function detectLocation(){
-  if(!navigator.geolocation){
-    locText.textContent = "GPS not supported on this device.";
-    return;
-  }
-  locText.textContent = "Detecting location...";
-  navigator.geolocation.getCurrentPosition(async (pos) => {
-    myLat = Number(pos.coords.latitude);
-    myLng = Number(pos.coords.longitude);
-    const acc = Number(pos.coords.accuracy || 0);
-    locText.textContent = `Live location detected. Accuracy ~${Math.round(acc)}m`;
-    const dropLatInput = document.getElementById("dropLatInput");
-    const dropLngInput = document.getElementById("dropLngInput");
-    if(dropLatInput && !String(dropLatInput.value || "").trim()){
-      dropLatInput.value = myLat.toFixed(6);
-    }
-    if(dropLngInput && !String(dropLngInput.value || "").trim()){
-      dropLngInput.value = myLng.toFixed(6);
-    }
-    await initRideMap();
-    updateRideMapMarkers();
-    resolvePlaceName(myLat, myLng).then((place) => {
-      if(place){
-        locText.textContent = `Live current location: ${place}${acc ? ` (~${Math.round(acc)}m)` : ""}`;
-      }
-    }).catch(()=>{});
-    loadListings();
-  }, () => {
-    locText.textContent = "Location permission denied. Enable location in browser/app settings.";
-    initRideMap();
-    resultsInfo.textContent = "Location permission is required for nearby services.";
-    listingBox.innerHTML = '<div class="muted">Location blocked. Turn on location permission and refresh GPS.</div>';
-  }, { enableHighAccuracy:true, timeout:15000, maximumAge:0 });
-}
-
-function startLiveLocationWatch(){
-  if(!navigator.geolocation) return;
-  if(geoWatchId != null){
-    try{ navigator.geolocation.clearWatch(geoWatchId); }catch(_){ }
-    geoWatchId = null;
-  }
-  geoWatchId = navigator.geolocation.watchPosition(async (pos) => {
-    const lat = Number(pos.coords.latitude);
-    const lng = Number(pos.coords.longitude);
-    if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    const changed = (myLat == null || myLng == null)
-      ? true
-      : (Math.abs(myLat - lat) > 0.0003 || Math.abs(myLng - lng) > 0.0003);
-    myLat = lat;
-    myLng = lng;
-    await initRideMap();
-    updateRideMapMarkers();
-    const acc = Number(pos.coords.accuracy || 0);
-    if(changed){
-      resolvePlaceName(myLat, myLng).then((place) => {
-        if(place){
-          locText.textContent = `Live current location: ${place}${acc ? ` (~${Math.round(acc)}m)` : ""}`;
-        }
-      }).catch(()=>{});
-      loadListings();
-    }
-  }, () => {}, { enableHighAccuracy:true, maximumAge:0, timeout:15000 });
-}
-
-async function ensureUser(){
-  if(!supa?.auth) return null;
-  const { data } = await supa.auth.getSession();
-  user = data?.session?.user || null;
-  return user;
-}
-
-async function uploadListingImage(file, uid){
-  if(!file || !supa) return "";
-  const ext = (file.name || "jpg").split(".").pop().toLowerCase();
-  const path = `local-listings/${uid || "guest"}-${Date.now()}.${ext}`;
-  const { error } = await supa.storage.from("chat_media").upload(path, file, { upsert:true });
-  if(error) return "";
-  const { data } = supa.storage.from("chat_media").getPublicUrl(path);
-  return data?.publicUrl || "";
-}
-
-async function createListing(){
-  const me = await ensureUser();
-  if(!me){
-    alert("Please login first.");
-    location.href = "login.html";
-    return;
-  }
-  if(myLat == null || myLng == null){
-    alert("Please enable GPS first.");
-    return;
-  }
-  const storeName = document.getElementById("storeName").value.trim();
-  const storeType = document.getElementById("storeType").value;
-  const phone = document.getElementById("storePhone").value.trim();
-  const imgFile = document.getElementById("storeImage").files[0] || null;
-  if(!storeName || !phone){
-    alert("Store name and phone required.");
-    return;
-  }
-  let imageUrl = "Images/no-image.jpg";
-  if(imgFile){
-    const uploaded = await uploadListingImage(imgFile, me.id);
-    if(uploaded) imageUrl = uploaded;
-  }
-  const payload = {
-    user_id: me.id,
-    store_name: storeName,
-    listing_type: storeType,
-    phone,
-    image_url: imageUrl,
-    lat: myLat,
-    lng: myLng
-  };
-  const bases = buildApiBases();
-  let ok = false;
-  for(const base of bases){
-    try{
-      const endpoint = storeType === "agent" ? "/api/local/agents/create" : "/api/local/listings/create";
-      const body = storeType === "agent"
-        ? {
-          user_id: me.id,
-          service_category: "general",
-          title: storeName,
-          phone,
-          price_per_visit_inr: 199,
-          lat: myLat,
-          lng: myLng,
-          image_url: imageUrl
-        }
-        : payload;
-      const res = await fetch(`${base}${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type":"application/json" },
-        body: JSON.stringify(body)
-      });
-      if(!res.ok) continue;
-      const json = await res.json().catch(() => null);
-      if(json?.ok){
-        ok = true;
-        break;
-      }
-    }catch(_){ }
-  }
-  if(!ok){
-    alert("Listing save failed. Ensure backend + local_listings tables are ready.");
-    return;
-  }
-  alert(storeType === "agent"
-    ? "Agent profile submitted."
-    : "Listing submitted. INR 500 listing fee marked. Awaiting approval.");
-  listingFormWrap.classList.add("hide");
-}
-
-async function createOrderForListing(listingId, listingName, type){
-  const me = await ensureUser();
-  if(!me){
-    alert("Please login first.");
-    location.href = "login.html";
-    return;
-  }
-  const address = prompt("Enter delivery address");
-  if(!address) return;
-  const amount = Number(prompt("Enter total amount in INR", "120") || 0);
-  if(!amount || amount <= 0) return;
-  for(const base of buildApiBases()){
-    try{
-      const res = await fetch(`${base}/api/local/orders/create`, {
-        method: "POST",
-        headers: { "Content-Type":"application/json" },
-        body: JSON.stringify({
-          user_id: me.id,
-          listing_id: listingId,
-          service_type: type,
-          amount_inr: amount,
-          delivery_address: address,
-          note: `Order from ${listingName || "listing"}`
-        })
-      });
-      const json = await res.json().catch(()=>null);
-      if(res.ok && json?.ok){
-        alert("Order placed successfully.");
-        return;
-      }
-    }catch(_){ }
-  }
-  alert("Order failed.");
-}
-
-async function createRideRequest(){
-  const me = await ensureUser();
-  if(!me){
-    alert("Please login first.");
-    location.href = "login.html";
-    return;
-  }
-  if(myLat == null || myLng == null){
-    alert("Enable GPS first.");
-    return;
-  }
-  const dropText = String(document.getElementById("dropTextInput")?.value || "").trim();
-  if(!dropText){
-    alert("Enter drop location text.");
-    return;
-  }
-  const dropLat = Number(document.getElementById("dropLatInput")?.value || 0);
-  const dropLng = Number(document.getElementById("dropLngInput")?.value || 0);
-  if(!Number.isFinite(dropLat) || !Number.isFinite(dropLng) || Math.abs(dropLat) > 90 || Math.abs(dropLng) > 180){
-    alert("Please select drop location from map.");
-    return;
-  }
-  for(const base of buildApiBases()){
-    try{
-      const res = await fetch(`${base}/api/local/rides/request`, {
-        method: "POST",
-        headers: { "Content-Type":"application/json" },
-        body: JSON.stringify({
-          user_id: me.id,
-          pickup_lat: myLat,
-          pickup_lng: myLng,
-          drop_lat: dropLat,
-          drop_lng: dropLng,
-          pickup_text: "Current location",
-          drop_text: dropText
-        })
-      });
-      const json = await res.json().catch(()=>null);
-      if(res.ok && json?.ok){
-        const reqId = String(json?.ride_request?.id || "");
-        const rideTrackIdInput = document.getElementById("rideTrackIdInput");
-        if(reqId && rideTrackIdInput) rideTrackIdInput.value = reqId;
-        alert(`Ride request created. Offered riders: ${Number(json.offered_driver_count || 0)}`);
-        startRideAutoTrack();
-        return;
-      }
-    }catch(_){ }
-  }
-  alert("Ride request failed.");
-}
-
-async function trackRide(){
-  const requestId = String(document.getElementById("rideTrackIdInput")?.value || "").trim();
-  if(!requestId) return;
-  for(const base of buildApiBases()){
-    try{
-      const res = await fetch(`${base}/api/local/rides/track?request_id=${encodeURIComponent(requestId)}`, { cache:"no-store" });
-      const json = await res.json().catch(()=>null);
-      if(res.ok && json?.ok){
-        const phone = String(json?.driver_phone || "").trim();
-        const otpVerified = json?.ride_request?.otp_verified ? "Yes" : "No";
-        const dlat = Number(json?.driver_location?.lat);
-        const dlng = Number(json?.driver_location?.lng);
-        let loc = "Driver location unavailable";
-        if(Number.isFinite(dlat) && Number.isFinite(dlng)){
-          const place = await resolvePlaceName(dlat, dlng);
-          if(place) loc = `Driver near ${place}`;
-        }
-        const rideTrackText = document.getElementById("rideTrackText");
-        if(rideTrackText){
-          rideTrackText.textContent = `Status: ${json?.ride_request?.status || "-"} | Driver phone: ${phone || "-"} | OTP verified: ${otpVerified} | ${loc}`;
-        }
-        return;
-      }
-    }catch(_){ }
-  }
-  const rideTrackText = document.getElementById("rideTrackText");
-  if(rideTrackText) rideTrackText.textContent = "Track failed.";
-}
-
-function startRideAutoTrack(){
-  if(rideTrackTimer){
-    clearInterval(rideTrackTimer);
-    rideTrackTimer = null;
-  }
-  rideTrackTimer = setInterval(() => {
-    trackRide().catch(()=>{});
-  }, 8000);
-}
-
-async function fillDropCoordinatesFromText(){
-  const dropText = String(document.getElementById("dropTextInput")?.value || "").trim();
-  if(!dropText){
-    alert("Enter drop text first.");
-    return;
-  }
-  await initRideMap();
-  try{
-    const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(dropText)}&limit=1`;
-    const pRes = await fetch(photonUrl, { cache:"no-store" });
-    const pJson = await pRes.json().catch(() => null);
-    const coords = pJson?.features?.[0]?.geometry?.coordinates;
-    const lng = Number(Array.isArray(coords) ? coords[0] : NaN);
-    const lat = Number(Array.isArray(coords) ? coords[1] : NaN);
-    if(Number.isFinite(lat) && Number.isFinite(lng)){
-      await setDropPoint(lat, lng, true);
-      return;
-    }
-  }catch(_){ }
-  try{
-    const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(dropText)}&limit=1`;
-    const nRes = await fetch(nominatimUrl, { cache:"no-store" });
-    const nJson = await nRes.json().catch(() => []);
-    const first = Array.isArray(nJson) ? nJson[0] : null;
-    const lat = Number(first?.lat);
-    const lng = Number(first?.lon);
-    if(Number.isFinite(lat) && Number.isFinite(lng)){
-      await setDropPoint(lat, lng, true);
-      return;
-    }
-  }catch(_){ }
-  alert("Location name not found. Try area + city (example: Hinjewadi Pune).");
-}
-
-async function verifyRideOtp(){
-  const me = await ensureUser();
-  if(!me){
-    location.href = "login.html";
-    return;
-  }
-  const requestId = String(document.getElementById("rideTrackIdInput")?.value || "").trim();
-  const otp = String(document.getElementById("rideOtpInput")?.value || "").trim();
-  if(!requestId || !otp){
-    alert("Enter ride request id and OTP.");
-    return;
-  }
-  for(const base of buildApiBases()){
-    try{
-      const res = await fetch(`${base}/api/local/rides/otp/verify`, {
-        method: "POST",
-        headers: { "Content-Type":"application/json" },
-        body: JSON.stringify({
-          request_id: requestId,
-          rider_user_id: me.id,
-          otp
-        })
-      });
-      const json = await res.json().catch(()=>null);
-      if(res.ok && json?.ok){
-        alert("OTP verified. Ride started.");
-        trackRide();
-        return;
-      }
-    }catch(_){ }
-  }
-  alert("OTP verification failed.");
-}
-
-async function createAgentBooking(agentId){
-  const me = await ensureUser();
-  if(!me){
-    alert("Please login first.");
-    location.href = "login.html";
-    return;
-  }
-  const address = prompt("Enter service address");
-  if(!address) return;
-  for(const base of buildApiBases()){
-    try{
-      const res = await fetch(`${base}/api/local/agents/book`, {
-        method: "POST",
-        headers: { "Content-Type":"application/json" },
-        body: JSON.stringify({
-          customer_user_id: me.id,
-          agent_id: agentId,
-          service_address: address,
-          note: "Booked from Food/Auto section"
-        })
-      });
-      const json = await res.json().catch(()=>null);
-      if(res.ok && json?.ok){
-        alert("Agent booking created.");
-        return;
-      }
-    }catch(_){ }
-  }
-  alert("Agent booking failed.");
-}
-
-function buildApiBases(){
-  const out = [];
-  const push = (raw) => {
-    const clean = String(raw || "").trim().replace(/\/+$/g, "");
-    if(!clean) return;
-    if(!/^https?:\/\//i.test(clean)) return;
-    if(!out.includes(clean)) out.push(clean);
-  };
-  push(window.CONTEST_API_BASE || window.API_BASE || "");
-  try{
-    push(localStorage.getItem("contest_api_base"));
-    push(localStorage.getItem("api_base"));
-  }catch(_){ }
-  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
-  push("https://novagapp-mart.onrender.com");
-  return out;
-}
-
-document.getElementById("locBtn").addEventListener("click", detectLocation);
-chips.forEach(chip => {
-  chip.addEventListener("click", () => {
-    chips.forEach(c => c.classList.remove("active"));
-    chip.classList.add("active");
-    activeType = chip.dataset.type || "food";
-    loadListings();
-  });
-});
-listingBox.addEventListener("click", (e) => {
-  const btn = e.target.closest(".action-btn");
-  if(!btn) return;
-  const id = String(btn.dataset.id || "");
-  const type = String(btn.dataset.type || "");
-  const name = String(btn.dataset.name || "");
-  if(type === "ride"){
-    createRideRequest();
-    return;
-  }
-  if(type === "agent"){
-    createAgentBooking(id);
-    return;
-  }
-  createOrderForListing(id, name, type);
-});
-document.getElementById("openListingTopBtn").addEventListener("click", () => {
-  listingFormWrap.classList.toggle("hide");
-});
-document.getElementById("enhanceBtn").addEventListener("click", () => {
-  document.getElementById("enhanceText").textContent = "Auto-enhance preview ready. (Advanced AI pipeline can be connected next.)";
-});
-document.getElementById("saveListingBtn").addEventListener("click", createListing);
-document.getElementById("rideRequestBtn").addEventListener("click", createRideRequest);
-document.getElementById("rideTrackBtn").addEventListener("click", trackRide);
-document.getElementById("rideOtpBtn").addEventListener("click", verifyRideOtp);
-document.getElementById("dropGeoBtn").addEventListener("click", fillDropCoordinatesFromText);
-
-detectLocation();
-initRideMap();
-startLiveLocationWatch();
-loadListings();
+(async function init(){await ensureUser();renderRecent();setVehicle("auto");setTab("ride");setScreen("entryCard");detectPickup();setInterval(()=>{if(state.pickupLat!=null&&state.pickupLng!=null){updateDriverLocation(true).catch(()=>{});}},15000);})();
 </script>
 </body>
 </html>

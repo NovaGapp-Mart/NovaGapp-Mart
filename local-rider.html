@@ -1,12 +1,90 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Local Rider</title><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="global.js"></script><script src="public-config.js"></script><style>body{font-family:Arial;background:#f5f5f5;margin:0}.top{background:#111;color:#fff;padding:12px;font-weight:700}.box{background:#fff;margin:10px;border-radius:12px;padding:12px}.row{border:1px solid #eee;border-radius:10px;padding:10px;margin:8px 0}.btn{border:none;border-radius:8px;padding:8px 10px;background:#ff6a00;color:#fff;cursor:pointer;margin-right:8px}</style></head><body><div class="top">Rider Dispatch Panel</div><div class="box"><button class="btn" onclick="goOnline()">Go Online</button><button class="btn" onclick="loadRides()">Refresh Rides</button><div id="msg"></div><div id="list"></div></div><script>
-const supa=window.supa||window.novaCreateSupabaseClient();let me=null;function bases(){const o=[];const p=v=>{v=String(v||'').trim().replace(/\/+$/g,'');if(v&&/^https?:\/\//i.test(v)&&!o.includes(v))o.push(v)};p(window.CONTEST_API_BASE||window.API_BASE||'');try{p(localStorage.getItem('contest_api_base'));p(localStorage.getItem('api_base'))}catch(_){};if(/^https?:\/\//i.test(location.origin||''))p(location.origin);p('https://novagapp-mart.onrender.com');return o}
-async function meUser(){if(me)return me;const {data}=await supa.auth.getSession();me=data?.session?.user||null;if(!me){location.href='login.html';return null;}return me;}
-let riderHeartbeat=null;
-async function goOnline(){const u=await meUser();if(!u)return;navigator.geolocation.getCurrentPosition(async p=>{for(const b of bases()){try{const r=await fetch(b+'/api/local/riders/location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:u.id,lat:p.coords.latitude,lng:p.coords.longitude,is_online:true})});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok){document.getElementById('msg').textContent='Online location updated';if(riderHeartbeat){clearInterval(riderHeartbeat);}riderHeartbeat=setInterval(()=>{goOnline().catch(()=>{});loadRides().catch(()=>{});},15000);return}}catch(_){}}document.getElementById('msg').textContent='Online update failed';},()=>{document.getElementById('msg').textContent='Location permission denied';});}
-async function loadRides(){const u=await meUser();if(!u)return;for(const b of bases()){try{const r=await fetch(`${b}/api/local/rides/for-rider?user_id=${encodeURIComponent(u.id)}`);const j=await r.json().catch(()=>null);if(r.ok&&j?.ok){render(j.rides||[]);return}}catch(_){}}}
-function render(rows){const box=document.getElementById('list');box.innerHTML=''; if(!rows.length){box.textContent='No ride requests';return;} rows.forEach(r=>{const d=document.createElement('div');d.className='row';const canAccept=(r.status==='searching');d.innerHTML=`<b>${r.pickup_text||'Pickup'}</b> -> ${r.drop_text||'Drop'}<div>Status: ${r.status||''}</div>${canAccept?`<button class='btn' onclick="acceptRide('${r.id}')">Accept</button>`:''}<button class='btn' onclick="setRideStatus('${r.id}','arriving')">Arriving</button><button class='btn' onclick="setRideStatus('${r.id}','on_trip')">On Trip</button><button class='btn' onclick="setRideStatus('${r.id}','completed')">Complete</button>`;box.appendChild(d)})}
-async function acceptRide(id){const u=await meUser();if(!u)return;for(const b of bases()){try{const r=await fetch(b+'/api/local/rides/accept',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id:id,driver_user_id:u.id})});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok){loadRides();return}}catch(_){}}alert('accept failed')}
-async function setRideStatus(id,status){const u=await meUser();if(!u)return;for(const b of bases()){try{const r=await fetch(b+'/api/local/rides/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id:id,user_id:u.id,status})});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok){loadRides();return}}catch(_){}}alert('status failed')}
-meUser().then(()=>{loadRides();setInterval(()=>{loadRides().catch(()=>{});},10000);});
-</script></body></html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rider Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="global.js"></script>
+<script src="public-config.js"></script>
+<style>
+:root{--brand:#ff6a00;--line:#e2e8f0;--bg:#f1f5f9;--text:#0f172a;--muted:#64748b}
+body{font-family:Arial,sans-serif;background:var(--bg);margin:0;color:var(--text)}
+.top{background:#111;color:#fff;padding:12px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+.wrap{padding:10px}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
+.btn{border:none;border-radius:8px;padding:9px 11px;background:var(--brand);color:#fff;cursor:pointer;font-weight:700}
+.btn.gray{background:#334155}
+.muted{font-size:12px;color:var(--muted)}
+.req{border:1px solid #e8edf5;border-radius:10px;padding:10px;margin:8px 0}
+.timer{font-size:13px;color:#b91c1c;font-weight:700}
+.hide{display:none}
+</style>
+</head>
+<body>
+<div class="top">Driver Dashboard <a href="food-auto.html" style="color:#fff;text-decoration:none;font-size:12px">Rider App</a></div>
+<div class="wrap">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <div>
+        <div><b>Go Online</b></div>
+        <div class="muted" id="onlineText">Offline</div>
+      </div>
+      <button class="btn" id="onlineBtn">Go Online</button>
+      <button class="btn gray" id="refreshBtn">Refresh</button>
+    </div>
+    <div style="margin-top:10px"><b>Today earnings:</b> <span id="earnings">INR 0.00</span></div>
+  </div>
+
+  <div class="card">
+    <b>Ride Request Popup Queue</b>
+    <div class="muted" style="margin-top:4px">Each request has 10s timer. Accept or reject.</div>
+    <div id="queue"></div>
+  </div>
+
+  <div class="card">
+    <b>Active Ride Flow</b>
+    <div id="activeRideBox" class="muted" style="margin-top:8px">No active ride</div>
+  </div>
+</div>
+
+<script>
+const supa=window.supa||window.novaCreateSupabaseClient();
+let me=null,heartbeat=null,poller=null,online=false;
+const timers=new Map();
+
+function bases(){const o=[];const p=v=>{v=String(v||"").trim().replace(/\/+$/g,"");if(v&&/^https?:\/\//i.test(v)&&!o.includes(v))o.push(v)};p(window.CONTEST_API_BASE||window.API_BASE||"");try{p(localStorage.getItem("contest_api_base"));p(localStorage.getItem("api_base"));}catch(_){ }if(/^https?:\/\//i.test(location.origin||""))p(location.origin);p("https://novagapp-mart.onrender.com");return o;}
+async function apiGet(path){for(const b of bases()){try{const r=await fetch(b+path,{cache:"no-store"});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok)return j;}catch(_){}}return null;}
+async function apiPost(path,body){for(const b of bases()){try{const r=await fetch(b+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok)return j;}catch(_){}}return null;}
+
+function money(v){return "INR "+Number(v||0).toFixed(2)}
+function haversineKm(a,b,c,d){const r=x=>x*Math.PI/180;const R=6371;const dLat=r(c-a),dLng=r(d-b);const q=Math.sin(dLat/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dLng/2)**2;return R*(2*Math.atan2(Math.sqrt(q),Math.sqrt(1-q)));}
+function estimateFare(ride){const dist=haversineKm(Number(ride.pickup_lat||0),Number(ride.pickup_lng||0),Number(ride.drop_lat||0),Number(ride.drop_lng||0));const dur=Math.max((dist/24)*60,3);const fare=45+(dist*11)+(dur*2);return {fare,dist};}
+
+async function meUser(){if(me)return me;const {data}=await supa.auth.getSession();me=data?.session?.user||null;if(!me){location.href="login.html";return null;}return me;}
+
+async function goOnline(){const u=await meUser();if(!u)return;if(!navigator.geolocation){alert("GPS unavailable");return;}navigator.geolocation.getCurrentPosition(async p=>{const ok=await apiPost("/api/local/riders/location",{user_id:u.id,lat:p.coords.latitude,lng:p.coords.longitude,is_online:true});if(!ok){document.getElementById("onlineText").textContent="Online update failed";return;}online=true;document.getElementById("onlineText").textContent="Online and receiving requests";if(heartbeat)clearInterval(heartbeat);heartbeat=setInterval(()=>goOnline(),15000);if(poller)clearInterval(poller);poller=setInterval(()=>loadRides(),4000);loadRides();},()=>alert("Location denied"),{enableHighAccuracy:true,timeout:15000,maximumAge:0});}
+
+async function loadRides(){const u=await meUser();if(!u)return;const j=await apiGet(`/api/local/rides/for-rider?user_id=${encodeURIComponent(u.id)}`);render((j&&j.rides)||[]);}
+
+function render(rows){const q=document.getElementById("queue");q.innerHTML="";if(!rows.length){q.innerHTML='<div class="muted" style="margin-top:8px">No ride requests</div>';document.getElementById("activeRideBox").textContent="No active ride";document.getElementById("earnings").textContent=money(0);return;}
+let earning=0;let activeHtml="No active ride";
+rows.forEach(r=>{const s=String(r.status||"");const e=estimateFare(r);if(s==="completed")earning += e.fare*0.9;
+if(s==="accepted"||s==="arriving"||s==="on_trip"){activeHtml=`<b>${r.pickup_text||"Pickup"}</b> -> <b>${r.drop_text||"Drop"}</b><div style='margin-top:8px'>Status: ${s}</div><div style='margin-top:8px'><button class='btn' onclick="setStatus('${r.id}','arriving')">Arriving</button> <button class='btn' onclick="setStatus('${r.id}','on_trip')">Start Ride</button> <button class='btn' onclick="setStatus('${r.id}','completed')">End Ride</button> <button class='btn gray' onclick="setStatus('${r.id}','cancelled')">Cancel</button></div>`;}
+const canAccept=s==="searching";
+const d=document.createElement("div");d.className="req";
+d.innerHTML=`<b>${r.pickup_text||"Pickup"}</b> -> ${r.drop_text||"Drop"}<div class='muted' style='margin-top:4px'>Pickup distance estimate: ${e.dist.toFixed(1)} km | Est. earning: ${money(e.fare*0.9)}</div><div style='margin-top:4px'>Status: ${s}</div>${canAccept?`<div class='timer' id='tm_${r.id}'>Auto reject in 10s</div><div style='margin-top:8px'><button class='btn' onclick="acceptRide('${r.id}')">Accept</button> <button class='btn gray' onclick="rejectRide('${r.id}')">Reject</button></div>`:""}`;
+q.appendChild(d);
+if(canAccept && !timers.has(r.id)){let t=10;const int=setInterval(()=>{t--;const el=document.getElementById(`tm_${r.id}`);if(el)el.textContent=`Auto reject in ${Math.max(0,t)}s`;if(t<=0){clearInterval(int);timers.delete(r.id);}},1000);timers.set(r.id,int);}if(!canAccept&&timers.has(r.id)){clearInterval(timers.get(r.id));timers.delete(r.id);} });
+document.getElementById("activeRideBox").innerHTML=activeHtml;document.getElementById("earnings").textContent=money(earning);}
+
+async function acceptRide(id){const u=await meUser();if(!u)return;const j=await apiPost('/api/local/rides/accept',{request_id:id,driver_user_id:u.id});if(!j){alert('Accept failed');return;}loadRides();}
+async function rejectRide(id){if(timers.has(id)){clearInterval(timers.get(id));timers.delete(id);}loadRides();}
+async function setStatus(id,status){const u=await meUser();if(!u)return;const j=await apiPost('/api/local/rides/status',{request_id:id,user_id:u.id,status});if(!j){alert('Status update failed');return;}loadRides();}
+
+document.getElementById("onlineBtn").onclick=goOnline;
+document.getElementById("refreshBtn").onclick=loadRides;
+meUser().then(()=>loadRides());
+</script>
+</body>
+</html>
