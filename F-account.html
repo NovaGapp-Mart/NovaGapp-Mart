@@ -1,27 +1,140 @@
 <!doctype html>
 <html lang="en"><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>F-Account</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script src="global.js"></script><script src="public-config.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
 <style>
-body{margin:0;font-family:Arial;background:#f6f8fc;color:#0f172a;padding-bottom:72px}.top{position:sticky;top:0;background:#111;color:#fff;padding:12px;display:flex;justify-content:space-between}.w{padding:10px}.c{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px;margin-bottom:10px}.row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}.r3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}.in,select{width:100%;padding:9px;border:1px solid #d3dae8;border-radius:8px}.b{border:none;border-radius:8px;padding:9px 10px;background:#ff6a00;color:#fff;font-weight:700;cursor:pointer}.bd{background:#111}.bg{background:#334155}.bo{background:#0f9f50}.mut{font-size:12px;color:#64748b}.roles{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.role{border:1px solid #d9e3f3;border-radius:10px;padding:10px;cursor:pointer}.role.a{border-color:#ff6a00;background:#fff3ea}.hide{display:none!important}#m{height:200px;border:1px solid #dbe3f1;border-radius:10px;margin-top:8px}.p{display:flex;gap:6px;flex-wrap:wrap}.pill{padding:6px 10px;border-radius:999px;background:#eef2ff;color:#1e40af;font-size:12px;font-weight:700}
-@media(max-width:900px){.roles,.row,.r3{grid-template-columns:1fr}}
+:root{--brand:#ff6a00;--brand-dark:#dc5300;--ink:#10131d;--mut:#687489;--line:#d8dfed;--bg:#f3f6fc}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Manrope",sans-serif;background:radial-gradient(1000px 500px at 20% -120px,#ebf1ff 0,#f3f6fc 55%,#eff3fa 100%);color:var(--ink);padding-bottom:32px}
+.top{position:sticky;top:0;z-index:20;background:rgba(10,12,18,.96);border-bottom:1px solid rgba(255,255,255,.08);backdrop-filter:blur(8px);color:#fff;padding:12px 14px;display:flex;justify-content:space-between;align-items:center}
+.top b{font-size:18px;letter-spacing:.01em}
+.w{padding:14px;max-width:1180px;margin:0 auto}
+.hero{background:linear-gradient(135deg,#111827 0,#1d2332 65%,#3b2a19 100%);color:#fff;border:1px solid #2b3448;border-radius:18px;padding:16px;box-shadow:0 18px 30px rgba(15,23,42,.18);margin-bottom:12px}
+.hero .mut{color:#cfd7eb}
+.flow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.flow span{padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.12);font-size:12px;font-weight:700}
+.layout{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,1fr);gap:12px;align-items:start}
+.c{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:10px;box-shadow:0 10px 24px rgba(15,23,42,.06)}
+.title{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.title b{font-size:17px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.r3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}
+.in,select{width:100%;padding:11px 12px;border:1px solid #d4dced;border-radius:11px;background:#fff;color:#111827;font-family:"Manrope",sans-serif;font-size:14px}
+.in:focus,select:focus{outline:none;border-color:#ff9a53;box-shadow:0 0 0 3px rgba(255,106,0,.15)}
+.b{border:none;border-radius:11px;padding:10px 12px;background:linear-gradient(135deg,#ff7a1a 0,#ff5900 100%);color:#fff;font-weight:800;cursor:pointer;letter-spacing:.01em}
+.bd{background:#111827}.bg{background:#334155}.bo{background:#0f9f50}
+.mut{font-size:12px;color:var(--mut);font-weight:500}
+.roles{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}
+.role{border:1px solid #d8e2f2;border-radius:13px;padding:12px;background:#fff;cursor:pointer;text-align:left;transition:all .18s ease}
+.role b{display:block;margin-bottom:3px}
+.role:hover{transform:translateY(-1px);box-shadow:0 10px 22px rgba(15,23,42,.09)}
+.role.a{border-color:#ff6a00;background:linear-gradient(180deg,#fff8f2 0,#fff 100%);box-shadow:0 12px 22px rgba(255,106,0,.15)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;background:#eef2ff;color:#1e40af;font-size:11px;font-weight:800}
+.hide{display:none!important}
+#m{height:240px;border:1px solid #dbe3f1;border-radius:12px;margin-top:8px;overflow:hidden}
+.p{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.pill{padding:6px 10px;border-radius:999px;background:#eef2ff;color:#1e40af;font-size:12px;font-weight:700}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.wallet{padding:10px 11px;border-radius:12px;background:#f5f8ff;border:1px solid #dbe5f7}
+@media(max-width:1020px){.layout{grid-template-columns:1fr}}
+@media(max-width:900px){.roles,.row,.r3,.actions{grid-template-columns:1fr}}
 </style></head><body>
 <div class="top"><b>F-Account Provider Setup</b><div><button class="b bd" onclick="location.href='index.html'">Home</button> <button class="b" onclick="location.href='food-auto.html'">Services</button></div></div>
 <div class="w">
-<div class="c"><b>Flow</b><div class="mut" style="margin-top:6px">Role select -> OTP verify -> INR 500 payment -> activate provider profile</div></div>
-<div class="c"><b>1) Select Role</b><div class="roles" style="margin-top:8px"><button id="rr" class="role" onclick="sel('rider')"><b>Driver</b><div class="mut">Ride provider</div></button><button id="rs" class="role" onclick="sel('seller')"><b>Food Seller</b><div class="mut">Food/Grocery listing</div></button><button id="ra" class="role" onclick="sel('agent')"><b>Service Agent</b><div class="mut">Electrician/Plumber</div></button></div><div class="mut" style="margin-top:8px">Selected: <span id="sr">None</span></div></div>
-<div class="c"><b>2) Profile + OTP + Location</b><div id="u" class="mut" style="margin-top:6px">Checking login...</div><div class="row"><input id="nm" class="in" placeholder="Full name"><input id="ph" class="in" placeholder="Phone (+91...)"/></div><div class="row"><button id="send" class="b bg">Send OTP</button><div style="display:flex;gap:6px"><input id="otp" class="in" placeholder="OTP"><button id="ver" class="b bo">Verify</button></div></div><div id="os" class="mut" style="margin-top:6px">OTP not sent</div><div class="row"><input id="ad" class="in" placeholder="Address by GPS"><button id="gps" class="b">Use GPS</button></div><div id="gs" class="mut" style="margin-top:6px">GPS not locked</div><div id="m"></div></div>
-<div class="c"><b>3) Role Details</b>
-  <div id="fr" class="hide"><div class="row"><select id="vtype"><option value="bike">Bike</option><option value="auto" selected>Auto</option><option value="car">Car</option></select><input id="vno" class="in" placeholder="Vehicle number"></div><div class="r3"><input id="bf" class="in" type="number" placeholder="Base fare"><input id="pk" class="in" type="number" placeholder="Per km"><input id="pm" class="in" type="number" placeholder="Per min"></div><div class="row"><input id="rrad" class="in" type="number" placeholder="Service radius km"><input id="docs" class="in" placeholder="Docs URL"></div></div>
-  <div id="fs" class="hide"><div class="row"><select id="stype"><option value="food">Food</option><option value="grocery">Grocery</option></select><input id="sn" class="in" placeholder="Store name"></div><div class="r3"><input id="dc" class="in" type="number" placeholder="Delivery charge"><input id="mo" class="in" type="number" placeholder="Min order"><input id="ot" class="in" placeholder="Open time"></div><div class="row"><input id="ct" class="in" placeholder="Close time"><input id="si" class="in" placeholder="Image URL"></div></div>
-  <div id="fa" class="hide"><div class="row"><select id="ac"><option value="electrician">Electrician</option><option value="plumber">Plumber</option><option value="ac_repair">AC Repair</option><option value="carpenter">Carpenter</option><option value="mechanic">Mechanic</option><option value="painter">Painter</option><option value="cleaning">Cleaning</option></select><input id="at" class="in" placeholder="Profile title"></div><div class="r3"><input id="ae" class="in" type="number" placeholder="Experience"><input id="av" class="in" type="number" placeholder="Visit charge"><input id="ah" class="in" type="number" placeholder="Per hour"></div><div class="row"><input id="ar" class="in" type="number" placeholder="Service radius km"><select id="aa"><option value="true">Available</option><option value="false">Offline</option></select></div></div>
-</div>
-<div class="c"><b>4) Activate</b><div class="row"><div><div class="mut">Provider fee</div><b>INR 500</b></div><div><div class="mut">Commission</div><b>10%</b></div></div><button id="act" class="b" style="margin-top:10px;width:100%">Pay & Activate</button><div id="as" class="mut" style="margin-top:6px">Pending</div></div>
-<div class="c"><b>Active roles & wallet</b><div id="rb" class="p" style="margin-top:8px"></div><div class="row"><button class="b bg" onclick="rw()">Refresh wallet</button><div id="wt" class="mut" style="align-self:center">Wallet not loaded</div></div><div class="row"><button class="b" onclick="location.href='local-rider.html'">Driver dashboard</button><button class="b" onclick="location.href='local-seller.html'">Seller dashboard</button></div><div class="row"><button class="b" onclick="location.href='local-agent.html'">Agent dashboard</button><button class="b bd" onclick="location.href='food-auto.html'">Service app</button></div></div>
+  <div class="hero">
+    <b>Provider activation flow</b>
+    <div class="mut" style="margin-top:6px">Create one verified service profile for Driver, Seller or Agent with OTP + location lock + INR 500 activation.</div>
+    <div class="flow"><span>1. Select role</span><span>2. OTP verify</span><span>3. Save profile details</span><span>4. Pay and activate</span></div>
+  </div>
+  <div class="layout">
+    <div>
+      <div class="c">
+        <div class="title"><b>1) Select Role</b><span class="chip">Required</span></div>
+        <div class="roles">
+          <button id="rr" class="role" onclick="sel('rider')"><b>Driver</b><div class="mut">Ride provider account</div></button>
+          <button id="rs" class="role" onclick="sel('seller')"><b>Food Seller</b><div class="mut">Food or grocery business</div></button>
+          <button id="ra" class="role" onclick="sel('agent')"><b>Service Agent</b><div class="mut">Electrician, plumber, repair</div></button>
+        </div>
+        <div class="mut" style="margin-top:8px">Selected role: <b id="sr">None</b></div>
+      </div>
+
+      <div class="c">
+        <div class="title"><b>2) Identity, OTP and Location</b><span class="chip">Verify first</span></div>
+        <div id="u" class="mut" style="margin-top:6px">Checking login...</div>
+        <div class="row">
+          <input id="nm" class="in" placeholder="Full name">
+          <input id="ph" class="in" placeholder="Phone (+91...)"/>
+        </div>
+        <div class="row">
+          <button id="send" class="b bg">Send OTP</button>
+          <div style="display:flex;gap:6px">
+            <input id="otp" class="in" placeholder="6-digit OTP">
+            <button id="ver" class="b bo">Verify</button>
+          </div>
+        </div>
+        <div id="os" class="mut" style="margin-top:6px">OTP not sent</div>
+        <div class="row">
+          <input id="ad" class="in" placeholder="Auto-detected address">
+          <button id="gps" class="b">Use Live GPS</button>
+        </div>
+        <div id="gs" class="mut" style="margin-top:6px">GPS not locked</div>
+        <div id="m"></div>
+      </div>
+
+      <div class="c">
+        <div class="title"><b>3) Role Details</b><span class="chip">Mandatory fields</span></div>
+        <div id="fr" class="hide">
+          <div class="row"><select id="vtype"><option value="bike">Bike</option><option value="auto" selected>Auto</option><option value="car">Car</option></select><input id="vno" class="in" placeholder="Vehicle number"></div>
+          <div class="r3"><input id="bf" class="in" type="number" placeholder="Base fare"><input id="pk" class="in" type="number" placeholder="Per km"><input id="pm" class="in" type="number" placeholder="Per min"></div>
+          <div class="row"><input id="rrad" class="in" type="number" placeholder="Service radius km"><input id="docs" class="in" placeholder="Docs URL"></div>
+        </div>
+        <div id="fs" class="hide">
+          <div class="row"><select id="stype"><option value="food">Food</option><option value="grocery">Grocery</option></select><input id="sn" class="in" placeholder="Store name"></div>
+          <div class="r3"><input id="dc" class="in" type="number" placeholder="Delivery charge"><input id="mo" class="in" type="number" placeholder="Min order"><input id="ot" class="in" placeholder="Open time"></div>
+          <div class="row"><input id="ct" class="in" placeholder="Close time"><input id="si" class="in" placeholder="Image URL"></div>
+        </div>
+        <div id="fa" class="hide">
+          <div class="row"><select id="ac"><option value="electrician">Electrician</option><option value="plumber">Plumber</option><option value="ac_repair">AC Repair</option><option value="carpenter">Carpenter</option><option value="mechanic">Mechanic</option><option value="painter">Painter</option><option value="cleaning">Cleaning</option></select><input id="at" class="in" placeholder="Profile title"></div>
+          <div class="r3"><input id="ae" class="in" type="number" placeholder="Experience"><input id="av" class="in" type="number" placeholder="Visit charge"><input id="ah" class="in" type="number" placeholder="Per hour"></div>
+          <div class="row"><input id="ar" class="in" type="number" placeholder="Service radius km"><select id="aa"><option value="true">Available</option><option value="false">Offline</option></select></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="c">
+        <div class="title"><b>4) Activate</b><span class="chip">Final step</span></div>
+        <div class="row">
+          <div class="wallet"><div class="mut">Provider fee</div><b>INR 500</b></div>
+          <div class="wallet"><div class="mut">Commission</div><b>10%</b></div>
+        </div>
+        <button id="act" class="b" style="margin-top:10px;width:100%">Pay and Activate</button>
+        <div id="as" class="mut" style="margin-top:7px">Pending</div>
+      </div>
+
+      <div class="c">
+        <div class="title"><b>Active Roles and Wallet</b><span class="chip">Live</span></div>
+        <div id="rb" class="p"></div>
+        <div class="actions">
+          <button class="b bg" onclick="rw()">Refresh wallet</button>
+          <div id="wt" class="wallet mut">Wallet not loaded</div>
+        </div>
+        <div class="actions">
+          <button class="b" onclick="location.href='local-rider.html'">Driver dashboard</button>
+          <button class="b" onclick="location.href='local-seller.html'">Seller dashboard</button>
+        </div>
+        <div class="actions">
+          <button class="b" onclick="location.href='local-agent.html'">Agent dashboard</button>
+          <button class="b bd" onclick="location.href='food-auto.html'">Service app</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 <script>
 const supa=window.supa||window.novaCreateSupabaseClient();

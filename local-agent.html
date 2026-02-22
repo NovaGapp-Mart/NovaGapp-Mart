@@ -7,24 +7,27 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="global.js"></script>
 <script src="public-config.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
 <style>
-body{margin:0;font-family:Arial;background:#f6f8fc;color:#0f172a}
-.top{position:sticky;top:0;background:#111;color:#fff;padding:12px;display:flex;justify-content:space-between}
-.w{padding:10px 10px 72px}
-.c{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px;margin-bottom:10px}
+body{margin:0;font-family:"Manrope",sans-serif;background:radial-gradient(1000px 500px at 20% -120px,#ebf2ff 0,#f3f6fc 56%,#eef3fb 100%);color:#0f172a}
+.top{position:sticky;top:0;z-index:20;background:rgba(10,12,18,.95);color:#fff;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,.08);backdrop-filter:blur(8px)}
+.top b{font-size:18px}
+.w{padding:12px 12px 72px;max-width:1180px;margin:0 auto}
+.c{background:#fff;border:1px solid #dbe3f2;border-radius:16px;padding:14px;margin-bottom:10px;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
 .r3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}
-.in,select{width:100%;padding:9px;border:1px solid #d3dae8;border-radius:8px}
-.b{border:none;border-radius:8px;padding:9px 10px;background:#ff6a00;color:#fff;font-weight:700;cursor:pointer}
+.in,select{width:100%;padding:10px 12px;border:1px solid #d3dae8;border-radius:11px;font-family:"Manrope",sans-serif}
+.in:focus,select:focus{outline:none;border-color:#ff9a53;box-shadow:0 0 0 3px rgba(255,106,0,.15)}
+.b{border:none;border-radius:11px;padding:10px 12px;background:linear-gradient(135deg,#ff7a1a 0,#ff5900 100%);color:#fff;font-weight:800;cursor:pointer}
 .bg{background:#334155}.bo{background:#0f9f50}.bb{background:#c62828}
-.mut{font-size:12px;color:#64748b}
-.list{border:1px solid #e2e8f0;border-radius:10px;padding:10px;margin-top:8px}
-.kpi{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.k{border:1px solid #e2e8f0;border-radius:10px;padding:10px}
+.mut{font-size:12px;color:#64748b;font-weight:500}
+.list{border:1px solid #e1e8f5;border-radius:12px;padding:10px;margin-top:8px;background:#fbfcff}
+.kpi{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.k{border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#fbfcff}
 @media(max-width:900px){.row,.r3,.kpi{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
-<div class="top"><b>Agent Dashboard</b><div><button class="b bg" onclick="location.href='F-account.html'">F-Account</button> <button class="b" onclick="location.href='food-auto.html'">Services</button></div></div>
+<div class="top"><b>Agent Operations</b><div><button class="b bg" onclick="location.href='F-account.html'">F-Account</button> <button class="b" onclick="location.href='food-auto.html'">Services</button></div></div>
 <div class="w">
 <div class="c"><b>Agent Profile</b><div id="u" class="mut" style="margin-top:6px">Checking login...</div>
   <div class="row"><select id="cat"><option value="electrician">Electrician</option><option value="plumber">Plumber</option><option value="ac_repair">AC Repair</option><option value="carpenter">Carpenter</option><option value="mechanic">Mechanic</option><option value="painter">Painter</option><option value="cleaning">Cleaning</option></select><input id="title" class="in" placeholder="Profile title"></div>

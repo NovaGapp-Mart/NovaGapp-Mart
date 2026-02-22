@@ -11,43 +11,269 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
 <style>
-:root{--brand:#ff6a00;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--bg:#f1f5f9;--ok:#16974b;--bad:#c62828}
+:root{
+  --brand:#ff6a00;
+  --brand-dark:#db5600;
+  --ink:#10131d;
+  --ink-soft:#3a4358;
+  --muted:#6b7284;
+  --line:#d9e0ee;
+  --surface:#f4f6fb;
+  --panel:#ffffff;
+  --ok:#0f9f50;
+  --bad:#c62828;
+}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif}
+html,body{height:100%}
+body{
+  margin:0;
+  background:radial-gradient(1200px 600px at 50% -120px,#edf2ff 0%,#f6f8fc 45%,#f1f4fb 100%);
+  color:var(--ink);
+  font-family:"Manrope",sans-serif;
+}
 .hide{display:none!important}
+
 #rideView{position:fixed;inset:0;background:#fff}
 #rideMap{position:absolute;inset:0;z-index:1}
-.top-search{position:absolute;left:12px;right:12px;top:12px;z-index:20;display:flex;gap:8px;background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:8px;box-shadow:0 6px 18px rgba(0,0,0,.16)}
-.top-search input{flex:1;border:none;outline:none;font-size:14px}
-.top-search button{border:none;border-radius:10px;background:#111;color:#fff;padding:9px 12px;font-weight:700;cursor:pointer}
-.float-loc{position:absolute;right:12px;top:74px;z-index:20;border:none;border-radius:999px;background:#fff;padding:10px 12px;font-weight:700;box-shadow:0 6px 18px rgba(0,0,0,.18);cursor:pointer}
-.sheet{position:absolute;left:0;right:0;bottom:58px;z-index:25;background:#fff;border-top:1px solid #e2e8f0;border-radius:18px 18px 0 0;max-height:50vh;overflow:auto;padding:12px}
+#rideView::after{
+  content:"";
+  position:absolute;
+  left:0;right:0;bottom:56px;
+  height:220px;
+  background:linear-gradient(180deg,rgba(255,255,255,0) 0%,rgba(13,18,32,.75) 100%);
+  pointer-events:none;
+  z-index:3;
+}
+
+.top-search{
+  position:absolute;
+  left:12px;
+  right:12px;
+  top:14px;
+  z-index:22;
+  display:flex;
+  gap:8px;
+  background:rgba(255,255,255,.96);
+  border:1px solid rgba(210,220,240,.95);
+  border-radius:16px;
+  padding:8px;
+  box-shadow:0 14px 32px rgba(15,23,42,.18);
+  backdrop-filter:blur(6px);
+}
+.top-search input{
+  flex:1;
+  border:none;
+  outline:none;
+  font-size:14px;
+  font-weight:600;
+  color:#111827;
+  background:transparent;
+}
+.top-search button{
+  border:none;
+  border-radius:11px;
+  background:#0f172a;
+  color:#fff;
+  padding:10px 13px;
+  font-weight:800;
+  letter-spacing:.01em;
+  cursor:pointer;
+}
+.float-loc{
+  position:absolute;
+  right:12px;
+  top:76px;
+  z-index:22;
+  border:none;
+  border-radius:999px;
+  background:#fff;
+  padding:10px 13px;
+  font-weight:700;
+  color:#0f172a;
+  box-shadow:0 10px 24px rgba(15,23,42,.22);
+  cursor:pointer;
+}
+
+.sheet{
+  position:absolute;
+  left:0;
+  right:0;
+  bottom:58px;
+  z-index:25;
+  background:rgba(255,255,255,.98);
+  border-top:1px solid #dde3ef;
+  border-radius:24px 24px 0 0;
+  box-shadow:0 -14px 30px rgba(15,23,42,.2);
+  max-height:56vh;
+  overflow:auto;
+  padding:14px;
+}
 .panel{display:block}
-.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.input,select{width:100%;padding:11px;border:1px solid #d6deea;border-radius:10px;font-size:14px;background:#fff}
-.btn{border:none;border-radius:10px;padding:11px 12px;font-weight:700;cursor:pointer}
-.btn.brand{background:var(--brand);color:#fff}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+
+.input,select,textarea{
+  width:100%;
+  padding:12px 13px;
+  border:1px solid #d5deed;
+  border-radius:12px;
+  font-size:14px;
+  font-family:"Manrope",sans-serif;
+  background:#fff;
+  color:#111827;
+}
+.input:focus,select:focus,textarea:focus{
+  outline:none;
+  border-color:#ff9a53;
+  box-shadow:0 0 0 3px rgba(255,106,0,.16);
+}
+
+.btn{
+  border:none;
+  border-radius:11px;
+  padding:11px 13px;
+  font-weight:800;
+  letter-spacing:.01em;
+  cursor:pointer;
+  transition:transform .16s ease,filter .16s ease,box-shadow .16s ease;
+}
+.btn:hover{filter:brightness(.98)}
+.btn:active{transform:translateY(1px)}
+.btn.brand{
+  background:linear-gradient(135deg,#ff7a1a 0%,#ff5900 100%);
+  color:#fff;
+  box-shadow:0 12px 24px rgba(255,106,0,.28);
+}
 .btn.gray{background:#334155;color:#fff}
-.btn.bad{background:var(--bad);color:#fff}
-.btn.ok{background:var(--ok);color:#fff}
+.btn.bad{background:#c62828;color:#fff}
+.btn.ok{background:#0f9f50;color:#fff}
 .btn.full{width:100%}
-.muted{font-size:12px;color:var(--muted)}
-.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:11px;background:#eaf2ff;color:#1d4ed8;font-weight:700}
-.vehicle-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px}
-.vehicle-card{border:1px solid #dce3f0;border-radius:11px;padding:10px;cursor:pointer;background:#fff}
-.vehicle-card.active{border-color:var(--brand);background:#fff4ec}
+
+.muted{font-size:12px;color:var(--muted);font-weight:500}
+.badge{
+  display:inline-block;
+  padding:5px 10px;
+  border-radius:999px;
+  font-size:11px;
+  background:#eaf2ff;
+  color:#1e3a8a;
+  font-weight:800;
+}
+
+.vehicle-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}
+.vehicle-card{
+  border:1px solid #dae2f0;
+  border-radius:14px;
+  padding:11px;
+  cursor:pointer;
+  background:#fff;
+  transition:border-color .16s ease,transform .16s ease,box-shadow .16s ease;
+}
+.vehicle-card:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(15,23,42,.1)}
+.vehicle-card.active{
+  border-color:var(--brand);
+  background:linear-gradient(180deg,#fff8f2 0%,#fff 100%);
+  box-shadow:0 10px 22px rgba(255,106,0,.15);
+}
+
 .matching{display:flex;gap:10px;align-items:center}
 .dot{width:10px;height:10px;border-radius:99px;background:var(--brand);animation:p 1.2s infinite}
-@keyframes p{0%{transform:scale(1)}60%{transform:scale(2);opacity:.25}100%{transform:scale(1)}}
-.driver{display:grid;grid-template-columns:58px 1fr auto;gap:10px;align-items:center}
+@keyframes p{
+  0%{transform:scale(1)}
+  60%{transform:scale(2);opacity:.25}
+  100%{transform:scale(1)}
+}
+
+.driver{
+  display:grid;
+  grid-template-columns:58px 1fr auto;
+  gap:10px;
+  align-items:center;
+  background:#f7f9fe;
+  border:1px solid #dfe6f2;
+  border-radius:14px;
+  padding:10px;
+}
 .driver img{width:58px;height:58px;border-radius:999px;object-fit:cover;background:#ffe4d5}
 .status-line{margin-top:6px}
-#foodView,#agentView{position:fixed;inset:0;background:#f7fafc;padding:14px 12px 74px 12px;overflow:auto}
-.block{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px}
-.bottom-nav{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid #dbe2ee;display:grid;grid-template-columns:repeat(5,1fr);z-index:60}
-.nav-item{border:none;background:transparent;padding:8px 4px;font-size:11px;color:#475569;cursor:pointer;text-align:center}
-.nav-item.active{color:var(--brand);font-weight:700}
+
+#foodView,#agentView{
+  position:fixed;
+  inset:0;
+  background:linear-gradient(180deg,#f5f8ff 0%,#f2f4fa 100%);
+  padding:12px 12px 78px 12px;
+  overflow:auto;
+}
+.block{
+  background:rgba(255,255,255,.96);
+  border:1px solid #dce3f1;
+  border-radius:16px;
+  padding:14px;
+  box-shadow:0 8px 22px rgba(15,23,42,.08);
+}
+#foodView .block:first-child,
+#agentView .block:first-child{
+  background:linear-gradient(145deg,#ffffff 0%,#f8fbff 60%,#f2f7ff 100%);
+}
+
+.list-card{
+  border:1px solid #dde6f3;
+  border-radius:14px;
+  padding:11px;
+  background:#fff;
+  margin-bottom:9px;
+  box-shadow:0 6px 16px rgba(15,23,42,.06);
+}
+.list-title{font-size:14px;font-weight:800;color:#0f172a}
+.list-sub{font-size:12px;color:#64748b;margin-top:4px}
+.price{font-weight:800;color:#111827}
+.qty-btn{
+  border:none;
+  border-radius:8px;
+  padding:6px 11px;
+  background:#111827;
+  color:#fff;
+  cursor:pointer;
+  font-weight:700;
+}
+.status-chip{
+  display:inline-block;
+  padding:4px 9px;
+  border-radius:999px;
+  background:#edf2ff;
+  color:#1e40af;
+  font-size:11px;
+  font-weight:800;
+}
+
+.bottom-nav{
+  position:fixed;
+  left:0;
+  right:0;
+  bottom:0;
+  background:rgba(255,255,255,.98);
+  border-top:1px solid #d9e2f0;
+  backdrop-filter:blur(6px);
+  display:grid;
+  grid-template-columns:repeat(5,minmax(0,1fr));
+  z-index:60;
+}
+.nav-item{
+  border:none;
+  background:transparent;
+  padding:9px 4px 10px;
+  font-size:11px;
+  color:#4b5568;
+  font-weight:700;
+  cursor:pointer;
+  text-align:center;
+}
+.nav-item.active{
+  color:var(--brand);
+  font-weight:800;
+}
+
 .suggest-popup{
   position:fixed;
   z-index:120;
@@ -68,25 +294,29 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif
   color:#0f172a;
   cursor:pointer;
   border-bottom:1px solid #edf2f8;
+  font-family:"Manrope",sans-serif;
 }
 .suggest-item:last-child{border-bottom:none}
 .suggest-item:hover{background:#f8fafc}
-.list-card{border:1px solid #dde5f3;border-radius:12px;padding:10px;background:#fff;margin-bottom:8px}
-.list-title{font-size:14px;font-weight:700}
-.list-sub{font-size:12px;color:#64748b;margin-top:4px}
-.price{font-weight:700;color:#0f172a}
-.qty-btn{border:none;border-radius:8px;padding:6px 10px;background:#111;color:#fff;cursor:pointer}
-.status-chip{display:inline-block;padding:3px 8px;border-radius:999px;background:#edf2ff;color:#1e40af;font-size:11px;font-weight:700}
+
+@media (max-width:900px){
+  .sheet{max-height:62vh}
+}
+@media (max-width:680px){
+  .vehicle-list{grid-template-columns:1fr}
+  .driver{grid-template-columns:54px 1fr}
+  .driver .badge{grid-column:2}
+}
 </style>
 </head>
 <body>
 <div id="rideView">
   <div id="rideMap"></div>
   <div class="top-search">
-    <input id="whereToInput" placeholder="Where to?">
-    <button id="whereSetBtn" type="button">Set</button>
+    <input id="whereToInput" placeholder="Search destination, chowk, village, landmark">
+    <button id="whereSetBtn" type="button">Search</button>
   </div>
-  <button class="float-loc" id="locBtn" type="button">Current Location</button>
+  <button class="float-loc" id="locBtn" type="button">Live GPS</button>
 
   <div class="sheet">
     <div id="idlePanel" class="panel">
@@ -102,7 +332,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif
         <input id="pickupLandmarkInput" class="input" placeholder="Pickup landmark / village (e.g. Temple Chowk)">
         <input id="dropLandmarkInput" class="input" placeholder="Drop landmark / village (e.g. School gate)">
       </div>
-      <div class="muted" style="margin-top:6px">For small cities/villages: add clear landmark names so driver reaches exact spot.</div>
+      <div class="muted" style="margin-top:6px">Use local landmark names (chowk, mandir, school gate) for exact pickup and drop in small cities.</div>
       <div id="routeMeta" class="muted" style="margin-top:8px">Set destination to see fare and ETA.</div>
       <div id="vehicleList" class="vehicle-list"></div>
       <div class="row" style="margin-top:8px">
@@ -176,7 +406,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif
         <button id="foodTypeGroceryBtn" class="btn gray" type="button">Grocery</button>
       </div>
     </div>
-    <div class="muted" id="foodLocationNote" style="margin-top:6px">Fetching nearest stores within 5km...</div>
+    <div class="muted" id="foodLocationNote" style="margin-top:6px">Fetching nearby stores in 5km based on your live location...</div>
     <div id="foodList" style="margin-top:10px"></div>
   </div>
 

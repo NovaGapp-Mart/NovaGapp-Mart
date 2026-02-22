@@ -9,39 +9,43 @@
 <script src="public-config.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
 <style>
-:root{--brand:#ff6a00;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--bg:#f1f5f9;--ok:#0f9f50;--bad:#c62828}
+:root{--brand:#ff6a00;--ink:#10131d;--muted:#667389;--line:#d9e1ef;--bg:#f3f6fc;--ok:#0f9f50;--bad:#c62828}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif;padding-bottom:20px}
-.top{position:sticky;top:0;z-index:50;background:#111;color:#fff;padding:12px;display:flex;justify-content:space-between;align-items:center;font-weight:700}
-.wrap{padding:10px}
-.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
+body{margin:0;background:radial-gradient(1000px 500px at 30% -120px,#eaf1ff 0,#f3f6fc 58%,#eef3fb 100%);color:var(--ink);font-family:"Manrope",sans-serif;padding-bottom:20px}
+.top{position:sticky;top:0;z-index:50;background:rgba(10,12,18,.95);color:#fff;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;font-weight:800;border-bottom:1px solid rgba(255,255,255,.08);backdrop-filter:blur(8px)}
+.top a{color:#fff;text-decoration:none;font-size:12px;padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.12);font-weight:700}
+.wrap{padding:12px;max-width:1200px;margin:0 auto}
+.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:10px;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.input,select{width:100%;padding:10px;border:1px solid #d6deea;border-radius:10px;font-size:14px;background:#fff}
-.btn{border:none;border-radius:10px;padding:10px 12px;font-weight:700;cursor:pointer}
-.btn.brand{background:var(--brand);color:#fff}
+.input,select{width:100%;padding:11px 12px;border:1px solid #d6deea;border-radius:11px;font-size:14px;background:#fff;color:#111827;font-family:"Manrope",sans-serif}
+.input:focus,select:focus{outline:none;border-color:#ff9a53;box-shadow:0 0 0 3px rgba(255,106,0,.16)}
+.btn{border:none;border-radius:11px;padding:10px 12px;font-weight:800;cursor:pointer;letter-spacing:.01em}
+.btn.brand{background:linear-gradient(135deg,#ff7a1a 0,#ff5900 100%);color:#fff;box-shadow:0 10px 20px rgba(255,106,0,.24)}
 .btn.gray{background:#334155;color:#fff}
 .btn.ok{background:var(--ok);color:#fff}
 .btn.bad{background:var(--bad);color:#fff}
 .btn.full{width:100%}
-.muted{font-size:12px;color:var(--muted)}
+.muted{font-size:12px;color:var(--muted);font-weight:500}
 .kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.kpi{border:1px solid #e8edf5;border-radius:10px;padding:10px;background:#fff}
-.req{border:1px solid #e8edf5;border-radius:10px;padding:10px;margin-top:8px}
+.kpi{border:1px solid #e3eaf6;border-radius:12px;padding:10px;background:#fbfcff}
+.req{border:1px solid #e2e9f5;border-radius:12px;padding:10px;margin-top:8px;background:#f9fbff}
 .req-title{font-size:14px;font-weight:700}
-.timer{font-size:12px;color:#b91c1c;font-weight:700;margin-top:6px}
-#driverMap{height:280px;border-radius:12px;border:1px solid #dbe2ef;margin-top:8px}
-.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;background:#e8f1ff;color:#1d4ed8}
+.timer{font-size:12px;color:#b91c1c;font-weight:800;margin-top:6px}
+#driverMap{height:340px;border-radius:14px;border:1px solid #dbe2ef;margin-top:8px;overflow:hidden}
+.badge{display:inline-block;padding:5px 10px;border-radius:999px;font-size:11px;font-weight:800;background:#e8f1ff;color:#1d4ed8}
 .actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
 .hide{display:none!important}
 .nav-meta{margin-top:6px;font-size:12px;color:#334155}
 .small-note{font-size:11px;color:#64748b;margin-top:6px}
+@media(max-width:900px){.kpis,.actions{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <div class="top">
-  <span>Driver Dashboard</span>
-  <a href="food-auto.html" style="color:#fff;text-decoration:none;font-size:12px">Open Rider App</a>
+  <span>Driver Operations</span>
+  <a href="food-auto.html">Open Rider App</a>
 </div>
 <div class="wrap">
   <div class="card">
