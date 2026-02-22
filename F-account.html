@@ -8,14 +8,47 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
 <style>
-:root{--brand:#ff6a00;--brand-dark:#dc5300;--ink:#10131d;--mut:#687489;--line:#d8dfed;--bg:#f3f6fc}
+:root{
+  --brand:#111827;
+  --brand-dark:#0b1120;
+  --ink:#10131d;
+  --mut:#64748b;
+  --line:#dbe3ef;
+  --bg:#f3f6fc;
+}
 *{box-sizing:border-box}
-body{margin:0;font-family:"Manrope",sans-serif;background:radial-gradient(1000px 500px at 20% -120px,#ebf1ff 0,#f3f6fc 55%,#eff3fa 100%);color:var(--ink);padding-bottom:32px}
-.top{position:sticky;top:0;z-index:20;background:rgba(10,12,18,.96);border-bottom:1px solid rgba(255,255,255,.08);backdrop-filter:blur(8px);color:#fff;padding:12px 14px;display:flex;justify-content:space-between;align-items:center}
+body{
+  margin:0;
+  font-family:"Manrope",sans-serif;
+  background:radial-gradient(1000px 500px at 20% -120px,#e9edf7 0,#f3f5f9 55%,#edf1f8 100%);
+  color:var(--ink);
+  padding-bottom:32px;
+}
+.top{
+  position:sticky;
+  top:0;
+  z-index:20;
+  background:rgba(10,12,18,.96);
+  border-bottom:1px solid rgba(255,255,255,.08);
+  backdrop-filter:blur(8px);
+  color:#fff;
+  padding:12px 14px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
 .top b{font-size:18px;letter-spacing:.01em}
 .w{padding:14px;max-width:1180px;margin:0 auto}
-.hero{background:linear-gradient(135deg,#111827 0,#1d2332 65%,#3b2a19 100%);color:#fff;border:1px solid #2b3448;border-radius:18px;padding:16px;box-shadow:0 18px 30px rgba(15,23,42,.18);margin-bottom:12px}
-.hero .mut{color:#cfd7eb}
+.hero{
+  background:linear-gradient(145deg,#0f172a 0,#111827 56%,#1f2937 100%);
+  color:#fff;
+  border:1px solid #2a3449;
+  border-radius:18px;
+  padding:16px;
+  box-shadow:0 18px 30px rgba(15,23,42,.18);
+  margin-bottom:12px;
+}
+.hero .mut{color:#ced8ef}
 .flow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .flow span{padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.12);font-size:12px;font-weight:700}
 .layout{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,1fr);gap:12px;align-items:start}
@@ -25,15 +58,15 @@ body{margin:0;font-family:"Manrope",sans-serif;background:radial-gradient(1000px
 .row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
 .r3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}
 .in,select{width:100%;padding:11px 12px;border:1px solid #d4dced;border-radius:11px;background:#fff;color:#111827;font-family:"Manrope",sans-serif;font-size:14px}
-.in:focus,select:focus{outline:none;border-color:#ff9a53;box-shadow:0 0 0 3px rgba(255,106,0,.15)}
-.b{border:none;border-radius:11px;padding:10px 12px;background:linear-gradient(135deg,#ff7a1a 0,#ff5900 100%);color:#fff;font-weight:800;cursor:pointer;letter-spacing:.01em}
+.in:focus,select:focus{outline:none;border-color:#111827;box-shadow:0 0 0 3px rgba(17,24,39,.11)}
+.b{border:none;border-radius:11px;padding:10px 12px;background:linear-gradient(135deg,#111827 0,#0b1120 100%);color:#fff;font-weight:800;cursor:pointer;letter-spacing:.01em}
 .bd{background:#111827}.bg{background:#334155}.bo{background:#0f9f50}
 .mut{font-size:12px;color:var(--mut);font-weight:500}
 .roles{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}
 .role{border:1px solid #d8e2f2;border-radius:13px;padding:12px;background:#fff;cursor:pointer;text-align:left;transition:all .18s ease}
 .role b{display:block;margin-bottom:3px}
 .role:hover{transform:translateY(-1px);box-shadow:0 10px 22px rgba(15,23,42,.09)}
-.role.a{border-color:#ff6a00;background:linear-gradient(180deg,#fff8f2 0,#fff 100%);box-shadow:0 12px 22px rgba(255,106,0,.15)}
+.role.a{border-color:#111827;background:linear-gradient(180deg,#f8fafc 0,#fff 100%);box-shadow:0 12px 22px rgba(15,23,42,.12)}
 .chip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;background:#eef2ff;color:#1e40af;font-size:11px;font-weight:800}
 .hide{display:none!important}
 #m{height:240px;border:1px solid #dbe3f1;border-radius:12px;margin-top:8px;overflow:hidden}
@@ -41,15 +74,19 @@ body{margin:0;font-family:"Manrope",sans-serif;background:radial-gradient(1000px
 .pill{padding:6px 10px;border-radius:999px;background:#eef2ff;color:#1e40af;font-size:12px;font-weight:700}
 .actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
 .wallet{padding:10px 11px;border-radius:12px;background:#f5f8ff;border:1px solid #dbe5f7}
+.policy-grid{display:grid;grid-template-columns:1fr;gap:8px;margin-top:8px}
+.policy{border:1px solid #dbe4f7;border-radius:12px;padding:10px;background:#f9fbff}
+.policy b{display:block;font-size:14px;color:#0f172a}
+.policy span{display:block;margin-top:3px;color:#475569;font-size:12px;font-weight:600}
 @media(max-width:1020px){.layout{grid-template-columns:1fr}}
 @media(max-width:900px){.roles,.row,.r3,.actions{grid-template-columns:1fr}}
 </style></head><body>
 <div class="top"><b>F-Account Provider Setup</b><div><button class="b bd" onclick="location.href='index.html'">Home</button> <button class="b" onclick="location.href='food-auto.html'">Services</button></div></div>
 <div class="w">
   <div class="hero">
-    <b>Provider activation flow</b>
-    <div class="mut" style="margin-top:6px">Create one verified service profile for Driver, Seller or Agent with OTP + location lock + INR 500 activation.</div>
-    <div class="flow"><span>1. Select role</span><span>2. OTP verify</span><span>3. Save profile details</span><span>4. Pay and activate</span></div>
+    <b>Provider onboarding with clear fee policy</b>
+    <div class="mut" style="margin-top:6px">Service provider account activation requires one-time listing fee of INR 500 and 10% monthly platform share on completed sales. Service buyers are charged zero platform fee.</div>
+    <div class="flow"><span>1. Select role</span><span>2. OTP + location verify</span><span>3. Fill profile details</span><span>4. Pay INR 500 and activate</span></div>
   </div>
   <div class="layout">
     <div>
@@ -109,11 +146,12 @@ body{margin:0;font-family:"Manrope",sans-serif;background:radial-gradient(1000px
     <div>
       <div class="c">
         <div class="title"><b>4) Activate</b><span class="chip">Final step</span></div>
-        <div class="row">
-          <div class="wallet"><div class="mut">Provider fee</div><b>INR 500</b></div>
-          <div class="wallet"><div class="mut">Commission</div><b>10%</b></div>
+        <div class="policy-grid">
+          <div class="policy"><b>One-time listing fee</b><span>INR 500 at activation for Driver, Seller or Agent accounts.</span></div>
+          <div class="policy"><b>Monthly platform share</b><span>10% of completed monthly sales/revenue from provider side.</span></div>
+          <div class="policy"><b>Customer platform fee</b><span>INR 0. Service buyers are not charged platform onboarding fees.</span></div>
         </div>
-        <button id="act" class="b" style="margin-top:10px;width:100%">Pay and Activate</button>
+        <button id="act" class="b" style="margin-top:10px;width:100%">Pay INR 500 and Activate Provider</button>
         <div id="as" class="mut" style="margin-top:7px">Pending</div>
       </div>
 

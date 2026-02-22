@@ -14,35 +14,44 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
 <style>
 :root{
-  --brand:#ff6a00;
-  --brand-dark:#db5600;
-  --ink:#10131d;
-  --ink-soft:#3a4358;
-  --muted:#6b7284;
-  --line:#d9e0ee;
-  --surface:#f4f6fb;
+  --brand:#111827;
+  --brand-dark:#000;
+  --ink:#0f172a;
+  --ink-soft:#334155;
+  --muted:#64748b;
+  --line:#dbe2ef;
+  --surface:#f3f5fb;
   --panel:#ffffff;
   --ok:#0f9f50;
-  --bad:#c62828;
+  --bad:#b91c1c;
+  --ride-accent:#00a86b;
+  --zomato:#e23744;
+  --zomato-soft:#fff3f1;
+  --urban:#1f2b4d;
+  --urban-soft:#eef2ff;
 }
 *{box-sizing:border-box}
 html,body{height:100%}
 body{
   margin:0;
-  background:radial-gradient(1200px 600px at 50% -120px,#edf2ff 0%,#f6f8fc 45%,#f1f4fb 100%);
+  background:radial-gradient(1200px 600px at 50% -120px,#eceff7 0%,#f5f6f9 48%,#f0f2f8 100%);
   color:var(--ink);
   font-family:"Manrope",sans-serif;
 }
 .hide{display:none!important}
 
-#rideView{position:fixed;inset:0;background:#fff}
+#rideView{
+  position:fixed;
+  inset:0;
+  background:#fff;
+}
 #rideMap{position:absolute;inset:0;z-index:1}
 #rideView::after{
   content:"";
   position:absolute;
   left:0;right:0;bottom:56px;
-  height:220px;
-  background:linear-gradient(180deg,rgba(255,255,255,0) 0%,rgba(13,18,32,.75) 100%);
+  height:240px;
+  background:linear-gradient(180deg,rgba(10,10,10,0) 0%,rgba(10,10,10,.85) 100%);
   pointer-events:none;
   z-index:3;
 }
@@ -55,11 +64,11 @@ body{
   z-index:22;
   display:flex;
   gap:8px;
-  background:rgba(255,255,255,.96);
-  border:1px solid rgba(210,220,240,.95);
-  border-radius:16px;
+  background:rgba(255,255,255,.94);
+  border:1px solid rgba(214,220,232,.92);
+  border-radius:18px;
   padding:8px;
-  box-shadow:0 14px 32px rgba(15,23,42,.18);
+  box-shadow:0 14px 34px rgba(3,7,18,.24);
   backdrop-filter:blur(6px);
 }
 .top-search input{
@@ -67,13 +76,13 @@ body{
   border:none;
   outline:none;
   font-size:14px;
-  font-weight:600;
+  font-weight:700;
   color:#111827;
   background:transparent;
 }
 .top-search button{
   border:none;
-  border-radius:11px;
+  border-radius:12px;
   background:#0f172a;
   color:#fff;
   padding:10px 13px;
@@ -92,7 +101,7 @@ body{
   padding:10px 13px;
   font-weight:700;
   color:#0f172a;
-  box-shadow:0 10px 24px rgba(15,23,42,.22);
+  box-shadow:0 10px 24px rgba(15,23,42,.28);
   cursor:pointer;
 }
 
@@ -103,20 +112,37 @@ body{
   bottom:58px;
   z-index:25;
   background:rgba(255,255,255,.98);
-  border-top:1px solid #dde3ef;
-  border-radius:24px 24px 0 0;
+  border-top:1px solid #dde4f0;
+  border-radius:26px 26px 0 0;
   box-shadow:0 -14px 30px rgba(15,23,42,.2);
-  max-height:56vh;
+  max-height:58vh;
   overflow:auto;
-  padding:14px;
+  padding:14px 14px 18px;
 }
 .panel{display:block}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.panel-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+}
+.panel-title{
+  font-size:18px;
+  font-weight:800;
+  color:#070b14;
+  letter-spacing:-.01em;
+}
+.panel-sub{
+  font-size:12px;
+  color:#475569;
+  font-weight:600;
+}
 
 .input,select,textarea{
   width:100%;
   padding:12px 13px;
-  border:1px solid #d5deed;
+  border:1px solid #d6deea;
   border-radius:12px;
   font-size:14px;
   font-family:"Manrope",sans-serif;
@@ -125,8 +151,8 @@ body{
 }
 .input:focus,select:focus,textarea:focus{
   outline:none;
-  border-color:#ff9a53;
-  box-shadow:0 0 0 3px rgba(255,106,0,.16);
+  border-color:#1f2937;
+  box-shadow:0 0 0 3px rgba(17,24,39,.12);
 }
 
 .btn{
@@ -141,11 +167,11 @@ body{
 .btn:hover{filter:brightness(.98)}
 .btn:active{transform:translateY(1px)}
 .btn.brand{
-  background:linear-gradient(135deg,#ff7a1a 0%,#ff5900 100%);
+  background:linear-gradient(135deg,#111827 0%,#0b0f19 100%);
   color:#fff;
-  box-shadow:0 12px 24px rgba(255,106,0,.28);
+  box-shadow:0 12px 24px rgba(15,23,42,.24);
 }
-.btn.gray{background:#334155;color:#fff}
+.btn.gray{background:#e5eaf5;color:#0f172a}
 .btn.bad{background:#c62828;color:#fff}
 .btn.ok{background:#0f9f50;color:#fff}
 .btn.full{width:100%}
@@ -156,7 +182,7 @@ body{
   padding:5px 10px;
   border-radius:999px;
   font-size:11px;
-  background:#eaf2ff;
+  background:#edf2ff;
   color:#1e3a8a;
   font-weight:800;
 }
@@ -172,13 +198,13 @@ body{
 }
 .vehicle-card:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(15,23,42,.1)}
 .vehicle-card.active{
-  border-color:var(--brand);
-  background:linear-gradient(180deg,#fff8f2 0%,#fff 100%);
-  box-shadow:0 10px 22px rgba(255,106,0,.15);
+  border-color:#0f172a;
+  background:linear-gradient(180deg,#f8fafc 0%,#fff 100%);
+  box-shadow:0 10px 22px rgba(15,23,42,.13);
 }
 
 .matching{display:flex;gap:10px;align-items:center}
-.dot{width:10px;height:10px;border-radius:99px;background:var(--brand);animation:p 1.2s infinite}
+.dot{width:10px;height:10px;border-radius:99px;background:var(--ride-accent);animation:p 1.2s infinite}
 @keyframes p{
   0%{transform:scale(1)}
   60%{transform:scale(2);opacity:.25}
@@ -197,45 +223,187 @@ body{
 }
 .driver img{width:58px;height:58px;border-radius:999px;object-fit:cover;background:#ffe4d5}
 .status-line{margin-top:6px}
+.ride-metric-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+  margin-top:8px;
+}
+.ride-metric{
+  border:1px solid #e1e7f2;
+  border-radius:12px;
+  padding:10px;
+  background:#f8faff;
+}
+.ride-metric b{
+  display:block;
+  font-size:15px;
+  color:#0b1324;
+}
+.ride-metric span{
+  font-size:11px;
+  color:#64748b;
+  font-weight:700;
+}
 
 #foodView,#agentView{
   position:fixed;
   inset:0;
-  background:linear-gradient(180deg,#f5f8ff 0%,#f2f4fa 100%);
-  padding:12px 12px 78px 12px;
+  padding:10px 12px 78px 12px;
   overflow:auto;
+}
+#foodView{
+  background:
+    radial-gradient(800px 340px at 15% -120px,#ffdedd 0,#fff2f2 60%,#fff8f7 100%);
+}
+#agentView{
+  background:
+    radial-gradient(840px 360px at 20% -120px,#dfe6ff 0,#eef2ff 55%,#f6f8ff 100%);
+}
+.view-shell{
+  max-width:1160px;
+  margin:0 auto;
+}
+.svc-hero{
+  border-radius:22px;
+  border:1px solid rgba(255,255,255,.45);
+  padding:16px;
+  box-shadow:0 14px 30px rgba(15,23,42,.08);
+}
+#foodView .svc-hero{
+  background:linear-gradient(140deg,#fff 0%,#fff9f8 62%,#ffe8e8 100%);
+}
+#agentView .svc-hero{
+  background:linear-gradient(142deg,#fff 0%,#f6f8ff 58%,#e6edff 100%);
+}
+.svc-hero b{
+  font-size:19px;
+  color:#0f172a;
+  letter-spacing:-.01em;
+}
+.svc-hero .muted{
+  color:#475569;
+  margin-top:6px;
+}
+.svc-pills{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:10px;
+}
+.svc-pill{
+  border-radius:999px;
+  padding:6px 11px;
+  font-size:11px;
+  font-weight:800;
+}
+#foodView .svc-pill{
+  background:#fff;
+  color:#9f1239;
+  border:1px solid #ffd4d9;
+}
+#agentView .svc-pill{
+  background:#fff;
+  color:#1e3a8a;
+  border:1px solid #d7e2ff;
 }
 .block{
   background:rgba(255,255,255,.96);
-  border:1px solid #dce3f1;
-  border-radius:16px;
+  border:1px solid #e3e8f4;
+  border-radius:20px;
   padding:14px;
-  box-shadow:0 8px 22px rgba(15,23,42,.08);
+  box-shadow:0 10px 26px rgba(15,23,42,.08);
+  margin-top:10px;
 }
 #foodView .block:first-child,
 #agentView .block:first-child{
-  background:linear-gradient(145deg,#ffffff 0%,#f8fbff 60%,#f2f7ff 100%);
+  margin-top:0;
 }
 
 .list-card{
-  border:1px solid #dde6f3;
-  border-radius:14px;
-  padding:11px;
+  border:1px solid #e2e8f5;
+  border-radius:16px;
+  padding:12px;
   background:#fff;
-  margin-bottom:9px;
-  box-shadow:0 6px 16px rgba(15,23,42,.06);
+  margin-bottom:10px;
+  box-shadow:0 8px 18px rgba(15,23,42,.06);
 }
-.list-title{font-size:14px;font-weight:800;color:#0f172a}
-.list-sub{font-size:12px;color:#64748b;margin-top:4px}
-.price{font-weight:800;color:#111827}
+#foodList .list-card{
+  border-color:#ffdfe2;
+  background:linear-gradient(150deg,#fff 0%,#fffaf9 100%);
+}
+#foodMenuList .list-card{
+  border-color:#f8cfd5;
+  background:#fff;
+}
+#agentList .list-card{
+  border-color:#dce3ff;
+  background:linear-gradient(145deg,#fff 0%,#f9fbff 100%);
+}
+#agentBookingsList .list-card{
+  border-color:#dbe4fb;
+}
+.list-title{
+  font-size:15px;
+  font-weight:800;
+  color:#0f172a;
+}
+.list-sub{
+  font-size:12px;
+  color:#64748b;
+  margin-top:4px;
+  font-weight:600;
+}
+.price{
+  font-weight:800;
+  color:#111827;
+  margin-top:6px;
+}
+.rating-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  padding:4px 8px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:800;
+  background:#0f9f50;
+  color:#fff;
+  margin-top:6px;
+}
+.eta-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  padding:4px 9px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:800;
+  background:#e7f9ef;
+  color:#166534;
+}
+.qty-wrap{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:5px 7px;
+  border:1px solid #d6ddeb;
+  border-radius:999px;
+  background:#fff;
+}
 .qty-btn{
   border:none;
-  border-radius:8px;
-  padding:6px 11px;
+  border-radius:999px;
+  width:28px;
+  height:28px;
+  padding:0;
   background:#111827;
   color:#fff;
   cursor:pointer;
   font-weight:700;
+  display:flex;
+  align-items:center;
+  justify-content:center;
 }
 .status-chip{
   display:inline-block;
@@ -246,6 +414,24 @@ body{
   font-size:11px;
   font-weight:800;
 }
+.ride-summary-strong{
+  border:1px solid #d8e2ef;
+  border-radius:12px;
+  padding:10px;
+  background:#f8fafc;
+  font-size:12px;
+  color:#0f172a;
+  font-weight:700;
+}
+.cart-summary-strong{
+  border:1px dashed #fbc6ce;
+  border-radius:12px;
+  padding:10px;
+  background:#fff8f9;
+  font-size:12px;
+  color:#7f1d1d;
+  font-weight:700;
+}
 
 .bottom-nav{
   position:fixed;
@@ -253,7 +439,7 @@ body{
   right:0;
   bottom:0;
   background:rgba(255,255,255,.98);
-  border-top:1px solid #d9e2f0;
+  border-top:1px solid #d8e0ed;
   backdrop-filter:blur(6px);
   display:grid;
   grid-template-columns:repeat(5,minmax(0,1fr));
@@ -270,8 +456,9 @@ body{
   text-align:center;
 }
 .nav-item.active{
-  color:var(--brand);
+  color:#0f172a;
   font-weight:800;
+  background:#eef2ff;
 }
 
 .suggest-popup{
@@ -301,6 +488,7 @@ body{
 
 @media (max-width:900px){
   .sheet{max-height:62vh}
+  .ride-metric-grid{grid-template-columns:1fr}
 }
 @media (max-width:680px){
   .vehicle-list{grid-template-columns:1fr}
@@ -314,14 +502,17 @@ body{
   <div id="rideMap"></div>
   <div class="top-search">
     <input id="whereToInput" placeholder="Search destination, chowk, village, landmark">
-    <button id="whereSetBtn" type="button">Search</button>
+    <button id="whereSetBtn" type="button">Set</button>
   </div>
   <button class="float-loc" id="locBtn" type="button">Live GPS</button>
 
   <div class="sheet">
     <div id="idlePanel" class="panel">
-      <div class="row" style="justify-content:space-between">
-        <b>Book a Ride</b>
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">Book your ride</div>
+          <div class="panel-sub">Uber-style live pickup, ETA and fare lock</div>
+        </div>
         <span class="badge" id="gpsBadge">GPS: detecting...</span>
       </div>
       <div class="row" style="margin-top:8px">
@@ -332,8 +523,8 @@ body{
         <input id="pickupLandmarkInput" class="input" placeholder="Pickup landmark / village (e.g. Temple Chowk)">
         <input id="dropLandmarkInput" class="input" placeholder="Drop landmark / village (e.g. School gate)">
       </div>
-      <div class="muted" style="margin-top:6px">Use local landmark names (chowk, mandir, school gate) for exact pickup and drop in small cities.</div>
-      <div id="routeMeta" class="muted" style="margin-top:8px">Set destination to see fare and ETA.</div>
+      <div class="muted" style="margin-top:6px">Use local landmark names for precise pickup and smoother matching in small towns and villages.</div>
+      <div id="routeMeta" class="ride-summary-strong" style="margin-top:8px">Set destination to see fare and ETA.</div>
       <div id="vehicleList" class="vehicle-list"></div>
       <div class="row" style="margin-top:8px">
         <select id="paymentMethod">
@@ -345,7 +536,7 @@ body{
     </div>
 
     <div id="matchingPanel" class="panel hide">
-      <div class="matching"><div class="dot"></div><b>Finding nearby drivers...</b></div>
+      <div class="matching"><div class="dot"></div><b>Matching you with nearby drivers...</b></div>
       <div id="matchingText" class="muted status-line">Searching in 3km...</div>
       <button id="cancelMatchingBtn" class="btn bad full" style="margin-top:10px">Cancel Search</button>
     </div>
@@ -354,8 +545,8 @@ body{
       <div class="driver">
         <img id="driverPhoto" src="Images/no-image.jpg" alt="Driver">
         <div>
-          <div><b id="driverName">Assigned Driver</b></div>
-          <div id="driverMeta" class="muted">Rating 4.8 | Vehicle</div>
+          <div><b id="driverName">Live driver details pending</b></div>
+          <div id="driverMeta" class="muted">Vehicle and trip status will show after acceptance</div>
         </div>
         <div class="badge" id="driverEta">ETA -</div>
       </div>
@@ -370,7 +561,7 @@ body{
     </div>
 
     <div id="tripPanel" class="panel hide">
-      <span class="badge">Ride Started</span>
+      <span class="badge">Ride in progress</span>
       <div id="remainText" class="muted status-line">Distance remaining: -</div>
       <div id="tripEtaText" class="muted status-line">ETA: -</div>
       <button id="sosBtn" class="btn bad full" style="margin-top:8px">Emergency SOS</button>
@@ -398,9 +589,19 @@ body{
 </div>
 
 <section id="foodView" class="hide">
+  <div class="view-shell">
+  <div class="svc-hero">
+    <b>Food & Grocery in minutes</b>
+    <div class="muted">Zomato-style discovery, menu-first checkout and real-time order timeline.</div>
+    <div class="svc-pills">
+      <span class="svc-pill">Top rated stores</span>
+      <span class="svc-pill">Fast delivery zones</span>
+      <span class="svc-pill">No hidden customer fee</span>
+    </div>
+  </div>
   <div class="block">
     <div class="row" style="justify-content:space-between">
-      <b>Food / Grocery</b>
+      <b>Discover Partners</b>
       <div class="row">
         <button id="foodTypeFoodBtn" class="btn gray" type="button">Food</button>
         <button id="foodTypeGroceryBtn" class="btn gray" type="button">Grocery</button>
@@ -424,7 +625,7 @@ body{
       </select>
     </div>
     <textarea id="foodNoteInput" class="input" style="margin-top:8px;min-height:70px" placeholder="Order note (optional)"></textarea>
-    <div id="foodCartSummary" class="muted" style="margin-top:8px">Cart is empty.</div>
+    <div id="foodCartSummary" class="cart-summary-strong" style="margin-top:8px">Cart is empty.</div>
     <button id="foodCheckoutBtn" class="btn brand full" style="margin-top:8px" type="button">Place Order</button>
   </div>
 
@@ -435,12 +636,23 @@ body{
     </div>
     <div id="foodOrdersList" style="margin-top:10px"></div>
   </div>
+  </div>
 </section>
 
 <section id="agentView" class="hide">
+  <div class="view-shell">
+  <div class="svc-hero">
+    <b>Home service professionals</b>
+    <div class="muted">Urban Company-inspired booking with category filters, estimates and scheduled visits.</div>
+    <div class="svc-pills">
+      <span class="svc-pill">Verified professionals</span>
+      <span class="svc-pill">Transparent pricing</span>
+      <span class="svc-pill">Zero platform fee for customers</span>
+    </div>
+  </div>
   <div class="block">
     <div class="row" style="justify-content:space-between">
-      <b>Book Agent</b>
+      <b>Book a Professional</b>
       <button id="agentRefreshBtn" class="btn gray" type="button">Refresh</button>
     </div>
     <div id="agentCategoryGrid" class="vehicle-list" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-top:10px"></div>
@@ -473,6 +685,7 @@ body{
       <button id="agentBookingsRefreshBtn" class="btn gray" type="button">Refresh</button>
     </div>
     <div id="agentBookingsList" style="margin-top:10px"></div>
+  </div>
   </div>
 </section>
 
@@ -992,13 +1205,14 @@ function ensureRideExtrasUI(){
   if(top && !document.getElementById("liveAddressLabel")){
     const label = document.createElement("div");
     label.id = "liveAddressLabel";
-    label.className = "muted";
+    label.className = "ride-summary-strong";
     label.style.marginTop = "6px";
-    label.style.marginLeft = "2px";
-    label.style.marginRight = "2px";
-    label.style.background = "rgba(255,255,255,0.92)";
-    label.style.padding = "6px 8px";
-    label.style.borderRadius = "10px";
+    label.style.marginLeft = "12px";
+    label.style.marginRight = "12px";
+    label.style.background = "rgba(255,255,255,0.96)";
+    label.style.padding = "7px 10px";
+    label.style.borderRadius = "12px";
+    label.style.border = "1px solid #d8e2ef";
     label.textContent = "Current location: detecting...";
     top.insertAdjacentElement("afterend", label);
   }
@@ -1009,6 +1223,7 @@ function ensureRideExtrasUI(){
     near.id = "nearbyInfo";
     near.className = "muted";
     near.style.marginTop = "8px";
+    near.style.fontWeight = "700";
     near.textContent = "Nearby drivers: checking...";
     routeMeta.parentElement.insertBefore(near, routeMeta);
   }
@@ -1019,6 +1234,7 @@ function ensureRideExtrasUI(){
     wrap.id = "recentWrap";
     wrap.className = "muted";
     wrap.style.marginTop = "8px";
+    wrap.style.fontWeight = "700";
     wrap.innerHTML = "Recent destinations";
     const chips = document.createElement("div");
     chips.id = "recentList";
@@ -1149,6 +1365,7 @@ function renderRecentDestinations(){
     const t = document.createElement("span");
     t.textContent = "No recent destination";
     t.style.fontSize = "11px";
+    t.style.color = "#64748b";
     box.appendChild(t);
     return;
   }
@@ -1156,10 +1373,12 @@ function renderRecentDestinations(){
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = String(item?.text || "Recent").slice(0, 45);
-    btn.style.border = "1px solid #dce3f0";
+    btn.style.border = "1px solid #d8e2ef";
     btn.style.borderRadius = "999px";
     btn.style.padding = "6px 10px";
-    btn.style.background = "#fff";
+    btn.style.background = "#f8fafc";
+    btn.style.color = "#0f172a";
+    btn.style.fontWeight = "700";
     btn.style.whiteSpace = "nowrap";
     btn.style.cursor = "pointer";
     btn.onclick = () => {
@@ -1617,7 +1836,7 @@ function applyDriverFromTrack(track, status){
   const ride = track?.ride_request || {};
   const publicStatus = rideStatusPublic(status);
   const driverUserId = String(ride?.driver_user_id || "").trim();
-  const driverName = String(profile?.name || "Assigned Driver").trim() || "Assigned Driver";
+  const driverName = String(profile?.name || "Live Driver").trim() || "Live Driver";
   const image = String(profile?.image_url || "").trim();
   const phone = String(track?.driver_phone || "").trim();
 
@@ -2072,14 +2291,23 @@ function renderFoodListings(){
     div.className = "list-card";
     const active = foodState.selectedListing && String(foodState.selectedListing.id) === String(listing.id);
     const distance = Number(listing?.distance_km || 0);
+    const delivery = Number(listing?.delivery_charge_inr || 0);
+    const minOrder = Number(listing?.minimum_order_inr || 0);
+    const ratingRaw = Number(listing?.rating || listing?.avg_rating || 0);
+    const rating = ratingRaw > 0 ? ratingRaw : 4.2;
+    const etaMin = Math.max(12, Math.round((distance * 5.5) + 14));
     div.innerHTML = `
-      <div class="row" style="justify-content:space-between">
-        <div>
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div style="max-width:calc(100% - 114px)">
           <div class="list-title">${String(listing.store_name || "Store")}</div>
-          <div class="list-sub">${distance.toFixed(2)} km | ${listing.open_now ? "Open" : "Closed"} | Delivery INR ${Number(listing.delivery_charge_inr || 0).toFixed(2)}</div>
-          <div class="list-sub">Min order INR ${Number(listing.minimum_order_inr || 0).toFixed(2)}</div>
+          <div class="list-sub">${distance.toFixed(2)} km away | ${listing.open_now ? "Open now" : "Closed"}</div>
+          <div class="row" style="margin-top:6px;gap:6px">
+            <span class="rating-chip">${rating.toFixed(1)} ★</span>
+            <span class="eta-chip">${etaMin} min</span>
+          </div>
+          <div class="list-sub">Delivery ${money(delivery)} | Min order ${money(minOrder)}</div>
         </div>
-        <button class="btn ${active ? "brand" : "gray"}" data-food-listing="${String(listing.id)}">${active ? "Selected" : "View"}</button>
+        <button class="btn ${active ? "brand" : "gray"}" data-food-listing="${String(listing.id)}">${active ? "Selected" : "Browse"}</button>
       </div>
     `;
     box.appendChild(div);
@@ -2109,16 +2337,17 @@ function renderFoodMenu(){
     div.className = "list-card";
     const inCart = foodState.cart.find((c) => String(c.id) === String(item.id));
     const qty = Number(inCart?.qty || 0);
+    const stock = Math.max(0, Number(item?.stock_qty || 0));
     div.innerHTML = `
-      <div class="row" style="justify-content:space-between">
-        <div>
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div style="max-width:calc(100% - 108px)">
           <div class="list-title">${String(item.name || "Item")}</div>
-          <div class="list-sub">${String(item.category || "General")}</div>
+          <div class="list-sub">${String(item.category || "General")} | In stock ${stock}</div>
           <div class="price">INR ${Number(item.price_inr || 0).toFixed(2)}</div>
         </div>
-        <div class="row">
+        <div class="qty-wrap">
           <button class="qty-btn" data-food-dec="${String(item.id)}">-</button>
-          <span style="min-width:18px;text-align:center">${qty}</span>
+          <span style="min-width:20px;text-align:center;font-size:13px;font-weight:800">${qty}</span>
           <button class="qty-btn" data-food-inc="${String(item.id)}">+</button>
         </div>
       </div>
@@ -2143,7 +2372,7 @@ function renderFoodCartSummary(){
     summary.textContent = "Cart is empty.";
     return;
   }
-  summary.textContent = `Subtotal ${money(subtotal)} + Delivery ${money(delivery)} = Total ${money(total)}${minOrder > 0 ? ` | Min order ${money(minOrder)}` : ""}`;
+  summary.textContent = `Subtotal ${money(subtotal)} | Delivery ${money(delivery)} | Payable ${money(total)}${minOrder > 0 ? ` | Min order ${money(minOrder)}` : ""}`;
 }
 
 function updateFoodAddressPrefill(){
@@ -2236,13 +2465,15 @@ function renderFoodOrders(){
     const status = String(order?.status || "placed");
     const items = Array.isArray(order?.item_snapshot) ? order.item_snapshot : [];
     const itemText = items.map((item) => `${item.name} x${item.qty}`).join(", ");
+    const created = order?.created_at ? new Date(order.created_at).toLocaleString() : "-";
     div.innerHTML = `
-      <div class="row" style="justify-content:space-between">
-        <div>
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div style="max-width:calc(100% - 110px)">
           <div class="list-title">Order ${String(order.id || "").slice(0, 8).toUpperCase()}</div>
           <div class="list-sub">${prettyLabel(String(order.service_type || foodState.type))} | ${money(order.amount_inr || 0)}</div>
           <div class="list-sub">${itemText || "Items not available"}</div>
           <div class="list-sub">${String(order.delivery_address || "")}</div>
+          <div class="list-sub">Placed on ${created}</div>
         </div>
         <span class="status-chip">${prettyLabel(status)}</span>
       </div>
@@ -2343,11 +2574,20 @@ function renderAgentCategories(){
   const box = document.getElementById("agentCategoryGrid");
   if(!box) return;
   box.innerHTML = "";
+  const iconMap = {
+    electrician: "Elect",
+    plumber: "Pipe",
+    ac_repair: "AC",
+    carpenter: "Wood",
+    mechanic: "Mech",
+    painter: "Paint",
+    cleaning: "Clean"
+  };
   agentState.categories.forEach((cat) => {
     const b = document.createElement("button");
     b.type = "button";
     b.className = `btn ${agentState.activeCategory === cat ? "brand" : "gray"}`;
-    b.textContent = prettyLabel(cat);
+    b.textContent = `${iconMap[cat] || "Pro"} | ${prettyLabel(cat)}`;
     b.dataset.agentCat = cat;
     box.appendChild(b);
   });
@@ -2365,18 +2605,24 @@ function renderAgentList(){
     const selected = agentState.selectedAgent && String(agentState.selectedAgent.id) === String(agent.id);
     const hours = Number(document.getElementById("agentHoursInput")?.value || 1);
     const estimate = calcAgentEstimate(agent, hours);
+    const rating = Math.max(0, Number(agent.rating || 0));
+    const etaMin = Math.max(18, Math.round(Number(agent.distance_km || 0) * 7 + 20));
     const div = document.createElement("div");
     div.className = "list-card";
     div.innerHTML = `
-      <div class="row" style="justify-content:space-between">
-        <div>
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div style="max-width:calc(100% - 108px)">
           <div class="list-title">${String(agent.title || "Agent")}</div>
           <div class="list-sub">${prettyLabel(agent.service_category)} | ${Number(agent.distance_km || 0).toFixed(2)} km</div>
-          <div class="list-sub">Rating ${Number(agent.rating || 0).toFixed(1)} (${Number(agent.rating_count || 0)}) | Exp ${Number(agent.experience_years || 0)} yr</div>
+          <div class="row" style="margin-top:6px;gap:6px">
+            <span class="rating-chip">${rating.toFixed(1)} ★ (${Number(agent.rating_count || 0)})</span>
+            <span class="eta-chip">ETA ${etaMin} min</span>
+          </div>
+          <div class="list-sub">Exp ${Number(agent.experience_years || 0)} yr | Radius ${Number(agent.service_radius_km || 0)} km</div>
           <div class="list-sub">Visit ${money(agent.price_per_visit_inr || 0)} + ${money(agent.per_hour_rate_inr || 0)}/hr</div>
           <div class="price">Est. ${money(estimate)}</div>
         </div>
-        <button class="btn ${selected ? "brand" : "gray"}" data-agent-id="${String(agent.id)}">${selected ? "Selected" : "Select"}</button>
+        <button class="btn ${selected ? "brand" : "gray"}" data-agent-id="${String(agent.id)}">${selected ? "Selected" : "Book"}</button>
       </div>
     `;
     box.appendChild(div);
@@ -2392,7 +2638,7 @@ function renderAgentEstimate(){
   }
   const hours = Math.max(1, Math.min(12, Math.round(Number(document.getElementById("agentHoursInput")?.value || 1))));
   const estimate = calcAgentEstimate(agentState.selectedAgent, hours);
-  text.textContent = `Estimated price: ${money(estimate)} for ${hours} hour(s).`;
+  text.textContent = `Estimated price ${money(estimate)} for ${hours} hour(s). No platform fee for customers.`;
 }
 
 async function loadNearbyAgents(){
@@ -2429,12 +2675,13 @@ function renderAgentBookings(){
   agentState.bookings.forEach((booking) => {
     const div = document.createElement("div");
     div.className = "list-card";
+    const scheduled = booking.scheduled_at ? new Date(booking.scheduled_at).toLocaleString() : "-";
     div.innerHTML = `
-      <div class="row" style="justify-content:space-between">
-        <div>
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div style="max-width:calc(100% - 110px)">
           <div class="list-title">Booking ${String(booking.id || "").slice(0, 8).toUpperCase()}</div>
           <div class="list-sub">${String(booking.service_address || "")}</div>
-          <div class="list-sub">Scheduled: ${booking.scheduled_at ? new Date(booking.scheduled_at).toLocaleString() : "-"}</div>
+          <div class="list-sub">Scheduled: ${scheduled}</div>
           <div class="list-sub">Estimated: ${money(booking.estimated_price_inr || 0)}</div>
         </div>
         <span class="status-chip">${prettyLabel(booking.status || "requested")}</span>

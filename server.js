@@ -129,6 +129,9 @@ const PUBLIC_FIREBASE_APP_ID = String(process.env.FIREBASE_APP_ID || "").trim();
 const PUBLIC_FIREBASE_MEASUREMENT_ID = String(process.env.FIREBASE_MEASUREMENT_ID || "").trim();
 const PUBLIC_FIREBASE_VAPID_KEY = String(process.env.FIREBASE_VAPID_KEY || "").trim();
 const FIREBASE_SERVER_KEY = String(process.env.FIREBASE_SERVER_KEY || "").trim();
+const TWILIO_ACCOUNT_SID = String(process.env.TWILIO_ACCOUNT_SID || "").trim();
+const TWILIO_AUTH_TOKEN = String(process.env.TWILIO_AUTH_TOKEN || "").trim();
+const TWILIO_FROM_NUMBER = String(process.env.TWILIO_FROM_NUMBER || "").trim();
 
 app.get("/api/public/config", (req, res) => {
   res.setHeader("Cache-Control", "public, max-age=120");
@@ -1023,6 +1026,54 @@ async function sendFcmNotificationToTokens(tokens, payload){
     sent: Math.max(0, Number(parsed?.success || 0)),
     failed: Math.max(0, Number(parsed?.failure || 0))
   };
+}
+
+function isTwilioSmsConfigured(){
+  return Boolean(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_FROM_NUMBER);
+}
+
+async function sendTwilioSms(toInput, bodyInput){
+  if(!isTwilioSmsConfigured()){
+    return { ok:false, error:"twilio_not_configured" };
+  }
+  const to = String(toInput || "").trim();
+  const body = String(bodyInput || "").trim();
+  if(!to || !body){
+    return { ok:false, error:"sms_payload_invalid" };
+  }
+  const endpoint = `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(TWILIO_ACCOUNT_SID)}/Messages.json`;
+  const params = new URLSearchParams();
+  params.set("To", to);
+  params.set("From", TWILIO_FROM_NUMBER);
+  params.set("Body", body.slice(0, 600));
+  try{
+    const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString("base64");
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: params.toString()
+    });
+    const txt = await res.text().catch(() => "");
+    let json = null;
+    try{ json = txt ? JSON.parse(txt) : null; }catch(_){ json = null; }
+    if(!res.ok){
+      return {
+        ok:false,
+        error:`twilio_send_failed_${res.status}`,
+        details:String(txt || "").slice(0, 240)
+      };
+    }
+    return {
+      ok:true,
+      sid: String(json?.sid || "").trim(),
+      status: String(json?.status || "").trim()
+    };
+  }catch(err){
+    return { ok:false, error:"twilio_send_failed", details:String(err?.message || "") };
+  }
 }
 
 function isLocalServicesSupabaseConfigured(){
@@ -6329,7 +6380,7 @@ app.post("/api/local/listings/create", async (req, res) => {
         lat,
         lng,
         listing_fee_inr: 500,
-        platform_monthly_share_percent: 5,
+        platform_monthly_share_percent: 10,
         status: "approved",
         open_now: openNow,
         delivery_charge_inr: deliveryChargeInr,
@@ -8000,35 +8051,55 @@ app.post("/api/local/provider/otp/send", async (req, res) => {
     if(!issued){
       return res.status(400).json({ ok:false, error:"otp_issue_failed" });
     }
+    const otpBody = `Your NovaGapp OTP is ${issued.code}. Valid for 5 minutes.`;
+    const channels = [];
+
+    let smsResult = null;
+    if(isTwilioSmsConfigured()){
+      smsResult = await sendTwilioSms(phone, otpBody);
+      if(smsResult?.ok){
+        channels.push("sms");
+      }
+    }
+
     const state = await readSystemState();
     const tokens = getPushTokensForUser(state, userId);
-    let delivery = "in_app";
+    let pushResult = null;
     if(tokens.length){
-      const body = `Your OTP is ${issued.code}. Valid for 5 minutes.`;
-      await sendFcmNotificationToTokens(tokens, {
+      pushResult = await sendFcmNotificationToTokens(tokens, {
         title: "NovaGapp OTP",
-        body,
+        body: otpBody,
         data: {
           type: "provider_otp",
           otp_token: issued.token,
           phone: issued.phone
         }
-      }).catch(() => {});
-      delivery = "push";
+      }).catch(() => ({ ok:false, error:"push_send_failed" }));
+      if(pushResult?.ok && Number(pushResult?.sent || 0) > 0){
+        channels.push("push");
+      }
     }
-    const response = {
+
+    if(!channels.length){
+      return res.status(503).json({
+        ok:false,
+        error:"otp_delivery_not_configured_or_failed",
+        sms_configured: isTwilioSmsConfigured(),
+        push_tokens: tokens.length,
+        sms_error: String(smsResult?.error || ""),
+        push_error: String(pushResult?.error || "")
+      });
+    }
+
+    return res.json({
       ok:true,
       otp_token: issued.token,
       phone_masked: issued.phoneMasked,
       expires_in_sec: issued.expiresInSec,
-      delivery
-    };
-    // Fallback delivery for devices without active push token.
-    if(delivery !== "push"){
-      response.otp_preview = issued.code;
-      response.warning = "push_token_missing_using_in_app_otp_preview";
-    }
-    return res.json(response);
+      delivery: channels.join("+"),
+      channels,
+      sms_message_id: String(smsResult?.sid || "")
+    });
   }catch(err){
     return res.status(500).json({ ok:false, error:"provider_otp_send_failed", message:String(err?.message || "") });
   }

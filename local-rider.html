@@ -11,31 +11,153 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
 <style>
-:root{--brand:#ff6a00;--ink:#10131d;--muted:#667389;--line:#d9e1ef;--bg:#f3f6fc;--ok:#0f9f50;--bad:#c62828}
+:root{
+  --brand:#111827;
+  --ink:#0b1324;
+  --muted:#64748b;
+  --line:#dbe3ef;
+  --bg:#f2f4f8;
+  --ok:#0f9f50;
+  --bad:#b42318;
+  --panel:#ffffff;
+}
 *{box-sizing:border-box}
-body{margin:0;background:radial-gradient(1000px 500px at 30% -120px,#eaf1ff 0,#f3f6fc 58%,#eef3fb 100%);color:var(--ink);font-family:"Manrope",sans-serif;padding-bottom:20px}
-.top{position:sticky;top:0;z-index:50;background:rgba(10,12,18,.95);color:#fff;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;font-weight:800;border-bottom:1px solid rgba(255,255,255,.08);backdrop-filter:blur(8px)}
-.top a{color:#fff;text-decoration:none;font-size:12px;padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.12);font-weight:700}
-.wrap{padding:12px;max-width:1200px;margin:0 auto}
-.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:10px;box-shadow:0 10px 24px rgba(15,23,42,.07)}
+body{
+  margin:0;
+  background:radial-gradient(1000px 500px at 28% -120px,#e9edf7 0,#f3f4f8 60%,#eef1f7 100%);
+  color:var(--ink);
+  font-family:"Manrope",sans-serif;
+  padding-bottom:20px;
+}
+.top{
+  position:sticky;
+  top:0;
+  z-index:50;
+  background:rgba(10,12,18,.95);
+  color:#fff;
+  padding:12px 14px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  font-weight:800;
+  border-bottom:1px solid rgba(255,255,255,.08);
+  backdrop-filter:blur(8px);
+}
+.top a{
+  color:#fff;
+  text-decoration:none;
+  font-size:12px;
+  padding:8px 10px;
+  border-radius:999px;
+  background:rgba(255,255,255,.12);
+  font-weight:700;
+}
+.wrap{padding:12px;max-width:1180px;margin:0 auto}
+.hero{
+  border-radius:20px;
+  background:linear-gradient(150deg,#0f172a 0,#111827 54%,#1e293b 100%);
+  color:#fff;
+  padding:16px;
+  border:1px solid #1f2937;
+  box-shadow:0 16px 34px rgba(15,23,42,.22);
+  margin-bottom:10px;
+}
+.hero b{
+  font-size:19px;
+  letter-spacing:-.01em;
+}
+.hero .muted{
+  color:#c8d2e7;
+  margin-top:6px;
+}
+.hero-pills{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:10px;
+}
+.hero-pills span{
+  background:rgba(255,255,255,.12);
+  border:1px solid rgba(255,255,255,.16);
+  border-radius:999px;
+  padding:6px 10px;
+  font-size:11px;
+  font-weight:800;
+}
+.card{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:18px;
+  padding:14px;
+  margin-bottom:10px;
+  box-shadow:0 10px 24px rgba(15,23,42,.07);
+}
+.section-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:8px;
+}
+.section-head b{
+  font-size:17px;
+  letter-spacing:-.01em;
+}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.input,select{width:100%;padding:11px 12px;border:1px solid #d6deea;border-radius:11px;font-size:14px;background:#fff;color:#111827;font-family:"Manrope",sans-serif}
-.input:focus,select:focus{outline:none;border-color:#ff9a53;box-shadow:0 0 0 3px rgba(255,106,0,.16)}
+.input,select{
+  width:100%;
+  padding:11px 12px;
+  border:1px solid #d6deea;
+  border-radius:11px;
+  font-size:14px;
+  background:#fff;
+  color:#111827;
+  font-family:"Manrope",sans-serif;
+}
+.input:focus,select:focus{
+  outline:none;
+  border-color:#111827;
+  box-shadow:0 0 0 3px rgba(17,24,39,.12);
+}
 .btn{border:none;border-radius:11px;padding:10px 12px;font-weight:800;cursor:pointer;letter-spacing:.01em}
-.btn.brand{background:linear-gradient(135deg,#ff7a1a 0,#ff5900 100%);color:#fff;box-shadow:0 10px 20px rgba(255,106,0,.24)}
-.btn.gray{background:#334155;color:#fff}
+.btn.brand{background:linear-gradient(135deg,#111827 0,#0b1120 100%);color:#fff;box-shadow:0 10px 20px rgba(15,23,42,.2)}
+.btn.gray{background:#e6ecf7;color:#0f172a}
 .btn.ok{background:var(--ok);color:#fff}
 .btn.bad{background:var(--bad);color:#fff}
 .btn.full{width:100%}
 .muted{font-size:12px;color:var(--muted);font-weight:500}
-.kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.kpi{border:1px solid #e3eaf6;border-radius:12px;padding:10px;background:#fbfcff}
-.req{border:1px solid #e2e9f5;border-radius:12px;padding:10px;margin-top:8px;background:#f9fbff}
-.req-title{font-size:14px;font-weight:700}
+.kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.kpi{
+  border:1px solid #e2e8f4;
+  border-radius:14px;
+  padding:11px;
+  background:#f8faff;
+}
+.kpi b{
+  font-size:18px;
+  color:#0f172a;
+}
+.req{
+  border:1px solid #dbe4f2;
+  border-radius:14px;
+  padding:11px;
+  margin-top:8px;
+  background:linear-gradient(145deg,#fff 0,#f8fbff 100%);
+}
+.req-title{font-size:14px;font-weight:800;color:#0b1324}
 .timer{font-size:12px;color:#b91c1c;font-weight:800;margin-top:6px}
 #driverMap{height:340px;border-radius:14px;border:1px solid #dbe2ef;margin-top:8px;overflow:hidden}
-.badge{display:inline-block;padding:5px 10px;border-radius:999px;font-size:11px;font-weight:800;background:#e8f1ff;color:#1d4ed8}
+.badge{display:inline-block;padding:5px 10px;border-radius:999px;font-size:11px;font-weight:800;background:#eef2ff;color:#1e3a8a}
 .actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
+.ride-meta{
+  margin-top:8px;
+  border:1px solid #dbe4f5;
+  border-radius:14px;
+  padding:10px;
+  background:#f8fbff;
+}
+.ride-meta b{
+  color:#0f172a;
+}
 .hide{display:none!important}
 .nav-meta{margin-top:6px;font-size:12px;color:#334155}
 .small-note{font-size:11px;color:#64748b;margin-top:6px}
@@ -44,13 +166,25 @@ body{margin:0;background:radial-gradient(1000px 500px at 30% -120px,#eaf1ff 0,#f
 </head>
 <body>
 <div class="top">
-  <span>Driver Operations</span>
+  <span>Driver Partner Console</span>
   <a href="food-auto.html">Open Rider App</a>
 </div>
 <div class="wrap">
+  <div class="hero">
+    <b>Drive with live trip control</b>
+    <div class="muted">Uber-inspired dispatch panel for accepting trips, navigating pickup/drop and tracking earnings in real time.</div>
+    <div class="hero-pills">
+      <span>No demo queue</span>
+      <span>Live GPS matching</span>
+      <span>Real earnings feed</span>
+    </div>
+  </div>
   <div class="card">
-    <div class="row" style="justify-content:space-between">
-      <b>Driver Registration</b>
+    <div class="section-head">
+      <div>
+        <b>Driver Registration</b>
+        <div class="muted">Complete this once, then go online.</div>
+      </div>
       <span class="badge" id="driverProfileStatus">Not saved</span>
     </div>
     <div class="row" style="margin-top:8px">
@@ -79,9 +213,9 @@ body{margin:0;background:radial-gradient(1000px 500px at 30% -120px,#eaf1ff 0,#f
   </div>
 
   <div class="card">
-    <div class="row" style="justify-content:space-between">
+    <div class="section-head">
       <div>
-        <div><b>Go Online</b></div>
+        <b>Availability</b>
         <div class="muted" id="onlineText">Offline</div>
       </div>
       <div class="row">
@@ -101,24 +235,33 @@ body{margin:0;background:radial-gradient(1000px 500px at 30% -120px,#eaf1ff 0,#f
         <div class="muted">Completed rides</div>
         <div><b id="ridesCompletedText">0</b></div>
       </div>
+      <div class="kpi">
+        <div class="muted">Queue right now</div>
+        <div><b id="queueLiveKpi">0</b></div>
+      </div>
     </div>
   </div>
 
   <div class="card">
-    <div class="row" style="justify-content:space-between">
-      <b>Incoming Ride Requests</b>
+    <div class="section-head">
+      <div>
+        <b>Incoming Ride Requests</b>
+        <div class="muted">Each request auto-expires after 10 seconds.</div>
+      </div>
       <span class="badge" id="queueBadge">0 waiting</span>
     </div>
-    <div class="muted" style="margin-top:6px">Each request has a 10 second response window.</div>
     <div id="queueList"></div>
   </div>
 
   <div class="card">
-    <div class="row" style="justify-content:space-between">
-      <b>Active Ride</b>
+    <div class="section-head">
+      <div>
+        <b>Active Ride</b>
+        <div class="muted">Live rider status, map path and action controls.</div>
+      </div>
       <span class="badge" id="activeStatusBadge">idle</span>
     </div>
-    <div id="activeRideBox" class="muted" style="margin-top:8px">No active ride</div>
+    <div id="activeRideBox" class="ride-meta">No active ride</div>
     <div id="driverMap"></div>
     <div id="navMeta" class="nav-meta">Navigation details will appear here.</div>
     <div id="turnSteps" class="small-note">Turn-by-turn steps will appear here.</div>
@@ -744,6 +887,8 @@ function renderQueue(rides){
   queue.innerHTML = "";
   const waiting = rides.filter((r) => isRideSearching(r?.status));
   document.getElementById("queueBadge").textContent = waiting.length + " waiting";
+  const queueLiveKpi = document.getElementById("queueLiveKpi");
+  if(queueLiveKpi) queueLiveKpi.textContent = String(waiting.length);
   if(!waiting.length){
     queue.innerHTML = '<div class="muted" style="margin-top:8px">No pending requests</div>';
   }
@@ -756,8 +901,12 @@ function renderQueue(rides){
     div.className = "req";
     div.innerHTML = `
       <div class="req-title">${String(ride.pickup_text || "Pickup")}</div>
-      <div class="muted">to ${String(ride.drop_text || "Drop")}</div>
-      <div class="muted" style="margin-top:6px">Pickup distance: ${Number(pickupKm || 0).toFixed(1)} km | Est. earning: ${money(estimate.earning)}</div>
+      <div class="muted">Drop: ${String(ride.drop_text || "Drop")}</div>
+      <div class="row" style="margin-top:6px;gap:6px">
+        <span class="badge">Pickup ${Number(pickupKm || 0).toFixed(1)} km</span>
+        <span class="badge">Fare ${money(estimate.fare)}</span>
+        <span class="badge">Earn ${money(estimate.earning)}</span>
+      </div>
       <div class="timer" id="tm_${String(ride.id)}">Auto reject in 10s</div>
       <div class="row" style="margin-top:8px">
         <button class="btn ok" data-act="accept" data-id="${String(ride.id)}">Accept</button>
@@ -796,6 +945,8 @@ function renderActiveRide(rides){
     state.activeRideId = "";
     box.textContent = "No active ride";
     badge.textContent = "idle";
+    badge.style.background = "#eef2ff";
+    badge.style.color = "#1e3a8a";
     updateMapForRide(null).catch(() => {});
     saveDriverState();
     return;
@@ -806,6 +957,16 @@ function renderActiveRide(rides){
 
   const s = rideStatusPublic(active.status);
   badge.textContent = s || "active";
+  const toneByStatus = {
+    accepted: { bg: "#dbeafe", fg: "#1d4ed8" },
+    arrived: { bg: "#e0f2fe", fg: "#0369a1" },
+    started: { bg: "#dcfce7", fg: "#166534" },
+    completed: { bg: "#e2e8f0", fg: "#334155" },
+    cancelled: { bg: "#fee2e2", fg: "#991b1b" }
+  };
+  const tone = toneByStatus[s] || toneByStatus.accepted;
+  badge.style.background = tone.bg;
+  badge.style.color = tone.fg;
   const estimate = estimateAutoFare(active);
   const toPickup = (state.lat != null && state.lng != null)
     ? haversineKm(state.lat, state.lng, Number(active.pickup_lat || 0), Number(active.pickup_lng || 0))
@@ -814,10 +975,13 @@ function renderActiveRide(rides){
     ? haversineKm(state.lat, state.lng, Number(active.drop_lat || 0), Number(active.drop_lng || 0))
     : 0;
   box.innerHTML = `
-    <div><b>${String(active.pickup_text || "Pickup")}</b> -> <b>${String(active.drop_text || "Drop")}</b></div>
-    <div class="muted" style="margin-top:6px">Status: ${s}</div>
-    <div class="muted" style="margin-top:6px">Fare est.: ${money(estimate.fare)} | Driver est.: ${money(estimate.earning)}</div>
-    <div class="muted" style="margin-top:6px">To pickup: ${Number(toPickup || 0).toFixed(1)} km | To drop: ${Number(toDrop || 0).toFixed(1)} km</div>
+    <div><b>${String(active.pickup_text || "Pickup")}</b> to <b>${String(active.drop_text || "Drop")}</b></div>
+    <div class="row" style="margin-top:6px;gap:6px">
+      <span class="badge">Status ${prettyLabel(s || "active")}</span>
+      <span class="badge">Fare ${money(estimate.fare)}</span>
+      <span class="badge">Earn ${money(estimate.earning)}</span>
+    </div>
+    <div class="muted" style="margin-top:6px">To pickup ${Number(toPickup || 0).toFixed(1)} km | To drop ${Number(toDrop || 0).toFixed(1)} km</div>
   `;
 
   const addAction = (label, status, cls) => {

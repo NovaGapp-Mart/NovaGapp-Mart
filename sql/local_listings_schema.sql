@@ -11,7 +11,7 @@ create table if not exists public.local_listings (
   lat double precision not null,
   lng double precision not null,
   listing_fee_inr numeric(10,2) not null default 500,
-  platform_monthly_share_percent numeric(5,2) not null default 5,
+  platform_monthly_share_percent numeric(5,2) not null default 10,
   status text not null default 'pending_approval' check (status in ('pending_approval','approved','rejected')),
   rejection_reason text,
   approved_at timestamptz,
