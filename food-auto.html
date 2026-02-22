@@ -343,6 +343,56 @@ body{
 #agentBookingsList .list-card{
   border-color:#dbe4fb;
 }
+.agent-cat-btn{
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+  gap:10px;
+  text-align:left;
+  min-height:74px;
+  padding:8px 10px;
+}
+.agent-cat-btn img{
+  width:44px;
+  height:44px;
+  border-radius:10px;
+  border:1px solid rgba(15,23,42,.14);
+  object-fit:cover;
+  background:#eef2ff;
+  flex:0 0 44px;
+}
+.agent-cat-copy{
+  display:flex;
+  flex-direction:column;
+  line-height:1.15;
+}
+.agent-cat-copy b{
+  font-size:13px;
+  font-weight:800;
+}
+.agent-cat-copy small{
+  margin-top:4px;
+  font-size:11px;
+  font-weight:700;
+  opacity:.9;
+}
+.agent-empty{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  border:1px dashed #c8d4fa;
+  border-radius:14px;
+  background:#f8fbff;
+  padding:12px;
+}
+.agent-empty img{
+  width:72px;
+  height:72px;
+  border-radius:12px;
+  border:1px solid #d7e1ff;
+  object-fit:cover;
+  background:#eef2ff;
+}
 .agent-art{
   display:block;
   width:100%;
@@ -3027,20 +3077,20 @@ function renderAgentCategories(){
   const box = document.getElementById("agentCategoryGrid");
   if(!box) return;
   box.innerHTML = "";
-  const iconMap = {
-    electrician: "Elect",
-    plumber: "Pipe",
-    ac_repair: "AC",
-    carpenter: "Wood",
-    mechanic: "Mech",
-    painter: "Paint",
-    cleaning: "Clean"
-  };
   agentState.categories.forEach((cat) => {
+    const selected = agentState.activeCategory === cat;
+    const art = buildAgentArtwork(cat);
+    const title = prettyLabel(cat);
     const b = document.createElement("button");
     b.type = "button";
-    b.className = `btn ${agentState.activeCategory === cat ? "brand" : "gray"}`;
-    b.textContent = `${iconMap[cat] || "Pro"} | ${prettyLabel(cat)}`;
+    b.className = `btn agent-cat-btn ${selected ? "brand" : "gray"}`;
+    b.innerHTML = `
+      <img src="${art}" alt="${title} image" loading="lazy">
+      <span class="agent-cat-copy">
+        <b>${title}</b>
+        <small>${selected ? "Selected" : "Tap to view"}</small>
+      </span>
+    `;
     b.dataset.agentCat = cat;
     box.appendChild(b);
   });
@@ -3051,7 +3101,18 @@ function renderAgentList(){
   if(!box) return;
   box.innerHTML = "";
   if(!agentState.agents.length){
-    box.innerHTML = `<div class="muted">No agent available in selected category.</div>`;
+    const selectedCategory = String(agentState.activeCategory || "agent").trim().toLowerCase();
+    const selectedLabel = prettyLabel(selectedCategory);
+    const selectedArt = buildAgentArtwork(selectedCategory);
+    box.innerHTML = `
+      <div class="agent-empty">
+        <img src="${selectedArt}" alt="${selectedLabel} image" loading="lazy">
+        <div>
+          <div class="list-title">${selectedLabel}</div>
+          <div class="list-sub">No agent available in selected category.</div>
+        </div>
+      </div>
+    `;
     return;
   }
   agentState.agents.forEach((agent) => {
