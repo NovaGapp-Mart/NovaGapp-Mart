@@ -91,6 +91,11 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif
         <input id="pickupInput" class="input" placeholder="Pickup location">
         <input id="dropInput" class="input" placeholder="Drop location">
       </div>
+      <div class="row" style="margin-top:8px">
+        <input id="pickupLandmarkInput" class="input" placeholder="Pickup landmark / village (e.g. Temple Chowk)">
+        <input id="dropLandmarkInput" class="input" placeholder="Drop landmark / village (e.g. School gate)">
+      </div>
+      <div class="muted" style="margin-top:6px">For small cities/villages: add clear landmark names so driver reaches exact spot.</div>
       <div id="routeMeta" class="muted" style="margin-top:8px">Set destination to see fare and ETA.</div>
       <div id="vehicleList" class="vehicle-list"></div>
       <div class="row" style="margin-top:8px">
@@ -196,6 +201,8 @@ const state = {
   dropLng: null,
   pickupText: "",
   dropText: "",
+  pickupLandmark: "",
+  dropLandmark: "",
   distanceKm: 0,
   durationMin: 0,
   fare: 0,
@@ -289,7 +296,12 @@ function setPhase(next){
 
 function saveState(){
   try{
-    if(!state.requestId){
+    const hasDraft = Boolean(
+      state.pickupText || state.dropText || state.pickupLandmark || state.dropLandmark ||
+      (state.pickupLat != null && state.pickupLng != null) ||
+      (state.dropLat != null && state.dropLng != null)
+    );
+    if(!state.requestId && !hasDraft){
       localStorage.removeItem(RIDE_STATE_KEY);
       return;
     }
@@ -303,6 +315,8 @@ function saveState(){
       dropLng: state.dropLng,
       pickupText: state.pickupText,
       dropText: state.dropText,
+      pickupLandmark: state.pickupLandmark,
+      dropLandmark: state.dropLandmark,
       distanceKm: state.distanceKm,
       durationMin: state.durationMin,
       fare: state.fare,
@@ -320,7 +334,7 @@ function loadState(){
     const raw = localStorage.getItem(RIDE_STATE_KEY);
     if(!raw) return null;
     const json = JSON.parse(raw);
-    if(!json?.requestId) return null;
+    if(!json || typeof json !== "object") return null;
     return json;
   }catch(_){
     return null;
@@ -846,6 +860,16 @@ function setRideHint(text){
   setMatchingText(msg);
 }
 
+function composePlaceText(baseText, landmarkText){
+  const base = String(baseText || "").trim();
+  const landmark = String(landmarkText || "").trim();
+  if(!base && !landmark) return "Location pin";
+  if(!landmark) return base || "Location pin";
+  if(!base) return `Landmark: ${landmark}`;
+  if(base.toLowerCase().includes(landmark.toLowerCase())) return base;
+  return `${base} | Landmark: ${landmark}`;
+}
+
 async function ensureConsumerRole(){
   const me = await ensureMe();
   if(!me) return false;
@@ -1307,6 +1331,8 @@ async function pollRideTrack(){
 async function requestRide(){
   const me = await ensureMe();
   if(!me) return;
+  state.pickupLandmark = String(document.getElementById("pickupLandmarkInput")?.value || state.pickupLandmark || "").trim().slice(0, 120);
+  state.dropLandmark = String(document.getElementById("dropLandmarkInput")?.value || state.dropLandmark || "").trim().slice(0, 120);
   if(state.pickupLat == null || state.pickupLng == null){
     setRideHint("Pickup not detected yet. Tap Current Location.");
     return;
@@ -1341,8 +1367,8 @@ async function requestRide(){
     pickup_lng: state.pickupLng,
     drop_lat: state.dropLat,
     drop_lng: state.dropLng,
-    pickup_text: String(state.pickupText || "Pickup").slice(0, 160),
-    drop_text: String(state.dropText || "Drop").slice(0, 160),
+    pickup_text: composePlaceText(state.pickupText || "Pickup", state.pickupLandmark).slice(0, 160),
+    drop_text: composePlaceText(state.dropText || "Drop", state.dropLandmark).slice(0, 160),
     vehicle_type: state.vehicle,
     payment_method: document.getElementById("paymentMethod").value,
     fare_inr: state.fare,
@@ -1433,11 +1459,13 @@ async function resetRideFlow(keepPickup){
   state.dropLat = null;
   state.dropLng = null;
   state.dropText = "";
+  state.dropLandmark = "";
   state.distanceKm = 0;
   state.durationMin = 0;
   state.fare = 0;
 
   document.getElementById("dropInput").value = "";
+  document.getElementById("dropLandmarkInput").value = "";
   document.getElementById("whereToInput").value = "";
   document.getElementById("otpInput").value = "";
 
@@ -1445,6 +1473,8 @@ async function resetRideFlow(keepPickup){
     state.pickupLat = null;
     state.pickupLng = null;
     state.pickupText = "";
+    state.pickupLandmark = "";
+    document.getElementById("pickupLandmarkInput").value = "";
     if(pickupMarker && map){ map.removeLayer(pickupMarker); pickupMarker = null; }
   }
 
@@ -1489,12 +1519,16 @@ async function restoreStateIfPresent(){
   state.dropLng = Number.isFinite(Number(saved.dropLng)) ? Number(saved.dropLng) : null;
   state.pickupText = String(saved.pickupText || "").trim().slice(0, 160);
   state.dropText = String(saved.dropText || "").trim().slice(0, 160);
+  state.pickupLandmark = String(saved.pickupLandmark || "").trim().slice(0, 120);
+  state.dropLandmark = String(saved.dropLandmark || "").trim().slice(0, 120);
   state.distanceKm = Number(saved.distanceKm || 0);
   state.durationMin = Number(saved.durationMin || 0);
   state.fare = Number(saved.fare || 0);
 
   document.getElementById("pickupInput").value = state.pickupText;
   document.getElementById("dropInput").value = state.dropText;
+  document.getElementById("pickupLandmarkInput").value = state.pickupLandmark;
+  document.getElementById("dropLandmarkInput").value = state.dropLandmark;
   document.getElementById("whereToInput").value = state.dropText;
 
   if(state.pickupLat != null && state.pickupLng != null){
@@ -1524,6 +1558,8 @@ function bindRideEvents(){
   const whereInput = document.getElementById("whereToInput");
   const dropInput = document.getElementById("dropInput");
   const pickupInput = document.getElementById("pickupInput");
+  const pickupLandmarkInput = document.getElementById("pickupLandmarkInput");
+  const dropLandmarkInput = document.getElementById("dropLandmarkInput");
 
   document.getElementById("whereSetBtn").onclick = () => {
     handleDestinationInput(whereInput.value).catch(() => {});
@@ -1596,6 +1632,15 @@ function bindRideEvents(){
       state.pickupText = String(place?.name || "").slice(0, 160);
       await setPickup(Number(place?.lat), Number(place?.lng), false);
     });
+  });
+
+  pickupLandmarkInput.addEventListener("input", () => {
+    state.pickupLandmark = String(pickupLandmarkInput.value || "").trim().slice(0, 120);
+    saveState();
+  });
+  dropLandmarkInput.addEventListener("input", () => {
+    state.dropLandmark = String(dropLandmarkInput.value || "").trim().slice(0, 120);
+    saveState();
   });
 
   document.getElementById("locBtn").onclick = () => {

@@ -33,6 +33,8 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif
 .badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;background:#e8f1ff;color:#1d4ed8}
 .actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
 .hide{display:none!important}
+.nav-meta{margin-top:6px;font-size:12px;color:#334155}
+.small-note{font-size:11px;color:#64748b;margin-top:6px}
 </style>
 </head>
 <body>
@@ -83,6 +85,8 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif
     </div>
     <div id="activeRideBox" class="muted" style="margin-top:8px">No active ride</div>
     <div id="driverMap"></div>
+    <div id="navMeta" class="nav-meta">Navigation details will appear here.</div>
+    <div class="small-note">Small city/village tip: use landmark text from pickup/drop while navigating.</div>
     <div class="actions" id="rideActions"></div>
   </div>
 </div>
@@ -97,6 +101,8 @@ const state = {
   pollTimer: null,
   heartbeatTimer: null,
   lastLocationPushAt: 0,
+  gpsAccuracy: null,
+  gpsLastFixAt: 0,
   lat: null,
   lng: null,
   queueTimers: new Map(),
@@ -108,6 +114,7 @@ let driverMarker = null;
 let pickupMarker = null;
 let dropMarker = null;
 let guideLine = null;
+let routeDrawSeq = 0;
 
 function money(v){ return "INR " + Number(v || 0).toFixed(2); }
 function nowMs(){ return Date.now(); }
@@ -214,13 +221,94 @@ function estimateAutoFare(ride){
 function initMap(){
   if(map) return;
   map = L.map("driverMap", { zoomControl: true }).setView([18.5204, 73.8567], 13);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  const primaryTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+    subdomains: "abcd",
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
+  });
+  const fallbackTiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap contributors"
-  }).addTo(map);
+  });
+  let fallbackAdded = false;
+  primaryTiles.on("tileerror", () => {
+    if(fallbackAdded) return;
+    fallbackAdded = true;
+    fallbackTiles.addTo(map);
+  });
+  primaryTiles.addTo(map);
 }
 
-function updateMapForRide(activeRide){
+function buildExternalNavUrl(lat, lng){
+  const la = Number(lat);
+  const ln = Number(lng);
+  if(!Number.isFinite(la) || !Number.isFinite(ln)) return "";
+  if(Number.isFinite(state.lat) && Number.isFinite(state.lng)){
+    return `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${encodeURIComponent(String(state.lat))}%2C${encodeURIComponent(String(state.lng))}%3B${encodeURIComponent(String(la))}%2C${encodeURIComponent(String(ln))}`;
+  }
+  return `https://www.openstreetmap.org/?mlat=${encodeURIComponent(String(la))}&mlon=${encodeURIComponent(String(ln))}#map=16/${encodeURIComponent(String(la))}/${encodeURIComponent(String(ln))}`;
+}
+
+function openExternalNavigation(lat, lng){
+  const url = buildExternalNavUrl(lat, lng);
+  if(!url) return;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+async function fetchDriverRoute(fromLat, fromLng, toLat, toLng){
+  const la1 = Number(fromLat), ln1 = Number(fromLng), la2 = Number(toLat), ln2 = Number(toLng);
+  if(!Number.isFinite(la1) || !Number.isFinite(ln1) || !Number.isFinite(la2) || !Number.isFinite(ln2)){
+    return null;
+  }
+  try{
+    const url = `https://router.project-osrm.org/route/v1/driving/${ln1},${la1};${ln2},${la2}?overview=full&geometries=geojson&steps=true`;
+    const res = await fetch(url, { cache: "no-store" });
+    const json = await res.json().catch(() => null);
+    const route = json?.routes?.[0];
+    if(!route) return null;
+    const coords = Array.isArray(route?.geometry?.coordinates)
+      ? route.geometry.coordinates.map((c) => [Number(c?.[1]), Number(c?.[0])]).filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]))
+      : [];
+    const distanceKm = Number(route?.distance || 0) / 1000;
+    const durationMin = Number(route?.duration || 0) / 60;
+    return {
+      path: coords.length >= 2 ? coords : [[la1, ln1], [la2, ln2]],
+      distanceKm: Number.isFinite(distanceKm) ? distanceKm : haversineKm(la1, ln1, la2, ln2),
+      durationMin: Number.isFinite(durationMin) ? durationMin : Math.max((haversineKm(la1, ln1, la2, ln2) / 24) * 60, 1)
+    };
+  }catch(_){
+    const distanceKm = haversineKm(la1, ln1, la2, ln2);
+    return {
+      path: [[la1, ln1], [la2, ln2]],
+      distanceKm,
+      durationMin: Math.max((distanceKm / 24) * 60, 1)
+    };
+  }
+}
+
+async function drawGuideRoute(targetLat, targetLng, mode){
+  if(!map || state.lat == null || state.lng == null) return;
+  const seq = ++routeDrawSeq;
+  const route = await fetchDriverRoute(state.lat, state.lng, targetLat, targetLng);
+  if(seq !== routeDrawSeq) return;
+  if(!route) return;
+
+  if(guideLine){ map.removeLayer(guideLine); guideLine = null; }
+  const isTrip = String(mode || "").toLowerCase() === "on_trip";
+  guideLine = L.polyline(route.path, {
+    color: isTrip ? "#16a34a" : "#dc2626",
+    weight: 4,
+    dashArray: isTrip ? undefined : "6,6"
+  }).addTo(map);
+
+  const navMeta = document.getElementById("navMeta");
+  if(navMeta){
+    const targetLabel = isTrip ? "drop" : "pickup";
+    navMeta.textContent = `Route to ${targetLabel}: ${route.distanceKm.toFixed(1)} km | ETA ${Math.max(1, Math.round(route.durationMin))} min`;
+  }
+}
+
+async function updateMapForRide(activeRide){
   initMap();
   if(state.lat != null && state.lng != null){
     const mePoint = [state.lat, state.lng];
@@ -234,6 +322,8 @@ function updateMapForRide(activeRide){
     if(pickupMarker){ map.removeLayer(pickupMarker); pickupMarker = null; }
     if(dropMarker){ map.removeLayer(dropMarker); dropMarker = null; }
     if(guideLine){ map.removeLayer(guideLine); guideLine = null; }
+    const navMeta = document.getElementById("navMeta");
+    if(navMeta) navMeta.textContent = "Navigation details will appear here.";
     if(driverMarker && state.lat != null && state.lng != null){
       map.setView([state.lat, state.lng], Math.max(map.getZoom(), 14));
     }
@@ -257,13 +347,16 @@ function updateMapForRide(activeRide){
       dropMarker.setLatLng([dLat, dLng]);
     }
   }
-  if(guideLine){ map.removeLayer(guideLine); guideLine = null; }
   const status = String(activeRide.status || "").toLowerCase();
   if(state.lat != null && state.lng != null){
     if(status === "accepted" || status === "arriving"){
-      guideLine = L.polyline([[state.lat, state.lng], [pLat, pLng]], { color: "#dc2626", weight: 4, dashArray: "6,6" }).addTo(map);
+      await drawGuideRoute(pLat, pLng, status);
     }else if(status === "on_trip"){
-      guideLine = L.polyline([[state.lat, state.lng], [dLat, dLng]], { color: "#16a34a", weight: 4 }).addTo(map);
+      await drawGuideRoute(dLat, dLng, status);
+    }else{
+      if(guideLine){ map.removeLayer(guideLine); guideLine = null; }
+      const navMeta = document.getElementById("navMeta");
+      if(navMeta) navMeta.textContent = "Waiting for next ride state update.";
     }
   }
   const boundsPoints = [];
@@ -298,6 +391,14 @@ function setOnlineUi(flag){
   saveDriverState();
 }
 
+function gpsQualityText(acc){
+  const a = Number(acc);
+  if(!Number.isFinite(a)) return "GPS live";
+  if(a <= 40) return `GPS accurate (${Math.round(a)}m)`;
+  if(a <= 120) return `GPS okay (${Math.round(a)}m)`;
+  return `GPS weak (${Math.round(a)}m) - move to open sky`;
+}
+
 async function enableOnline(){
   const me = await ensureMe();
   if(!me) return;
@@ -312,15 +413,21 @@ async function enableOnline(){
   state.watchId = navigator.geolocation.watchPosition(async (pos) => {
     const lat = Number(pos.coords.latitude);
     const lng = Number(pos.coords.longitude);
+    const acc = Number(pos.coords.accuracy);
     if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     state.lat = lat;
     state.lng = lng;
+    state.gpsAccuracy = Number.isFinite(acc) ? acc : null;
+    state.gpsLastFixAt = nowMs();
+    if(state.online){
+      document.getElementById("onlineText").textContent = gpsQualityText(acc);
+    }
     const now = nowMs();
     if(now - state.lastLocationPushAt >= 3000){
       state.lastLocationPushAt = now;
       pushLocation(true).catch(() => {});
     }
-    updateMapForRide(getActiveRide(state.rides));
+    updateMapForRide(getActiveRide(state.rides)).catch(() => {});
   }, () => {
     document.getElementById("onlineText").textContent = "Location permission denied";
   }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
@@ -328,7 +435,24 @@ async function enableOnline(){
   if(state.pollTimer) clearInterval(state.pollTimer);
   state.pollTimer = setInterval(() => loadData().catch(() => {}), 3000);
   if(state.heartbeatTimer) clearInterval(state.heartbeatTimer);
-  state.heartbeatTimer = setInterval(() => pushLocation(true).catch(() => {}), 10000);
+  state.heartbeatTimer = setInterval(() => {
+    const stale = !state.gpsLastFixAt || (nowMs() - state.gpsLastFixAt) > 15000;
+    if(stale && navigator.geolocation){
+      navigator.geolocation.getCurrentPosition((pos) => {
+        const lat = Number(pos?.coords?.latitude);
+        const lng = Number(pos?.coords?.longitude);
+        if(Number.isFinite(lat) && Number.isFinite(lng)){
+          state.lat = lat;
+          state.lng = lng;
+          state.gpsLastFixAt = nowMs();
+          state.gpsAccuracy = Number(pos?.coords?.accuracy);
+          document.getElementById("onlineText").textContent = gpsQualityText(state.gpsAccuracy);
+          updateMapForRide(getActiveRide(state.rides)).catch(() => {});
+        }
+      }, () => {}, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+    }
+    pushLocation(true).catch(() => {});
+  }, 10000);
   setOnlineUi(true);
   await loadData();
 }
@@ -443,7 +567,7 @@ function renderActiveRide(rides){
     state.activeRideId = "";
     box.textContent = "No active ride";
     badge.textContent = "idle";
-    updateMapForRide(null);
+    updateMapForRide(null).catch(() => {});
     saveDriverState();
     return;
   }
@@ -475,12 +599,24 @@ function renderActiveRide(rides){
     actions.appendChild(b);
   };
 
+  const addNav = (label, lat, lng) => {
+    const la = Number(lat), ln = Number(lng);
+    if(!Number.isFinite(la) || !Number.isFinite(ln)) return;
+    const b = document.createElement("button");
+    b.className = "btn gray";
+    b.textContent = label;
+    b.onclick = () => openExternalNavigation(la, ln);
+    actions.appendChild(b);
+  };
+
   if(s === "accepted") addAction("Start Arriving", "arriving", "brand");
   if(s === "accepted" || s === "arriving") addAction("Start Ride", "on_trip", "ok");
   if(s === "on_trip") addAction("End Ride", "completed", "ok");
   if(s === "accepted" || s === "arriving" || s === "on_trip") addAction("Cancel", "cancelled", "bad");
+  if(s === "accepted" || s === "arriving") addNav("Navigate Pickup", active.pickup_lat, active.pickup_lng);
+  if(s === "on_trip") addNav("Navigate Drop", active.drop_lat, active.drop_lng);
 
-  updateMapForRide(active);
+  updateMapForRide(active).catch(() => {});
 }
 
 async function acceptRide(rideId){
@@ -556,6 +692,15 @@ function bindEvents(){
   });
 }
 
+function cleanupDriverRuntime(){
+  if(state.watchId != null && navigator.geolocation){
+    try{ navigator.geolocation.clearWatch(state.watchId); }catch(_){ }
+  }
+  state.watchId = null;
+  if(state.pollTimer){ clearInterval(state.pollTimer); state.pollTimer = null; }
+  if(state.heartbeatTimer){ clearInterval(state.heartbeatTimer); state.heartbeatTimer = null; }
+}
+
 (async function init(){
   await ensureMe();
   initMap();
@@ -569,6 +714,10 @@ function bindEvents(){
     await loadData();
   }
 })();
+
+window.addEventListener("beforeunload", () => {
+  cleanupDriverRuntime();
+});
 </script>
 </body>
 </html>
