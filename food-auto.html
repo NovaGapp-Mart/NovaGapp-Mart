@@ -14,8 +14,8 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
 <style>
 :root{
-  --brand:#111827;
-  --brand-dark:#000;
+  --brand:#ff6a00;
+  --brand-dark:#d45100;
   --ink:#0f172a;
   --ink-soft:#334155;
   --muted:#64748b;
@@ -83,7 +83,7 @@ body{
 .top-search button{
   border:none;
   border-radius:12px;
-  background:#0f172a;
+  background:linear-gradient(135deg,#ff7a1a 0%,#ff5900 100%);
   color:#fff;
   padding:10px 13px;
   font-weight:800;
@@ -151,8 +151,8 @@ body{
 }
 .input:focus,select:focus,textarea:focus{
   outline:none;
-  border-color:#1f2937;
-  box-shadow:0 0 0 3px rgba(17,24,39,.12);
+  border-color:#ff8d3a;
+  box-shadow:0 0 0 3px rgba(255,106,0,.16);
 }
 
 .btn{
@@ -167,11 +167,11 @@ body{
 .btn:hover{filter:brightness(.98)}
 .btn:active{transform:translateY(1px)}
 .btn.brand{
-  background:linear-gradient(135deg,#111827 0%,#0b0f19 100%);
+  background:linear-gradient(135deg,#ff7a1a 0%,#ff5900 100%);
   color:#fff;
-  box-shadow:0 12px 24px rgba(15,23,42,.24);
+  box-shadow:0 12px 24px rgba(255,106,0,.24);
 }
-.btn.gray{background:#e5eaf5;color:#0f172a}
+.btn.gray{background:#fff2e7;color:#9a3f00}
 .btn.bad{background:#c62828;color:#fff}
 .btn.ok{background:#0f9f50;color:#fff}
 .btn.full{width:100%}
@@ -182,8 +182,8 @@ body{
   padding:5px 10px;
   border-radius:999px;
   font-size:11px;
-  background:#edf2ff;
-  color:#1e3a8a;
+  background:#fff1e7;
+  color:#a54100;
   font-weight:800;
 }
 
@@ -198,9 +198,9 @@ body{
 }
 .vehicle-card:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(15,23,42,.1)}
 .vehicle-card.active{
-  border-color:#0f172a;
-  background:linear-gradient(180deg,#f8fafc 0%,#fff 100%);
-  box-shadow:0 10px 22px rgba(15,23,42,.13);
+  border-color:var(--brand);
+  background:linear-gradient(180deg,#fff7f1 0%,#fff 100%);
+  box-shadow:0 10px 22px rgba(255,106,0,.15);
 }
 
 .matching{display:flex;gap:10px;align-items:center}
@@ -254,11 +254,11 @@ body{
 }
 #foodView{
   background:
-    radial-gradient(800px 340px at 15% -120px,#ffdedd 0,#fff2f2 60%,#fff8f7 100%);
+    radial-gradient(800px 340px at 15% -120px,#ffe1ca 0,#fff1e3 60%,#fff8f2 100%);
 }
 #agentView{
   background:
-    radial-gradient(840px 360px at 20% -120px,#dfe6ff 0,#eef2ff 55%,#f6f8ff 100%);
+    radial-gradient(840px 360px at 20% -120px,#ffe6d6 0,#fff2e8 55%,#fff9f5 100%);
 }
 .view-shell{
   max-width:1160px;
@@ -271,10 +271,10 @@ body{
   box-shadow:0 14px 30px rgba(15,23,42,.08);
 }
 #foodView .svc-hero{
-  background:linear-gradient(140deg,#fff 0%,#fff9f8 62%,#ffe8e8 100%);
+  background:linear-gradient(140deg,#fff 0%,#fff9f4 62%,#ffe7d5 100%);
 }
 #agentView .svc-hero{
-  background:linear-gradient(142deg,#fff 0%,#f6f8ff 58%,#e6edff 100%);
+  background:linear-gradient(142deg,#fff 0%,#fff6ef 58%,#ffe8d9 100%);
 }
 .svc-hero b{
   font-size:19px;
@@ -299,13 +299,13 @@ body{
 }
 #foodView .svc-pill{
   background:#fff;
-  color:#9f1239;
-  border:1px solid #ffd4d9;
+  color:#a54100;
+  border:1px solid #ffd7b9;
 }
 #agentView .svc-pill{
   background:#fff;
-  color:#1e3a8a;
-  border:1px solid #d7e2ff;
+  color:#a54100;
+  border:1px solid #ffd7b9;
 }
 .block{
   background:rgba(255,255,255,.96);
@@ -409,18 +409,18 @@ body{
   display:inline-block;
   padding:4px 9px;
   border-radius:999px;
-  background:#edf2ff;
-  color:#1e40af;
+  background:#fff1e7;
+  color:#a54100;
   font-size:11px;
   font-weight:800;
 }
 .ride-summary-strong{
-  border:1px solid #d8e2ef;
+  border:1px solid #ffd8bd;
   border-radius:12px;
   padding:10px;
-  background:#f8fafc;
+  background:#fff7f1;
   font-size:12px;
-  color:#0f172a;
+  color:#8f3b00;
   font-weight:700;
 }
 .cart-summary-strong{
@@ -456,9 +456,9 @@ body{
   text-align:center;
 }
 .nav-item.active{
-  color:#0f172a;
+  color:var(--brand);
   font-weight:800;
-  background:#eef2ff;
+  background:#fff2e8;
 }
 
 .suggest-popup{
@@ -790,6 +790,16 @@ function haversineKm(lat1, lon1, lat2, lon2){
   const dLon = toRad(lon2 - lon1);
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
   return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
+function isValidLatLng(latRaw, lngRaw){
+  const lat = Number(latRaw);
+  const lng = Number(lngRaw);
+  if(!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if(lat < -90 || lat > 90) return false;
+  if(lng < -180 || lng > 180) return false;
+  if(Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001) return false;
+  return true;
 }
 
 function rideStatusPublic(statusRaw){
@@ -1150,6 +1160,11 @@ async function loadRouteAndFare(){
     renderVehicleList();
     return;
   }
+  if(!isValidLatLng(state.pickupLat, state.pickupLng) || !isValidLatLng(state.dropLat, state.dropLng)){
+    document.getElementById("routeMeta").textContent = "Set valid pickup and destination to see fare and ETA.";
+    renderVehicleList();
+    return;
+  }
   let distanceKm = 0;
   let durationMin = 0;
   let geo = null;
@@ -1453,7 +1468,7 @@ async function ensureConsumerRole(){
 }
 
 async function setPickup(lat, lng, fromGps){
-  if(!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return;
+  if(!isValidLatLng(lat, lng)) return;
   state.pickupLat = Number(lat);
   state.pickupLng = Number(lng);
   setPickupMarker();
@@ -1488,7 +1503,7 @@ async function setPickup(lat, lng, fromGps){
 }
 
 async function setDrop(lat, lng, fromMap, explicitName){
-  if(!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return;
+  if(!isValidLatLng(lat, lng)) return;
   state.dropLat = Number(lat);
   state.dropLng = Number(lng);
   setDropMarker();
@@ -2466,6 +2481,8 @@ function renderFoodOrders(){
     const items = Array.isArray(order?.item_snapshot) ? order.item_snapshot : [];
     const itemText = items.map((item) => `${item.name} x${item.qty}`).join(", ");
     const created = order?.created_at ? new Date(order.created_at).toLocaleString() : "-";
+    const sellerName = String(order?.seller_name || "").trim();
+    const sellerPhone = String(order?.seller_phone || "").trim();
     div.innerHTML = `
       <div class="row" style="justify-content:space-between;align-items:flex-start">
         <div style="max-width:calc(100% - 110px)">
@@ -2473,6 +2490,7 @@ function renderFoodOrders(){
           <div class="list-sub">${prettyLabel(String(order.service_type || foodState.type))} | ${money(order.amount_inr || 0)}</div>
           <div class="list-sub">${itemText || "Items not available"}</div>
           <div class="list-sub">${String(order.delivery_address || "")}</div>
+          ${sellerName ? `<div class="list-sub">Seller: ${sellerName}${sellerPhone ? ` | ${sellerPhone}` : ""}</div>` : ""}
           <div class="list-sub">Placed on ${created}</div>
         </div>
         <span class="status-chip">${prettyLabel(status)}</span>
@@ -2958,6 +2976,14 @@ async function restoreStateIfPresent(){
   state.pickupLng = Number.isFinite(Number(saved.pickupLng)) ? Number(saved.pickupLng) : null;
   state.dropLat = Number.isFinite(Number(saved.dropLat)) ? Number(saved.dropLat) : null;
   state.dropLng = Number.isFinite(Number(saved.dropLng)) ? Number(saved.dropLng) : null;
+  if(!isValidLatLng(state.pickupLat, state.pickupLng)){
+    state.pickupLat = null;
+    state.pickupLng = null;
+  }
+  if(!isValidLatLng(state.dropLat, state.dropLng)){
+    state.dropLat = null;
+    state.dropLng = null;
+  }
   state.pickupText = String(saved.pickupText || "").trim().slice(0, 160);
   state.dropText = String(saved.dropText || "").trim().slice(0, 160);
   state.pickupLandmark = String(saved.pickupLandmark || "").trim().slice(0, 120);

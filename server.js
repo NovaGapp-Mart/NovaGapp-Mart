@@ -895,6 +895,12 @@ function normalizeSystemState(input){
   if(!state.local_services.provider_otp.challenges || typeof state.local_services.provider_otp.challenges !== "object"){
     state.local_services.provider_otp.challenges = {};
   }
+  if(!state.local_services.roles || typeof state.local_services.roles !== "object"){
+    state.local_services.roles = {};
+  }
+  if(!state.local_services.rider_locations || typeof state.local_services.rider_locations !== "object"){
+    state.local_services.rider_locations = {};
+  }
   if(!state.tryon || typeof state.tryon !== "object"){
     state.tryon = {};
   }
@@ -1143,6 +1149,17 @@ function sanitizeGeoNumber(value){
   const n = Number(value);
   if(!Number.isFinite(n)) return null;
   return n;
+}
+
+function isValidGeoPoint(latInput, lngInput){
+  const lat = sanitizeGeoNumber(latInput);
+  const lng = sanitizeGeoNumber(lngInput);
+  if(lat === null || lng === null) return false;
+  if(lat < -90 || lat > 90) return false;
+  if(lng < -180 || lng > 180) return false;
+  // Treat 0,0 as invalid placeholder in this app flow.
+  if(Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001) return false;
+  return true;
 }
 
 function parseMonthRange(monthInput){
@@ -1519,6 +1536,127 @@ function canTransitionStatus(current, next, flowMap){
   return allowed.includes(to);
 }
 
+function localRoleStateKey(userIdInput, roleInput){
+  const userId = sanitizeUserId(userIdInput);
+  const role = sanitizeLocalRole(roleInput);
+  if(!userId || !role) return "";
+  return `${userId}:${role}`;
+}
+
+function normalizeLocalRoleStateRow(input){
+  const row = input && typeof input === "object" ? input : {};
+  const userId = sanitizeUserId(row.user_id);
+  const role = sanitizeLocalRole(row.role);
+  const status = String(row.status || "active").trim().toLowerCase() || "active";
+  if(!userId || !role) return null;
+  return {
+    id: String(row.id || `state_${userId}_${role}`).trim().slice(0, 120) || `state_${userId}_${role}`,
+    user_id: userId,
+    role,
+    status,
+    fee_required_inr: Math.max(0, roundMoney(row.fee_required_inr || 0)),
+    fee_paid: row.fee_paid === undefined ? true : Boolean(row.fee_paid),
+    display_name: sanitizeDisplayName(row.display_name || "") || null,
+    phone: sanitizePhoneForOtp(row.phone || "") || String(row.phone || "").trim().slice(0, 30) || null,
+    payment_ref: String(row.payment_ref || "").trim().slice(0, 120) || null,
+    updated_at: String(row.updated_at || new Date().toISOString())
+  };
+}
+
+async function listLocalRolesFromState(userIdInput){
+  const userId = sanitizeUserId(userIdInput);
+  if(!userId) return [];
+  const state = await readSystemState();
+  const bag = state?.local_services?.roles || {};
+  return Object.keys(bag)
+    .map((k) => normalizeLocalRoleStateRow(bag[k]))
+    .filter(Boolean)
+    .filter((row) => row.user_id === userId && row.status === "active");
+}
+
+async function getLocalRoleFromState(userIdInput, roleInput){
+  const key = localRoleStateKey(userIdInput, roleInput);
+  if(!key) return null;
+  const state = await readSystemState();
+  const bag = state?.local_services?.roles || {};
+  return normalizeLocalRoleStateRow(bag[key]);
+}
+
+async function upsertLocalRoleInState(payload){
+  const normalized = normalizeLocalRoleStateRow(payload);
+  if(!normalized) return null;
+  return mutateSystemState((state) => {
+    if(!state.local_services || typeof state.local_services !== "object"){
+      state.local_services = {};
+    }
+    if(!state.local_services.roles || typeof state.local_services.roles !== "object"){
+      state.local_services.roles = {};
+    }
+    const key = localRoleStateKey(normalized.user_id, normalized.role);
+    if(!key) return null;
+    const existing = normalizeLocalRoleStateRow(state.local_services.roles[key] || null);
+    const next = {
+      ...(existing || {}),
+      ...normalized,
+      updated_at: new Date().toISOString()
+    };
+    state.local_services.roles[key] = next;
+    return next;
+  });
+}
+
+async function upsertRiderLocationInState(payload){
+  const userId = sanitizeUserId(payload?.user_id);
+  if(!userId) return null;
+  const lat = sanitizeGeoNumber(payload?.lat);
+  const lng = sanitizeGeoNumber(payload?.lng);
+  if(lat === null || lng === null) return null;
+  const row = {
+    user_id: userId,
+    lat,
+    lng,
+    is_online: payload?.is_online === undefined ? true : Boolean(payload?.is_online),
+    accuracy_m: Number.isFinite(Number(payload?.accuracy_m)) ? roundMoney(payload.accuracy_m) : null,
+    heading_deg: Number.isFinite(Number(payload?.heading_deg)) ? roundMoney(payload.heading_deg) : null,
+    speed_kmph: Number.isFinite(Number(payload?.speed_kmph)) ? roundMoney(payload.speed_kmph) : null,
+    updated_at: new Date().toISOString()
+  };
+  return mutateSystemState((state) => {
+    if(!state.local_services || typeof state.local_services !== "object"){
+      state.local_services = {};
+    }
+    if(!state.local_services.rider_locations || typeof state.local_services.rider_locations !== "object"){
+      state.local_services.rider_locations = {};
+    }
+    state.local_services.rider_locations[userId] = row;
+    return row;
+  });
+}
+
+async function listRiderLocationsFromState(){
+  const state = await readSystemState();
+  const bag = state?.local_services?.rider_locations || {};
+  return Object.keys(bag)
+    .map((k) => {
+      const row = bag[k];
+      const userId = sanitizeUserId(row?.user_id || k);
+      const lat = sanitizeGeoNumber(row?.lat);
+      const lng = sanitizeGeoNumber(row?.lng);
+      if(!userId || lat === null || lng === null) return null;
+      return {
+        user_id: userId,
+        lat,
+        lng,
+        is_online: row?.is_online === undefined ? true : Boolean(row?.is_online),
+        updated_at: String(row?.updated_at || ""),
+        accuracy_m: Number.isFinite(Number(row?.accuracy_m)) ? roundMoney(row?.accuracy_m) : null,
+        heading_deg: Number.isFinite(Number(row?.heading_deg)) ? roundMoney(row?.heading_deg) : null,
+        speed_kmph: Number.isFinite(Number(row?.speed_kmph)) ? roundMoney(row?.speed_kmph) : null
+      };
+    })
+    .filter(Boolean);
+}
+
 async function hasActiveLocalRole(userIdInput, roleInput){
   const userId = sanitizeUserId(userIdInput);
   const role = sanitizeLocalRole(roleInput);
@@ -1530,14 +1668,15 @@ async function hasActiveLocalRole(userIdInput, roleInput){
         user_id: `eq.${userId}`,
         role: `eq.${role}`,
         status: "eq.active",
-        fee_paid: "eq.true",
         limit: "1"
       }
     });
-    return Array.isArray(rows) && !!rows[0];
+    if(Array.isArray(rows) && rows[0]) return true;
   }catch(_){
-    return false;
+    // fallback handled below
   }
+  const fallbackRole = await getLocalRoleFromState(userId, role).catch(() => null);
+  return Boolean(fallbackRole && String(fallbackRole.status || "") === "active");
 }
 
 async function issueProviderOtpChallenge(userIdInput, phoneInput){
@@ -6751,6 +6890,9 @@ app.post("/api/local/rides/request", async (req, res) => {
   if(!riderUserId || pickupLat === null || pickupLng === null || dropLat === null || dropLng === null){
     return res.status(400).json({ ok:false, error:"invalid_ride_payload" });
   }
+  if(!isValidGeoPoint(pickupLat, pickupLng) || !isValidGeoPoint(dropLat, dropLng)){
+    return res.status(400).json({ ok:false, error:"invalid_ride_coordinates" });
+  }
   if(localRateLimitHit(`ride_request:${riderUserId}`, 30, 10 * 60 * 1000)){
     return res.status(429).json({ ok:false, error:"rate_limited" });
   }
@@ -6835,7 +6977,7 @@ app.post("/api/local/rides/request", async (req, res) => {
 });
 
 const RIDE_MATCH_RADIUS_KM = 3;
-const RIDE_INITIAL_OFFER_COUNT = 5;
+const RIDE_INITIAL_OFFER_COUNT = 40;
 const RIDE_REMATCH_BATCH_COUNT = 1;
 const RIDE_DRIVER_LOCATION_MAX_AGE_MS = 2 * 60 * 1000;
 const RIDE_STATUS_ALIAS_TO_INTERNAL = Object.freeze({
@@ -6877,32 +7019,51 @@ function isFreshRideDriverLocation(updatedAtRaw){
 }
 
 async function fetchActiveRiderRoleSet(){
-  const rows = await localServicesSupabaseRequest("local_roles", "GET", {
-    query: {
-      select: "user_id,role,status",
-      role: "eq.rider",
-      status: "eq.active",
-      limit: "5000"
-    }
-  });
-  const set = new Set();
-  (Array.isArray(rows) ? rows : []).forEach((row) => {
-    const id = sanitizeUserId(row?.user_id);
-    if(id) set.add(id);
-  });
-  return set;
+  try{
+    const rows = await localServicesSupabaseRequest("local_roles", "GET", {
+      query: {
+        select: "user_id,role,status",
+        role: "eq.rider",
+        status: "eq.active",
+        limit: "5000"
+      }
+    });
+    const set = new Set();
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+      const id = sanitizeUserId(row?.user_id);
+      if(id) set.add(id);
+    });
+    return set;
+  }catch(_){
+    const state = await readSystemState().catch(() => null);
+    const bag = state?.local_services?.roles || {};
+    const set = new Set();
+    Object.keys(bag).forEach((k) => {
+      const row = normalizeLocalRoleStateRow(bag[k]);
+      if(!row) return;
+      if(row.role !== "rider") return;
+      if(String(row.status || "") !== "active") return;
+      set.add(row.user_id);
+    });
+    return set;
+  }
 }
 
 async function fetchRideDriverProfileMap(){
-  const rows = await localServicesSupabaseRequest("local_listings", "GET", {
-    query: {
-      select: "user_id,store_name,image_url,phone,listing_type,status,open_now,ride_vehicle_type,vehicle_number,base_fare_inr,per_km_rate_inr,per_min_rate_inr,service_radius_km",
-      listing_type: "eq.ride",
-      status: "eq.approved",
-      open_now: "eq.true",
-      limit: "5000"
-    }
-  });
+  let rows = [];
+  try{
+    rows = await localServicesSupabaseRequest("local_listings", "GET", {
+      query: {
+        select: "user_id,store_name,image_url,phone,listing_type,status,open_now,ride_vehicle_type,vehicle_number,base_fare_inr,per_km_rate_inr,per_min_rate_inr,service_radius_km",
+        listing_type: "eq.ride",
+        status: "eq.approved",
+        open_now: "eq.true",
+        limit: "5000"
+      }
+    });
+  }catch(_){
+    rows = [];
+  }
   const map = new Map();
   (Array.isArray(rows) ? rows : []).forEach((row) => {
     const id = sanitizeUserId(row?.user_id);
@@ -6931,28 +7092,31 @@ async function fetchNearbyRideDrivers(pickupLat, pickupLng, limitCount, options)
       ? opts.excludeUserIds.map(sanitizeUserId).filter(Boolean)
       : []
   );
-  const [locRows, activeRiderSet, profileMap] = await Promise.all([
+  const [locRowsResult, activeRiderSet, profileMap] = await Promise.all([
     localServicesSupabaseRequest("local_rider_locations", "GET", {
       query: {
-        select: "user_id,lat,lng,is_online,updated_at",
+        select: "user_id,lat,lng,is_online,updated_at,accuracy_m,heading_deg,speed_kmph",
         is_online: "eq.true",
         limit: "5000"
       }
-    }),
-    fetchActiveRiderRoleSet(),
-    fetchRideDriverProfileMap()
+    }).catch(() => listRiderLocationsFromState()),
+    fetchActiveRiderRoleSet().catch(() => null),
+    fetchRideDriverProfileMap().catch(() => new Map())
   ]);
+  const locRows = Array.isArray(locRowsResult) ? locRowsResult : [];
+  const enforceRoleSet = activeRiderSet instanceof Set && activeRiderSet.size > 0;
+  const profiles = profileMap instanceof Map ? profileMap : new Map();
   return (Array.isArray(locRows) ? locRows : [])
     .map((row) => {
       const userId = sanitizeUserId(row?.user_id);
       if(!userId || excludeSet.has(userId)) return null;
-      if(!activeRiderSet.has(userId)) return null;
+      if(enforceRoleSet && !activeRiderSet.has(userId)) return null;
       if(!isFreshRideDriverLocation(row?.updated_at)) return null;
       const lat = sanitizeGeoNumber(row?.lat);
       const lng = sanitizeGeoNumber(row?.lng);
       if(lat === null || lng === null) return null;
       const distanceKm = localDistanceKm(pickupLat, pickupLng, lat, lng);
-      const profile = profileMap.get(userId) || null;
+      const profile = profiles.get(userId) || null;
       return {
         user_id: userId,
         lat,
@@ -7670,7 +7834,42 @@ app.get("/api/local/orders/for-buyer", async (req, res) => {
         limit: "500"
       }
     });
-    return res.json({ ok:true, orders: Array.isArray(rows) ? rows : [] });
+    const orders = Array.isArray(rows) ? rows : [];
+    const listingIds = Array.from(new Set(orders.map((row) => String(row?.listing_id || "").trim()).filter(Boolean)));
+    const listingMap = new Map();
+    if(listingIds.length){
+      try{
+        const inClause = `in.(${listingIds.map((id) => id.replace(/[^a-zA-Z0-9_-]/g, "")).filter(Boolean).join(",")})`;
+        if(inClause !== "in.()"){
+          const listingRows = await localServicesSupabaseRequest("local_listings", "GET", {
+            query: {
+              select: "id,store_name,phone,listing_type",
+              id: inClause,
+              limit: "1000"
+            }
+          });
+          (Array.isArray(listingRows) ? listingRows : []).forEach((row) => {
+            const id = String(row?.id || "").trim();
+            if(!id) return;
+            listingMap.set(id, {
+              store_name: String(row?.store_name || "").trim(),
+              phone: String(row?.phone || "").trim(),
+              listing_type: sanitizeListingType(row?.listing_type)
+            });
+          });
+        }
+      }catch(_){ }
+    }
+    const enriched = orders.map((order) => {
+      const listing = listingMap.get(String(order?.listing_id || "").trim()) || null;
+      return {
+        ...order,
+        seller_name: String(listing?.store_name || "").trim(),
+        seller_phone: String(listing?.phone || "").trim(),
+        seller_type: String(listing?.listing_type || "").trim()
+      };
+    });
+    return res.json({ ok:true, orders: enriched });
   }catch(err){
     return res.json({ ok:true, orders: [], warning: "buyer_orders_temporarily_unavailable" });
   }
@@ -8239,36 +8438,93 @@ app.post("/api/local/role/enroll", async (req, res) => {
   }
   try{
     if(feeRequired){
-      const paymentRows = await localServicesSupabaseRequest("local_role_payments", "GET", {
-        query: {
-          select: "id",
-          user_id: `eq.${userId}`,
-          role: `eq.${role}`,
-          status: "eq.captured",
-          order: "verified_at.desc",
-          limit: "1"
-        }
-      });
-      const hasVerifiedFee = Array.isArray(paymentRows) && !!paymentRows[0];
+      let hasVerifiedFee = false;
+      try{
+        const paymentRows = await localServicesSupabaseRequest("local_role_payments", "GET", {
+          query: {
+            select: "id",
+            user_id: `eq.${userId}`,
+            role: `eq.${role}`,
+            status: "eq.captured",
+            order: "verified_at.desc",
+            limit: "1"
+          }
+        });
+        hasVerifiedFee = Array.isArray(paymentRows) && !!paymentRows[0];
+      }catch(_){
+        hasVerifiedFee = false;
+      }
       if(!hasVerifiedFee && !paymentRef){
         return res.status(402).json({ ok:false, error:"listing_fee_not_verified" });
       }
     }
-    const rows = await localServicesSupabaseRequest("local_roles", "POST", {
-      body: [{
-        user_id: userId,
-        role,
-        display_name: displayName || null,
-        phone: phone || phoneRaw || null,
-        fee_required_inr: feeRequired ? 500 : 0,
-        fee_paid: true,
-        payment_ref: paymentRef || null,
-        status: "active",
-        updated_at: new Date().toISOString()
-      }],
-      query: { on_conflict: "user_id,role" },
-      prefer: "resolution=merge-duplicates,return=representation"
-    });
+
+    const rolePayloadFull = {
+      user_id: userId,
+      role,
+      display_name: displayName || null,
+      phone: phone || phoneRaw || null,
+      fee_required_inr: feeRequired ? 500 : 0,
+      fee_paid: true,
+      payment_ref: paymentRef || null,
+      status: "active",
+      updated_at: new Date().toISOString()
+    };
+
+    let rows = null;
+    let supabaseUpsertWorked = false;
+    try{
+      rows = await localServicesSupabaseRequest("local_roles", "POST", {
+        body: [rolePayloadFull],
+        query: { on_conflict: "user_id,role" },
+        prefer: "resolution=merge-duplicates,return=representation"
+      });
+      supabaseUpsertWorked = true;
+    }catch(_){
+      try{
+        rows = await localServicesSupabaseRequest("local_roles", "POST", {
+          body: [{
+            user_id: userId,
+            role,
+            status: "active",
+            display_name: displayName || null,
+            phone: phone || phoneRaw || null,
+            updated_at: new Date().toISOString()
+          }],
+          query: { on_conflict: "user_id,role" },
+          prefer: "resolution=merge-duplicates,return=representation"
+        });
+        supabaseUpsertWorked = true;
+      }catch(_){
+        supabaseUpsertWorked = false;
+      }
+    }
+
+    let roleRow = Array.isArray(rows) ? rows[0] || null : null;
+    if(!roleRow){
+      roleRow = await upsertLocalRoleInState(rolePayloadFull);
+      if(!roleRow){
+        return res.status(500).json({ ok:false, error:"local_role_enroll_failed" });
+      }
+      const ownerTypeByRole = {
+        consumer: "customer",
+        seller: "seller",
+        rider: "driver",
+        agent: "agent"
+      };
+      const walletOwnerType = sanitizeWalletOwnerType(ownerTypeByRole[role] || "");
+      if(walletOwnerType){
+        await ensureWalletRow(userId, walletOwnerType).catch(() => null);
+      }
+      return res.json({ ok:true, role: roleRow, warning: "role_saved_in_fallback_store" });
+    }
+
+    await upsertLocalRoleInState({
+      ...rolePayloadFull,
+      id: roleRow?.id || `state_${userId}_${role}`,
+      status: String(roleRow?.status || "active")
+    }).catch(() => null);
+
     const ownerTypeByRole = {
       consumer: "customer",
       seller: "seller",
@@ -8279,7 +8535,11 @@ app.post("/api/local/role/enroll", async (req, res) => {
     if(walletOwnerType){
       await ensureWalletRow(userId, walletOwnerType).catch(() => null);
     }
-    return res.json({ ok:true, role: Array.isArray(rows) ? rows[0] || null : null });
+    return res.json({
+      ok:true,
+      role: roleRow,
+      warning: supabaseUpsertWorked ? "" : "role_saved_with_partial_schema"
+    });
   }catch(err){
     return res.status(500).json({ ok:false, error:"local_role_enroll_failed", message:String(err?.message || "") });
   }
@@ -8291,16 +8551,51 @@ app.get("/api/local/roles", async (req, res) => {
     return res.status(400).json({ ok:false, error:"user_id_required" });
   }
   try{
-    const rows = await localServicesSupabaseRequest("local_roles", "GET", {
-      query: {
-        select: "id,user_id,role,status,fee_required_inr,fee_paid,display_name,phone,updated_at",
-        user_id: `eq.${userId}`,
-        status: "eq.active",
-        limit: "10"
+    let rows = null;
+    try{
+      rows = await localServicesSupabaseRequest("local_roles", "GET", {
+        query: {
+          select: "id,user_id,role,status,fee_required_inr,fee_paid,display_name,phone,updated_at",
+          user_id: `eq.${userId}`,
+          status: "eq.active",
+          limit: "10"
+        }
+      });
+    }catch(_){
+      rows = await localServicesSupabaseRequest("local_roles", "GET", {
+        query: {
+          select: "id,user_id,role,status,display_name,phone,updated_at",
+          user_id: `eq.${userId}`,
+          status: "eq.active",
+          limit: "10"
+        }
+      }).catch(() => null);
+    }
+    if(Array.isArray(rows)){
+      if(rows.length){
+        rows.forEach((row) => {
+          upsertLocalRoleInState({
+            id: row?.id,
+            user_id: row?.user_id,
+            role: row?.role,
+            status: row?.status,
+            fee_required_inr: row?.fee_required_inr,
+            fee_paid: row?.fee_paid,
+            display_name: row?.display_name,
+            phone: row?.phone,
+            updated_at: row?.updated_at
+          }).catch(() => null);
+        });
       }
-    });
-    return res.json({ ok:true, roles: Array.isArray(rows) ? rows : [] });
+      return res.json({ ok:true, roles: rows });
+    }
+    const fallbackRoles = await listLocalRolesFromState(userId);
+    return res.json({ ok:true, roles: fallbackRoles, warning: "roles_loaded_from_fallback_store" });
   }catch(err){
+    const fallbackRoles = await listLocalRolesFromState(userId).catch(() => []);
+    if(Array.isArray(fallbackRoles)){
+      return res.json({ ok:true, roles: fallbackRoles, warning: "roles_temporarily_unavailable_using_fallback" });
+    }
     return res.status(500).json({ ok:false, error:"local_roles_fetch_failed", message:String(err?.message || "") });
   }
 });
@@ -9058,8 +9353,30 @@ app.post("/api/local/riders/location", async (req, res) => {
       query: { on_conflict: "user_id" },
       prefer: "resolution=merge-duplicates,return=representation"
     });
-    return res.json({ ok:true, rider_location: Array.isArray(rows) ? rows[0] || null : null });
+    const saved = Array.isArray(rows) ? rows[0] || null : null;
+    await upsertRiderLocationInState({
+      user_id: userId,
+      lat: saved?.lat ?? lat,
+      lng: saved?.lng ?? lng,
+      is_online: saved?.is_online ?? isOnline,
+      accuracy_m: saved?.accuracy_m ?? (accuracyMeters > 0 ? roundMoney(accuracyMeters) : null),
+      heading_deg: saved?.heading_deg ?? headingDeg,
+      speed_kmph: saved?.speed_kmph ?? speedKmph
+    }).catch(() => null);
+    return res.json({ ok:true, rider_location: saved });
   }catch(err){
+    const fallback = await upsertRiderLocationInState({
+      user_id: userId,
+      lat,
+      lng,
+      is_online: isOnline,
+      accuracy_m: accuracyMeters > 0 ? roundMoney(accuracyMeters) : null,
+      heading_deg: headingDeg,
+      speed_kmph: speedKmph
+    }).catch(() => null);
+    if(fallback){
+      return res.json({ ok:true, rider_location: fallback, warning: "location_saved_in_fallback_store" });
+    }
     return res.status(500).json({ ok:false, error:"local_rider_location_failed", message:String(err?.message || "") });
   }
 });
@@ -9083,7 +9400,7 @@ app.get("/api/local/riders/nearby", async (req, res) => {
       drivers
     });
   }catch(err){
-    return res.status(500).json({ ok:false, error:"nearby_riders_failed", message:String(err?.message || "") });
+    return res.json({ ok:true, radius_km: radiusKm, count: 0, drivers: [], warning: "nearby_riders_temporarily_unavailable" });
   }
 });
 
@@ -9114,6 +9431,10 @@ app.get("/api/local/rides/track", async (req, res) => {
           user_id: `eq.${sanitizeUserId(request.driver_user_id)}`,
           limit: "1"
         }
+      }).catch(async () => {
+        const fallbackRows = await listRiderLocationsFromState().catch(() => []);
+        const targetId = sanitizeUserId(request.driver_user_id);
+        return (Array.isArray(fallbackRows) ? fallbackRows : []).filter((row) => sanitizeUserId(row?.user_id) === targetId).slice(0, 1);
       });
       driverLocation = Array.isArray(locRows) ? locRows[0] || null : null;
       const driverListingRows = await localServicesSupabaseRequest("local_listings", "GET", {
