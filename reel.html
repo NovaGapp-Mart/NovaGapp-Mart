@@ -532,39 +532,31 @@ const params = new URLSearchParams(location.search);
 const feedUserId = params.get("uid") || "";
 const focusReelId = params.get("focus") || "";
 let focusApplied = false;
-const REEL_ORDER_BUCKET_MS = 30 * 60 * 1000;
-let reelShuffleTick = 0;
+let userAudioUnlocked = false;
 
-function hashString(value){
-  const text = String(value || "");
-  let hash = 2166136261 >>> 0;
-  for(let i = 0; i < text.length; i += 1){
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
+function randomInt(maxExclusive){
+  const max = Math.max(1, Number(maxExclusive) || 1);
+  if(window.crypto && typeof window.crypto.getRandomValues === "function"){
+    const arr = new Uint32Array(1);
+    window.crypto.getRandomValues(arr);
+    return Number(arr[0] % max);
   }
-  return hash >>> 0;
+  return Math.floor(Math.random() * max);
 }
 
-function makeSeededRandom(seed){
-  let t = seed >>> 0;
-  return function(){
-    t += 0x6D2B79F5;
-    let r = Math.imul(t ^ (t >>> 15), 1 | t);
-    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
-    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
-  };
+function unlockReelAudio(){
+  userAudioUnlocked = true;
+  reelWrapper.querySelectorAll(".reel video").forEach((video) => {
+    if(!(video instanceof HTMLVideoElement)) return;
+    if(video.dataset.userPaused === "1") return;
+    video.muted = false;
+    video.volume = 1;
+    video.play().catch(() => {});
+  });
 }
 
-function getReelOrderSeed(contextKey){
-  const deviceKey = [
-    navigator.userAgent || "",
-    navigator.language || "",
-    `${screen.width || 0}x${screen.height || 0}`,
-    Intl.DateTimeFormat().resolvedOptions().timeZone || ""
-  ].join("|");
-  const bucket = Math.floor(Date.now() / REEL_ORDER_BUCKET_MS);
-  return (hashString(deviceKey) ^ hashString(`${contextKey || ""}|${bucket}|${reelShuffleTick++}`)) >>> 0;
-}
+document.addEventListener("pointerdown", unlockReelAudio, { once:true, passive:true });
+document.addEventListener("keydown", unlockReelAudio, { once:true });
 
 function compactCount(value){
   const num = Number(value) || 0;
@@ -647,11 +639,10 @@ function resetFeedCursor(){
   focusApplied = false;
 }
 
-function shuffleItems(items, contextKey){
+function shuffleItems(items){
   const list = Array.isArray(items) ? items.slice() : [];
-  const rand = makeSeededRandom(getReelOrderSeed(contextKey));
   for(let i = list.length - 1; i > 0; i -= 1){
-    const j = Math.floor(rand() * (i + 1));
+    const j = randomInt(i + 1);
     const temp = list[i];
     list[i] = list[j];
     list[j] = temp;
@@ -665,7 +656,7 @@ function toEpochMs(value){
 }
 
 function orderReelBatchForFeed(items, currentUserId, contextKey){
-  const shuffled = shuffleItems(items, contextKey);
+  const shuffled = shuffleItems(items);
   const me = String(currentUserId || "");
   if(!me) return shuffled;
   let ownTopIndex = -1;
@@ -1138,9 +1129,21 @@ const observer = new IntersectionObserver(entries => {
     if(entry.isIntersecting){
       markReelView(entry.target);
       if(video.dataset.userPaused !== "1"){
-        video.muted = true;
-        video.setAttribute("muted", "");
-        video.play().catch(()=>{});
+        if(userAudioUnlocked){
+          video.muted = false;
+          video.volume = 1;
+          video.play().catch(() => {
+            video.muted = true;
+            video.setAttribute("muted", "");
+            video.volume = 0;
+            video.play().catch(() => {});
+          });
+        }else{
+          video.muted = true;
+          video.setAttribute("muted", "");
+          video.volume = 0;
+          video.play().catch(()=>{});
+        }
       }
     }else{
       video.pause();
@@ -1533,6 +1536,14 @@ async function renderReel(item, options){
   }
 
   function toggleVideoPlayback(){
+    if(videoEl.muted){
+      userAudioUnlocked = true;
+      videoEl.dataset.userPaused = "0";
+      videoEl.muted = false;
+      videoEl.volume = 1;
+      videoEl.play().catch(()=>{});
+      return;
+    }
     if(videoEl.paused){
       videoEl.dataset.userPaused = "0";
       videoEl.play().catch(()=>{});
@@ -1745,8 +1756,14 @@ function focusReelElement(reel){
     const video = reel.querySelector("video");
     if(video){
       video.dataset.userPaused = "0";
-      video.muted = true;
-      video.setAttribute("muted", "");
+      if(userAudioUnlocked){
+        video.muted = false;
+        video.volume = 1;
+      }else{
+        video.muted = true;
+        video.setAttribute("muted", "");
+        video.volume = 0;
+      }
       video.play().catch(()=>{});
     }
   });
