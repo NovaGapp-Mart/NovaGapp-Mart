@@ -532,6 +532,39 @@ const params = new URLSearchParams(location.search);
 const feedUserId = params.get("uid") || "";
 const focusReelId = params.get("focus") || "";
 let focusApplied = false;
+const REEL_ORDER_BUCKET_MS = 30 * 60 * 1000;
+let reelShuffleTick = 0;
+
+function hashString(value){
+  const text = String(value || "");
+  let hash = 2166136261 >>> 0;
+  for(let i = 0; i < text.length; i += 1){
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function makeSeededRandom(seed){
+  let t = seed >>> 0;
+  return function(){
+    t += 0x6D2B79F5;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function getReelOrderSeed(contextKey){
+  const deviceKey = [
+    navigator.userAgent || "",
+    navigator.language || "",
+    `${screen.width || 0}x${screen.height || 0}`,
+    Intl.DateTimeFormat().resolvedOptions().timeZone || ""
+  ].join("|");
+  const bucket = Math.floor(Date.now() / REEL_ORDER_BUCKET_MS);
+  return (hashString(deviceKey) ^ hashString(`${contextKey || ""}|${bucket}|${reelShuffleTick++}`)) >>> 0;
+}
 
 function compactCount(value){
   const num = Number(value) || 0;
@@ -614,10 +647,11 @@ function resetFeedCursor(){
   focusApplied = false;
 }
 
-function shuffleItems(items){
+function shuffleItems(items, contextKey){
   const list = Array.isArray(items) ? items.slice() : [];
+  const rand = makeSeededRandom(getReelOrderSeed(contextKey));
   for(let i = list.length - 1; i > 0; i -= 1){
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rand() * (i + 1));
     const temp = list[i];
     list[i] = list[j];
     list[j] = temp;
@@ -630,8 +664,8 @@ function toEpochMs(value){
   return Number.isFinite(ts) ? ts : 0;
 }
 
-function orderReelBatchForFeed(items, currentUserId){
-  const shuffled = shuffleItems(items);
+function orderReelBatchForFeed(items, currentUserId, contextKey){
+  const shuffled = shuffleItems(items, contextKey);
   const me = String(currentUserId || "");
   if(!me) return shuffled;
   let ownTopIndex = -1;
@@ -710,7 +744,11 @@ async function runReelSearch(rawText){
     ]);
     if(token !== searchToken) return;
 
-    const matches = rows.filter(item => matchReelSearch(item, queryText));
+    const matches = orderReelBatchForFeed(
+      rows.filter(item => matchReelSearch(item, queryText)),
+      "",
+      `search_${queryText.toLowerCase()}`
+    );
     clearRenderedReels();
     loading = false;
     done = true;
@@ -1100,8 +1138,8 @@ const observer = new IntersectionObserver(entries => {
     if(entry.isIntersecting){
       markReelView(entry.target);
       if(video.dataset.userPaused !== "1"){
-        video.muted = false;
-        video.volume = 1;
+        video.muted = true;
+        video.setAttribute("muted", "");
         video.play().catch(()=>{});
       }
     }else{
@@ -1227,7 +1265,7 @@ async function loadMore(){
   if(emptyState) emptyState.style.display = "none";
 
   const currentUser = await currentUserPromise;
-  const orderedBatch = orderReelBatchForFeed(data, currentUser?.id || "");
+  const orderedBatch = orderReelBatchForFeed(data, currentUser?.id || "", `feed_page_${page}`);
   orderedBatch.forEach(item => renderReel(item));
   page += 1;
   loading = false;
@@ -1252,7 +1290,7 @@ async function renderReel(item, options){
 
   reel.innerHTML = `
     <div class="reel-stage">
-      <video src="${item.video_url}" playsinline loop></video>
+      <video src="${item.video_url}" playsinline webkit-playsinline muted autoplay loop preload="metadata"></video>
       <div class="actions">
         <div class="action-item">
           <div class="icon-btn" data-action="like">
@@ -1339,6 +1377,10 @@ async function renderReel(item, options){
   const videoEl = reel.querySelector("video");
   if(videoEl){
     videoEl.dataset.userPaused = "0";
+    videoEl.muted = true;
+    videoEl.setAttribute("muted", "");
+    videoEl.playsInline = true;
+    videoEl.autoplay = true;
   }
 
   const likeEl = reel.querySelector("[data-like]");
@@ -1703,8 +1745,8 @@ function focusReelElement(reel){
     const video = reel.querySelector("video");
     if(video){
       video.dataset.userPaused = "0";
-      video.muted = false;
-      video.volume = 1;
+      video.muted = true;
+      video.setAttribute("muted", "");
       video.play().catch(()=>{});
     }
   });
