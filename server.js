@@ -6105,34 +6105,100 @@ app.post("/api/local/rides/request", async (req, res) => {
 });
 
 const RIDE_MATCH_RADIUS_KM = 3;
-const RIDE_INITIAL_OFFER_COUNT = 8;
-const RIDE_REMATCH_BATCH_COUNT = 5;
+const RIDE_INITIAL_OFFER_COUNT = 5;
+const RIDE_REMATCH_BATCH_COUNT = 1;
+const RIDE_DRIVER_LOCATION_MAX_AGE_MS = 2 * 60 * 1000;
 
-async function fetchNearbyRideDrivers(pickupLat, pickupLng, limitCount){
-  const nearbyRes = await localServicesSupabaseRequest("local_listings", "GET", {
+function isFreshRideDriverLocation(updatedAtRaw){
+  const updatedAt = Date.parse(String(updatedAtRaw || ""));
+  if(!Number.isFinite(updatedAt)) return false;
+  return (Date.now() - updatedAt) <= RIDE_DRIVER_LOCATION_MAX_AGE_MS;
+}
+
+async function fetchActiveRiderRoleSet(){
+  const rows = await localServicesSupabaseRequest("local_roles", "GET", {
     query: {
-      select: "id,user_id,store_name,lat,lng,open_now,status,listing_type",
+      select: "user_id,role,status",
+      role: "eq.rider",
+      status: "eq.active",
+      limit: "5000"
+    }
+  });
+  const set = new Set();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const id = sanitizeUserId(row?.user_id);
+    if(id) set.add(id);
+  });
+  return set;
+}
+
+async function fetchRideDriverProfileMap(){
+  const rows = await localServicesSupabaseRequest("local_listings", "GET", {
+    query: {
+      select: "user_id,store_name,image_url,phone,listing_type,status,open_now",
       listing_type: "eq.ride",
       status: "eq.approved",
       open_now: "eq.true",
-      limit: "500"
+      limit: "5000"
     }
   });
-  return (Array.isArray(nearbyRes) ? nearbyRes : [])
+  const map = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const id = sanitizeUserId(row?.user_id);
+    if(!id) return;
+    map.set(id, {
+      user_id: id,
+      store_name: String(row?.store_name || "").trim(),
+      image_url: String(row?.image_url || "").trim(),
+      phone: String(row?.phone || "").trim()
+    });
+  });
+  return map;
+}
+
+async function fetchNearbyRideDrivers(pickupLat, pickupLng, limitCount, options){
+  const opts = options || {};
+  const radiusKm = Number.isFinite(Number(opts.radiusKm)) ? Number(opts.radiusKm) : RIDE_MATCH_RADIUS_KM;
+  const excludeSet = new Set(
+    Array.isArray(opts.excludeUserIds)
+      ? opts.excludeUserIds.map(sanitizeUserId).filter(Boolean)
+      : []
+  );
+  const [locRows, activeRiderSet, profileMap] = await Promise.all([
+    localServicesSupabaseRequest("local_rider_locations", "GET", {
+      query: {
+        select: "user_id,lat,lng,is_online,updated_at",
+        is_online: "eq.true",
+        limit: "5000"
+      }
+    }),
+    fetchActiveRiderRoleSet(),
+    fetchRideDriverProfileMap()
+  ]);
+  return (Array.isArray(locRows) ? locRows : [])
     .map((row) => {
+      const userId = sanitizeUserId(row?.user_id);
+      if(!userId || excludeSet.has(userId)) return null;
+      if(!activeRiderSet.has(userId)) return null;
+      if(!isFreshRideDriverLocation(row?.updated_at)) return null;
       const lat = sanitizeGeoNumber(row?.lat);
       const lng = sanitizeGeoNumber(row?.lng);
-      if(lat === null || lng === null){
-        return null;
-      }
+      if(lat === null || lng === null) return null;
       const distanceKm = localDistanceKm(pickupLat, pickupLng, lat, lng);
+      const profile = profileMap.get(userId) || null;
       return {
-        ...row,
-        distance_km: Number(distanceKm.toFixed(3))
+        user_id: userId,
+        lat,
+        lng,
+        distance_km: Number(distanceKm.toFixed(3)),
+        updated_at: String(row?.updated_at || ""),
+        store_name: String(profile?.store_name || "").trim(),
+        image_url: String(profile?.image_url || "").trim(),
+        phone: String(profile?.phone || "").trim()
       };
     })
     .filter(Boolean)
-    .filter(row => Number(row.distance_km || 0) <= RIDE_MATCH_RADIUS_KM)
+    .filter(row => Number(row.distance_km || 0) <= Math.max(0.1, radiusKm))
     .sort((a, b) => Number(a.distance_km || 0) - Number(b.distance_km || 0))
     .slice(0, Math.max(1, Number(limitCount || 20)));
 }
@@ -7390,6 +7456,29 @@ app.post("/api/local/riders/location", async (req, res) => {
     return res.json({ ok:true, rider_location: Array.isArray(rows) ? rows[0] || null : null });
   }catch(err){
     return res.status(500).json({ ok:false, error:"local_rider_location_failed", message:String(err?.message || "") });
+  }
+});
+
+app.get("/api/local/riders/nearby", async (req, res) => {
+  const lat = sanitizeGeoNumber(req.query?.lat);
+  const lng = sanitizeGeoNumber(req.query?.lng);
+  const radiusRaw = safeNumber(req.query?.radius_km);
+  const limitRaw = Math.floor(safeNumber(req.query?.limit));
+  if(lat === null || lng === null){
+    return res.status(400).json({ ok:false, error:"lat_lng_required" });
+  }
+  const radiusKm = Number.isFinite(radiusRaw) && radiusRaw > 0 ? Math.min(20, radiusRaw) : RIDE_MATCH_RADIUS_KM;
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(100, limitRaw) : 20;
+  try{
+    const drivers = await fetchNearbyRideDrivers(lat, lng, limit, { radiusKm });
+    return res.json({
+      ok:true,
+      radius_km: radiusKm,
+      count: drivers.length,
+      drivers
+    });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"nearby_riders_failed", message:String(err?.message || "") });
   }
 });
 

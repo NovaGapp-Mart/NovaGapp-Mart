@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,72 +8,68 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="global.js"></script>
 <script src="public-config.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
-:root{--brand:#ff6a00;--text:#1f2937;--muted:#64748b;--line:#e2e8f0;--bg:#f1f5f9;--ok:#16a34a;--warn:#dc2626}
+:root{--brand:#ff6a00;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--bg:#f1f5f9;--ok:#16974b;--bad:#c62828}
 *{box-sizing:border-box}
-body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:var(--text);padding-bottom:78px}
-.top{position:sticky;top:0;z-index:50;background:linear-gradient(130deg,#ff8b40,#ff6000);color:#fff;padding:14px 12px;font-weight:700}
-.wrap{padding:10px}
-.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif}
 .hide{display:none!important}
-.input,select{width:100%;padding:11px;border:1px solid #d6deea;border-radius:10px;font-size:14px;background:#fff}
+#rideView{position:fixed;inset:0;background:#fff}
+#rideMap{position:absolute;inset:0;z-index:1}
+.top-search{position:absolute;left:12px;right:12px;top:12px;z-index:20;display:flex;gap:8px;background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:8px;box-shadow:0 6px 18px rgba(0,0,0,.16)}
+.top-search input{flex:1;border:none;outline:none;font-size:14px}
+.top-search button{border:none;border-radius:10px;background:#111;color:#fff;padding:9px 12px;font-weight:700;cursor:pointer}
+.float-loc{position:absolute;right:12px;top:74px;z-index:20;border:none;border-radius:999px;background:#fff;padding:10px 12px;font-weight:700;box-shadow:0 6px 18px rgba(0,0,0,.18);cursor:pointer}
+.sheet{position:absolute;left:0;right:0;bottom:58px;z-index:25;background:#fff;border-top:1px solid #e2e8f0;border-radius:18px 18px 0 0;max-height:58vh;overflow:auto;padding:12px}
+.panel{display:block}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.input,select{width:100%;padding:11px;border:1px solid #d6deea;border-radius:10px;font-size:14px;background:#fff}
 .btn{border:none;border-radius:10px;padding:11px 12px;font-weight:700;cursor:pointer}
 .btn.brand{background:var(--brand);color:#fff}
-.btn.dark{background:#111;color:#fff}
-.btn.warn{background:var(--warn);color:#fff}
+.btn.gray{background:#334155;color:#fff}
+.btn.bad{background:var(--bad);color:#fff}
+.btn.ok{background:var(--ok);color:#fff}
 .btn.full{width:100%}
 .muted{font-size:12px;color:var(--muted)}
-.vehicle-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
-.vehicle{border:1px solid #d8e0ec;border-radius:11px;padding:10px;text-align:center;background:#fff;cursor:pointer;font-weight:700}
-.vehicle.active{border-color:var(--brand);background:#fff1e8;color:#9a3b00}
-#entryMap{height:170px;border-radius:12px;border:1px solid #dbe2ef;margin-top:8px}
-#rideMap{height:260px;border-radius:12px;border:1px solid #dbe2ef;margin-top:8px}
-.ride-type{display:flex;justify-content:space-between;align-items:center;border:1px solid #dce3f0;border-radius:11px;padding:10px;margin-top:8px;cursor:pointer}
-.ride-type.active{border-color:var(--brand);background:#fff4ec}
-.pulse{width:10px;height:10px;border-radius:99px;background:var(--brand);animation:p 1.2s infinite}
+.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:11px;background:#eaf2ff;color:#1d4ed8;font-weight:700}
+.vehicle-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px}
+.vehicle-card{border:1px solid #dce3f0;border-radius:11px;padding:10px;cursor:pointer;background:#fff}
+.vehicle-card.active{border-color:var(--brand);background:#fff4ec}
+.matching{display:flex;gap:10px;align-items:center}
+.dot{width:10px;height:10px;border-radius:99px;background:var(--brand);animation:p 1.2s infinite}
 @keyframes p{0%{transform:scale(1)}60%{transform:scale(2);opacity:.25}100%{transform:scale(1)}}
 .driver{display:grid;grid-template-columns:58px 1fr auto;gap:10px;align-items:center}
-.avatar{height:58px;width:58px;border-radius:999px;background:#ffe4d5;display:flex;align-items:center;justify-content:center;font-weight:700;object-fit:cover}
-.tag{font-size:11px;background:#eaf3ff;color:#1e40af;padding:4px 8px;border-radius:999px;font-weight:700;display:inline-block}
-.kv{display:flex;justify-content:space-between;margin:6px 0;font-size:14px}
-.kv.total{font-size:16px;font-weight:700;border-top:1px dashed #cfd8e5;padding-top:8px}
+.driver img{width:58px;height:58px;border-radius:999px;object-fit:cover;background:#ffe4d5}
+.status-line{margin-top:6px}
+#foodView,#agentView{position:fixed;inset:0;background:#f7fafc;padding:14px 12px 74px 12px;overflow:auto}
+.block{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px}
 .bottom-nav{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid #dbe2ee;display:grid;grid-template-columns:repeat(5,1fr);z-index:60}
 .nav-item{border:none;background:transparent;padding:8px 4px;font-size:11px;color:#475569;cursor:pointer;text-align:center}
 .nav-item.active{color:var(--brand);font-weight:700}
 </style>
 </head>
 <body>
-<div class="top" id="headerTitle">Book a Ride</div>
-<div class="wrap">
-  <section id="rideSection">
-    <div class="card" id="entryCard">
-      <b>Ride Home</b>
-      <div class="muted" style="margin-top:6px">Pickup is auto-detected from GPS.</div>
-      <div id="entryMap"></div>
-      <div class="vehicle-grid">
-        <button class="vehicle" data-vehicle="bike">Bike</button>
-        <button class="vehicle" data-vehicle="auto">Auto</button>
-        <button class="vehicle" data-vehicle="car">Car</button>
-      </div>
-      <input class="input" id="entryDestination" placeholder="Enter Destination" style="margin-top:8px">
-      <div class="muted" id="pickupText" style="margin-top:6px">Pickup: detecting...</div>
-      <div style="margin-top:8px"><b>Recent locations</b></div>
-      <div id="recentList"></div>
-      <button class="btn brand full" id="entryContinueBtn" style="margin-top:8px">Continue</button>
-    </div>
+<div id="rideView">
+  <div id="rideMap"></div>
+  <div class="top-search">
+    <input id="whereToInput" placeholder="Where to?">
+    <button id="whereSetBtn" type="button">Set</button>
+  </div>
+  <button class="float-loc" id="locBtn" type="button">Current Location</button>
 
-    <div class="card hide" id="bookingCard">
-      <div class="tag">Step: Pickup -> Drop -> Confirm</div>
-      <div class="row" style="margin-top:8px">
-        <input class="input" id="pickupInput" placeholder="Pickup">
-        <input class="input" id="dropInput" placeholder="Drop">
+  <div class="sheet">
+    <div id="idlePanel" class="panel">
+      <div class="row" style="justify-content:space-between">
+        <b>Book a Ride</b>
+        <span class="badge" id="gpsBadge">GPS: detecting...</span>
       </div>
-      <div id="rideMap"></div>
-      <div style="margin-top:8px"><b>Ride types</b></div>
-      <div id="rideTypes"></div>
+      <div class="row" style="margin-top:8px">
+        <input id="pickupInput" class="input" placeholder="Pickup location">
+        <input id="dropInput" class="input" placeholder="Drop location">
+      </div>
+      <div id="routeMeta" class="muted" style="margin-top:8px">Set destination to see fare and ETA.</div>
+      <div id="vehicleList" class="vehicle-list"></div>
       <div class="row" style="margin-top:8px">
         <select id="paymentMethod">
           <option value="cash">Cash</option>
@@ -80,48 +77,47 @@ body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:var(--text
           <option value="card">Card</option>
         </select>
       </div>
-      <button class="btn brand full" id="confirmBtn" style="margin-top:8px">Confirm Ride</button>
+      <button id="confirmRideBtn" class="btn brand full" style="margin-top:8px">Confirm Ride</button>
     </div>
 
-    <div class="card hide" id="matchingCard">
-      <div class="row"><div class="pulse"></div><b>Finding nearby drivers...</b></div>
-      <div class="muted" id="matchText" style="margin-top:8px">Searching in 3km radius</div>
-      <button class="btn warn full" id="cancelSearchBtn" style="margin-top:8px">Cancel Search</button>
+    <div id="matchingPanel" class="panel hide">
+      <div class="matching"><div class="dot"></div><b>Finding nearby drivers...</b></div>
+      <div id="matchingText" class="muted status-line">Searching in 3km...</div>
+      <button id="cancelMatchingBtn" class="btn bad full" style="margin-top:10px">Cancel Search</button>
     </div>
 
-    <div class="card hide" id="confirmedCard">
+    <div id="confirmedPanel" class="panel hide">
       <div class="driver">
-        <img class="avatar" id="driverPhoto" src="Images/no-image.jpg" alt="Driver">
+        <img id="driverPhoto" src="Images/no-image.jpg" alt="Driver">
         <div>
-          <div><b id="driverName">Driver</b></div>
-          <div class="muted" id="driverMeta">Rating 4.8 | Vehicle</div>
+          <div><b id="driverName">Assigned Driver</b></div>
+          <div id="driverMeta" class="muted">Rating 4.8 | Vehicle</div>
         </div>
-        <div class="tag" id="etaTag">ETA -</div>
+        <div class="badge" id="driverEta">ETA -</div>
       </div>
-      <div class="muted" id="rideStatus" style="margin-top:8px">Status: accepted</div>
-      <div class="muted" id="driverPhone" style="margin-top:4px">Phone: -</div>
-      <a id="callDriverBtn" class="btn dark full" href="#" style="display:block;text-decoration:none;text-align:center;margin-top:8px">Call Driver</a>
+      <div id="confirmedStatus" class="muted status-line">Status: accepted</div>
+      <div id="driverPhone" class="muted status-line">Phone: -</div>
+      <a id="callDriverBtn" class="btn gray full" href="#" style="display:block;text-align:center;text-decoration:none;margin-top:8px">Call Driver</a>
       <div class="row" style="margin-top:8px">
-        <input class="input" id="otpInput" placeholder="Enter start OTP">
-        <button class="btn dark" id="otpVerifyBtn">Start Ride</button>
+        <input id="otpInput" class="input" placeholder="Enter start OTP">
+        <button id="verifyOtpBtn" class="btn ok">Start Ride</button>
       </div>
-      <button class="btn warn full" id="cancelAfterAcceptBtn" style="margin-top:8px">Cancel Ride Request</button>
+      <button id="cancelAfterAcceptBtn" class="btn bad full" style="margin-top:8px">Cancel Ride</button>
     </div>
 
-    <div class="card hide" id="inRideCard">
-      <div class="tag">Ride Started</div>
-      <div class="muted" id="remainText" style="margin-top:8px">Distance remaining: -</div>
-      <div class="muted" id="inRideEta" style="margin-top:4px">ETA: -</div>
-      <button class="btn warn full" id="sosBtn" style="margin-top:8px">Emergency SOS</button>
-      <button class="btn brand full" id="completeBtn" style="margin-top:8px">Complete Ride (Rider side)</button>
+    <div id="tripPanel" class="panel hide">
+      <span class="badge">Ride Started</span>
+      <div id="remainText" class="muted status-line">Distance remaining: -</div>
+      <div id="tripEtaText" class="muted status-line">ETA: -</div>
+      <button id="sosBtn" class="btn bad full" style="margin-top:8px">Emergency SOS</button>
+      <button id="checkCompleteBtn" class="btn brand full" style="margin-top:8px">Check Ride Completion</button>
     </div>
 
-    <div class="card hide" id="completeCard">
+    <div id="donePanel" class="panel hide">
       <b>Ride Complete</b>
-      <div class="kv"><span>Ride fare</span><b id="fareOut">INR 0.00</b></div>
-      <div class="kv hide"><span>Platform fee (10%)</span><b id="commissionOut">INR 0.00</b></div>
-      <div class="kv"><span>Driver earning</span><b id="driverOut">INR 0.00</b></div>
-      <div class="kv total"><span>Total payable</span><b id="totalOut">INR 0.00</b></div>
+      <div class="row" style="justify-content:space-between;margin-top:8px"><span>Ride Fare</span><b id="fareOut">INR 0.00</b></div>
+      <div class="row" style="justify-content:space-between;margin-top:4px"><span>Driver Earning</span><b id="driverOut">INR 0.00</b></div>
+      <div class="row" style="justify-content:space-between;margin-top:4px"><span>Total Payable</span><b id="totalOut">INR 0.00</b></div>
       <div class="row" style="margin-top:8px">
         <select id="rateInput">
           <option value="5">Rate 5</option>
@@ -130,15 +126,26 @@ body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:var(--text
           <option value="2">Rate 2</option>
           <option value="1">Rate 1</option>
         </select>
-        <input class="input" id="tipInput" placeholder="Tip amount">
+        <input id="tipInput" class="input" placeholder="Tip amount">
       </div>
-      <button class="btn brand full" id="bookAgainBtn" style="margin-top:8px">Book Again</button>
+      <button id="bookAgainBtn" class="btn brand full" style="margin-top:8px">Book Again</button>
     </div>
-  </section>
-
-  <section id="foodSection" class="card hide"><b>Food/Grocery</b><div class="muted" style="margin-top:8px">This tab is available. Ride section is fully active now.</div></section>
-  <section id="agentSection" class="card hide"><b>Agent</b><div class="muted" style="margin-top:8px">This tab is available. Ride section is fully active now.</div></section>
+  </div>
 </div>
+
+<section id="foodView" class="hide">
+  <div class="block">
+    <b>Food / Grocery</b>
+    <div class="muted" style="margin-top:6px">Ride tab is production focus. Food and grocery module can be expanded next.</div>
+  </div>
+</section>
+
+<section id="agentView" class="hide">
+  <div class="block">
+    <b>Agent</b>
+    <div class="muted" style="margin-top:6px">Ride tab is production focus. Agent module can be expanded next.</div>
+  </div>
+</section>
 
 <nav class="bottom-nav">
   <button class="nav-item" data-nav="home">Home</button>
@@ -150,259 +157,1205 @@ body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:var(--text
 
 <script>
 const supa = window.supa || window.novaCreateSupabaseClient();
-const state = {
-  me:null,
-  vehicle:"auto",
-  pickupLat:null,pickupLng:null,dropLat:null,dropLng:null,
-  pickupText:"",dropText:"",
-  distanceKm:0,durationMin:0,fare:0,
-  requestId:"",trackTimer:null,matchSecond:0,matchAttempt:1,lastRematchAt:0,
-  driverWallet:0,platformWallet:0
+const RIDE_STATE_KEY = "nova_ride_state_v3";
+const PRICING = {
+  bike: { label: "Bike", base: 30, perKm: 8, perMin: 1.5, speed: 28 },
+  auto: { label: "Auto", base: 45, perKm: 11, perMin: 2, speed: 24 },
+  car: { label: "Car", base: 70, perKm: 15, perMin: 2.8, speed: 30 }
 };
-const pricing={bike:{base:30,perKm:8,perMin:1.5,speed:28,label:"Bike"},auto:{base:45,perKm:11,perMin:2,label:"Auto"},car:{base:70,perKm:15,perMin:2.8,label:"Car"}};
-const recent=["Hinjewadi Phase 1, Pune","Balewadi High Street, Pune","Pimpri Station"];
-let map=null,pickupMarker=null,dropMarker=null,routeLine=null,driverMarker=null;
-let entryMap=null,entryPickupMarker=null,driverGuideLine=null;
-let riderGeoWatchId=null;
-let lastPickupResolveAt=0;
-let lastDriverLocationPushAt=0;
-const RIDE_STATE_KEY="nova_active_ride_v2";
 
-function money(v){return "INR "+Number(v||0).toFixed(2)}
-function setScreen(id){["entryCard","bookingCard","matchingCard","confirmedCard","inRideCard","completeCard"].forEach(x=>document.getElementById(x).classList.toggle("hide",x!==id));}
-function haversineKm(a,b,c,d){const r=x=>x*Math.PI/180;const R=6371;const dLat=r(c-a),dLng=r(d-b);const q=Math.sin(dLat/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dLng/2)**2;return R*(2*Math.atan2(Math.sqrt(q),Math.sqrt(1-q)));}
-function bases(){const out=[];const p=v=>{v=String(v||"").trim().replace(/\/+$/g,"");if(v&&/^https?:\/\//i.test(v)&&!out.includes(v))out.push(v)};p(window.CONTEST_API_BASE||window.API_BASE||"");try{p(localStorage.getItem("contest_api_base"));p(localStorage.getItem("api_base"));}catch(_){ }if(/^https?:\/\//i.test(location.origin||""))p(location.origin);p("https://novagapp-mart.onrender.com");return out;}
-async function apiGet(path){for(const b of bases()){try{const r=await fetch(b+path,{cache:"no-store"});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok)return j;}catch(_){}}return null;}
-async function apiPost(path,body){for(const b of bases()){try{const r=await fetch(b+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok)return j;}catch(_){}}return null;}
-function saveRideState(){try{if(!state.requestId){localStorage.removeItem(RIDE_STATE_KEY);return;}localStorage.setItem(RIDE_STATE_KEY,JSON.stringify({requestId:state.requestId,vehicle:state.vehicle,pickupLat:state.pickupLat,pickupLng:state.pickupLng,dropLat:state.dropLat,dropLng:state.dropLng,pickupText:state.pickupText,dropText:state.dropText,savedAt:Date.now()}));}catch(_){ }}
-function clearRideState(){try{localStorage.removeItem(RIDE_STATE_KEY);}catch(_){ }}
-function loadRideState(){try{const raw=localStorage.getItem(RIDE_STATE_KEY);if(!raw)return null;const j=JSON.parse(raw);if(!j?.requestId)return null;return j;}catch(_){return null;}}
+const state = {
+  me: null,
+  vehicle: "auto",
+  pickupLat: null,
+  pickupLng: null,
+  dropLat: null,
+  dropLng: null,
+  pickupText: "",
+  dropText: "",
+  distanceKm: 0,
+  durationMin: 0,
+  fare: 0,
+  phase: "idle",
+  requestId: "",
+  trackTimer: null,
+  watchId: null,
+  lastReverseAt: 0,
+  lastNearbyAt: 0,
+  matchSecond: 0,
+  matchAttempt: 1,
+  lastRematchAt: 0,
+  driverLat: null,
+  driverLng: null
+};
 
-async function ensureUser(){if(state.me)return state.me;const {data}=await supa.auth.getSession();state.me=data?.session?.user||null;if(!state.me){location.href="login.html";return null;}return state.me;}
-function renderRecent(){const box=document.getElementById("recentList");box.innerHTML="";recent.forEach(name=>{const d=document.createElement("div");d.className="muted";d.style.marginTop="6px";d.style.padding="8px";d.style.border="1px solid #e4e9f3";d.style.borderRadius="10px";d.style.cursor="pointer";d.textContent="LOC: "+name;d.onclick=()=>{document.getElementById("entryDestination").value=name;};box.appendChild(d);});}
-function setVehicle(v){state.vehicle=v;document.querySelectorAll(".vehicle").forEach(btn=>btn.classList.toggle("active",btn.dataset.vehicle===v));renderRideTypes();}
-function initEntryMap(){if(entryMap)return;entryMap=L.map("entryMap",{zoomControl:false,attributionControl:false,dragging:false,doubleClickZoom:false,scrollWheelZoom:false,boxZoom:false,keyboard:false,tap:false,touchZoom:false}).setView([state.pickupLat||18.5204,state.pickupLng||73.8567],14);L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(entryMap);}
-function updateEntryMapPickup(){initEntryMap();if(!entryMap||state.pickupLat==null||state.pickupLng==null)return;const p=[state.pickupLat,state.pickupLng];if(!entryPickupMarker){entryPickupMarker=L.circleMarker(p,{radius:7,color:"#ff6a00",fillColor:"#ff6a00",fillOpacity:0.9}).addTo(entryMap);}else{entryPickupMarker.setLatLng(p);}entryMap.setView(p,14);}
+let map = null;
+let pickupMarker = null;
+let dropMarker = null;
+let routeLine = null;
+let nearbyLayer = null;
+let driverMarker = null;
+let driverGuideLine = null;
 
-async function reverseGeocode(lat,lng){
+function money(v){ return "INR " + Number(v || 0).toFixed(2); }
+function haversineKm(lat1, lon1, lat2, lon2){
+  const toRad = d => d * Math.PI / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
+function apiBases(){
+  const out = [];
+  const push = (value) => {
+    const clean = String(value || "").trim().replace(/\/+$/g, "");
+    if(!clean || !/^https?:\/\//i.test(clean)) return;
+    if(!out.includes(clean)) out.push(clean);
+  };
+  push(window.CONTEST_API_BASE || window.API_BASE || "");
   try{
-    const bdc=`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(String(lat))}&longitude=${encodeURIComponent(String(lng))}&localityLanguage=en`;
-    const r=await fetch(bdc,{cache:"no-store"});
-    if(r.ok){
-      const j=await r.json().catch(()=>null);
-      const label=[j?.locality||j?.city||"",j?.principalSubdivision||"",j?.countryName||""].filter(Boolean).join(", ").trim();
-      if(label) return label.slice(0,120);
+    push(localStorage.getItem("contest_api_base"));
+    push(localStorage.getItem("api_base"));
+  }catch(_){ }
+  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+  push("https://novagapp-mart.onrender.com");
+  return out;
+}
+
+async function apiGet(path){
+  for(const base of apiBases()){
+    try{
+      const res = await fetch(base + path, { cache: "no-store" });
+      const json = await res.json().catch(() => null);
+      if(res.ok && json?.ok) return json;
+    }catch(_){ }
+  }
+  return null;
+}
+
+async function apiPost(path, body){
+  for(const base of apiBases()){
+    try{
+      const res = await fetch(base + path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const json = await res.json().catch(() => null);
+      if(res.ok && json?.ok) return json;
+    }catch(_){ }
+  }
+  return null;
+}
+function setPhase(next){
+  state.phase = next;
+  document.getElementById("idlePanel").classList.toggle("hide", next !== "idle");
+  document.getElementById("matchingPanel").classList.toggle("hide", next !== "matching");
+  document.getElementById("confirmedPanel").classList.toggle("hide", next !== "confirmed");
+  document.getElementById("tripPanel").classList.toggle("hide", next !== "trip");
+  document.getElementById("donePanel").classList.toggle("hide", next !== "done");
+}
+
+function saveState(){
+  try{
+    if(!state.requestId){
+      localStorage.removeItem(RIDE_STATE_KEY);
+      return;
+    }
+    localStorage.setItem(RIDE_STATE_KEY, JSON.stringify({
+      requestId: state.requestId,
+      phase: state.phase,
+      vehicle: state.vehicle,
+      pickupLat: state.pickupLat,
+      pickupLng: state.pickupLng,
+      dropLat: state.dropLat,
+      dropLng: state.dropLng,
+      pickupText: state.pickupText,
+      dropText: state.dropText,
+      distanceKm: state.distanceKm,
+      durationMin: state.durationMin,
+      fare: state.fare,
+      savedAt: Date.now()
+    }));
+  }catch(_){ }
+}
+
+function clearState(){
+  try{ localStorage.removeItem(RIDE_STATE_KEY); }catch(_){ }
+}
+
+function loadState(){
+  try{
+    const raw = localStorage.getItem(RIDE_STATE_KEY);
+    if(!raw) return null;
+    const json = JSON.parse(raw);
+    if(!json?.requestId) return null;
+    return json;
+  }catch(_){
+    return null;
+  }
+}
+
+async function ensureMe(){
+  if(state.me) return state.me;
+  const { data } = await supa.auth.getSession();
+  state.me = data?.session?.user || null;
+  if(!state.me){
+    location.href = "login.html";
+    return null;
+  }
+  return state.me;
+}
+
+function initMap(){
+  if(map) return;
+  map = L.map("rideMap", { zoomControl: true }).setView([18.5204, 73.8567], 14);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(map);
+  nearbyLayer = L.layerGroup().addTo(map);
+  map.on("click", (e) => {
+    const lat = Number(e.latlng?.lat);
+    const lng = Number(e.latlng?.lng);
+    if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    setDrop(lat, lng, true).catch(() => {});
+  });
+}
+
+function setPickupMarker(){
+  if(!map || state.pickupLat == null || state.pickupLng == null) return;
+  const p = [state.pickupLat, state.pickupLng];
+  if(!pickupMarker) pickupMarker = L.marker(p).addTo(map).bindPopup("Pickup");
+  else pickupMarker.setLatLng(p);
+}
+
+function setDropMarker(){
+  if(!map || state.dropLat == null || state.dropLng == null) return;
+  const d = [state.dropLat, state.dropLng];
+  if(!dropMarker){
+    dropMarker = L.marker(d, { draggable: true }).addTo(map).bindPopup("Drop");
+    dropMarker.on("dragend", () => {
+      const pos = dropMarker.getLatLng();
+      setDrop(Number(pos.lat), Number(pos.lng), true).catch(() => {});
+    });
+  }else{
+    dropMarker.setLatLng(d);
+  }
+}
+
+function updateDriverMarker(){
+  if(!map || state.driverLat == null || state.driverLng == null) return;
+  const p = [state.driverLat, state.driverLng];
+  if(!driverMarker) driverMarker = L.circleMarker(p, { radius: 7, color: "#dc2626", fillOpacity: 1 }).addTo(map);
+  else driverMarker.setLatLng(p);
+}
+
+function clearDriverGuide(){
+  if(map && driverGuideLine){
+    map.removeLayer(driverGuideLine);
+    driverGuideLine = null;
+  }
+}
+
+async function reverseGeocode(lat, lng){
+  try{
+    const bdc = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(String(lat))}&longitude=${encodeURIComponent(String(lng))}&localityLanguage=en`;
+    const res = await fetch(bdc, { cache: "no-store" });
+    if(res.ok){
+      const json = await res.json().catch(() => null);
+      const name = [json?.locality || json?.city || "", json?.principalSubdivision || "", json?.countryName || ""].filter(Boolean).join(", ");
+      if(name) return name.slice(0, 120);
     }
   }catch(_){ }
   try{
-    const n=`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}`;
-    const r=await fetch(n,{cache:"no-store",headers:{"Accept":"application/json"}});
-    if(r.ok){
-      const j=await r.json().catch(()=>null);
-      const a=j?.address||{};
-      const label=[a.road||a.suburb||a.neighbourhood||a.village||a.town||a.city||"",a.state||"",a.country||""].filter(Boolean).join(", ");
-      if(label) return label.slice(0,120);
+    const n = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}`;
+    const res = await fetch(n, { cache: "no-store", headers: { "Accept": "application/json" } });
+    if(res.ok){
+      const json = await res.json().catch(() => null);
+      const a = json?.address || {};
+      const name = [a.road || a.suburb || a.neighbourhood || a.city || a.town || a.village || "", a.state || "", a.country || ""].filter(Boolean).join(", ");
+      if(name) return name.slice(0, 120);
     }
   }catch(_){ }
   return "Current location";
 }
 
-async function detectPickup(){if(!navigator.geolocation){document.getElementById("pickupText").textContent="Pickup: GPS unsupported";return;}
-navigator.geolocation.getCurrentPosition(async pos=>{
-state.pickupLat=Number(pos.coords.latitude);state.pickupLng=Number(pos.coords.longitude);
-document.getElementById("pickupText").textContent="Pickup: detecting live address...";
-const name=await reverseGeocode(state.pickupLat,state.pickupLng);
-state.pickupText=name||"Current location";
-document.getElementById("pickupText").textContent="Pickup: "+state.pickupText;
-document.getElementById("pickupInput").value=state.pickupText;
-updateEntryMapPickup();
-if(map){drawRoute();}
-await updateDriverLocation(true);
-},()=>{state.pickupLat=18.5204;state.pickupLng=73.8567;state.pickupText="Pune, Maharashtra";document.getElementById("pickupText").textContent="Pickup: "+state.pickupText;document.getElementById("pickupInput").value=state.pickupText;},{enableHighAccuracy:true,timeout:15000,maximumAge:0});}
+async function geocode(text){
+  const q = String(text || "").trim();
+  if(!q) return null;
+  try{
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(q)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const rows = await res.json().catch(() => []);
+    const first = Array.isArray(rows) ? rows[0] : null;
+    const lat = Number(first?.lat);
+    const lng = Number(first?.lon);
+    if(Number.isFinite(lat) && Number.isFinite(lng)){
+      return { lat, lng, name: String(first?.display_name || q).slice(0, 120) };
+    }
+  }catch(_){ }
+  return null;
+}
 
-function startLivePickupWatch(){
-  if(!navigator.geolocation) return;
-  if(riderGeoWatchId!=null){
-    try{navigator.geolocation.clearWatch(riderGeoWatchId);}catch(_){ }
-    riderGeoWatchId=null;
+function estimateFare(vehicleType){
+  const cfg = PRICING[vehicleType] || PRICING.auto;
+  if(state.distanceKm <= 0 || state.durationMin <= 0) return null;
+  const fare = cfg.base + (state.distanceKm * cfg.perKm) + (state.durationMin * cfg.perMin);
+  const eta = Math.max(2, Math.round(state.durationMin * 1.15));
+  return { fare, eta };
+}
+
+function renderVehicleList(){
+  const box = document.getElementById("vehicleList");
+  box.innerHTML = "";
+  Object.keys(PRICING).forEach((key) => {
+    const est = estimateFare(key);
+    const card = document.createElement("div");
+    card.className = "vehicle-card" + (state.vehicle === key ? " active" : "");
+    card.innerHTML = `
+      <div><b>${PRICING[key].label}</b></div>
+      <div class="muted">ETA ${est ? est.eta : "-"} min</div>
+      <div style="margin-top:4px"><b>${est ? money(est.fare) : "Set drop"}</b></div>
+    `;
+    card.onclick = () => {
+      state.vehicle = key;
+      const e = estimateFare(key);
+      if(e) state.fare = e.fare;
+      renderVehicleList();
+    };
+    box.appendChild(card);
+  });
+}
+
+async function loadRouteAndFare(){
+  if(state.pickupLat == null || state.pickupLng == null || state.dropLat == null || state.dropLng == null){
+    document.getElementById("routeMeta").textContent = "Set destination to see fare and ETA.";
+    renderVehicleList();
+    return;
   }
-  riderGeoWatchId=navigator.geolocation.watchPosition(async pos=>{
-    const lat=Number(pos.coords.latitude),lng=Number(pos.coords.longitude);
-    if(!Number.isFinite(lat)||!Number.isFinite(lng)) return;
-    state.pickupLat=lat;state.pickupLng=lng;
-    updateEntryMapPickup();
-    drawRoute();
-    const nowPush=Date.now();
-    if(nowPush-lastDriverLocationPushAt>3000){
-      lastDriverLocationPushAt=nowPush;
-      updateDriverLocation(true).catch(()=>{});
+  let distanceKm = 0;
+  let durationMin = 0;
+  let geo = null;
+  try{
+    const url = `https://router.project-osrm.org/route/v1/driving/${state.pickupLng},${state.pickupLat};${state.dropLng},${state.dropLat}?overview=full&geometries=geojson`;
+    const res = await fetch(url, { cache: "no-store" });
+    const json = await res.json().catch(() => null);
+    const route = json?.routes?.[0];
+    distanceKm = Number(route?.distance || 0) / 1000;
+    durationMin = Number(route?.duration || 0) / 60;
+    geo = route?.geometry?.coordinates || null;
+  }catch(_){ }
+  if(!Number.isFinite(distanceKm) || distanceKm <= 0){
+    distanceKm = haversineKm(state.pickupLat, state.pickupLng, state.dropLat, state.dropLng);
+  }
+  if(!Number.isFinite(durationMin) || durationMin <= 0){
+    durationMin = Math.max((distanceKm / PRICING[state.vehicle].speed) * 60, 3);
+  }
+  state.distanceKm = distanceKm;
+  state.durationMin = durationMin;
+
+  if(map){
+    if(routeLine){ map.removeLayer(routeLine); routeLine = null; }
+    if(Array.isArray(geo) && geo.length > 1){
+      const latlngs = geo.map((c) => [Number(c[1]), Number(c[0])]).filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+      if(latlngs.length > 1) routeLine = L.polyline(latlngs, { color: "#1d4ed8", weight: 5 }).addTo(map);
+    }else{
+      routeLine = L.polyline([[state.pickupLat, state.pickupLng], [state.dropLat, state.dropLng]], { color: "#1d4ed8", weight: 5 }).addTo(map);
     }
-    const now=Date.now();
-    if(now-lastPickupResolveAt>10000){
-      lastPickupResolveAt=now;
-      const name=await reverseGeocode(lat,lng);
-      state.pickupText=name||state.pickupText||"Current location";
-      document.getElementById("pickupText").textContent="Pickup: "+state.pickupText;
-      document.getElementById("pickupInput").value=state.pickupText;
-    }
-  },()=>{},{enableHighAccuracy:true,maximumAge:0,timeout:15000});
+    map.fitBounds([[state.pickupLat, state.pickupLng], [state.dropLat, state.dropLng]], { padding: [24, 24] });
+  }
+
+  const est = estimateFare(state.vehicle);
+  if(est) state.fare = est.fare;
+  document.getElementById("routeMeta").textContent = `Distance ${distanceKm.toFixed(1)} km | Duration ${Math.round(durationMin)} min | Fare ${est ? money(est.fare) : "-"}`;
+  renderVehicleList();
 }
 
-async function updateDriverLocation(isOnline){const me=await ensureUser();if(!me||state.pickupLat==null||state.pickupLng==null)return;await apiPost("/api/local/riders/location",{user_id:me.id,lat:state.pickupLat,lng:state.pickupLng,is_online:Boolean(isOnline)});}
+const RECENT_DEST_KEY = "nova_ride_recent_dest_v1";
+const REMATCH_INTERVAL_SEC = 10;
+const TRACK_INTERVAL_MS = 3000;
+const NEARBY_INTERVAL_MS = 15000;
+const MAX_RECENT_DEST = 6;
+const RIDE_STATE_TTL_MS = 6 * 60 * 60 * 1000;
 
-function initMap(){if(map)return;map=L.map("rideMap",{zoomControl:true}).setView([state.pickupLat||18.5204,state.pickupLng||73.8567],13);L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"&copy; OpenStreetMap contributors"}).addTo(map);map.on("click",e=>{state.dropLat=Number(e.latlng.lat);state.dropLng=Number(e.latlng.lng);drawRoute();updateFare();});}
-function drawRoute(){if(!map||state.pickupLat==null||state.pickupLng==null)return;const p=[state.pickupLat,state.pickupLng];if(!pickupMarker){pickupMarker=L.marker(p).addTo(map).bindPopup("Pickup");}else{pickupMarker.setLatLng(p);}if(state.dropLat!=null&&state.dropLng!=null){const d=[state.dropLat,state.dropLng];if(!dropMarker){dropMarker=L.marker(d,{draggable:true}).addTo(map).bindPopup("Drop");dropMarker.on("dragend",()=>{const m=dropMarker.getLatLng();state.dropLat=Number(m.lat);state.dropLng=Number(m.lng);drawRoute();updateFare();});}else{dropMarker.setLatLng(d);}if(routeLine){map.removeLayer(routeLine);}routeLine=L.polyline([p,d],{color:"#1d4ed8",weight:5}).addTo(map);map.fitBounds(routeLine.getBounds(),{padding:[20,20]});}else{map.setView(p,Math.max(map.getZoom(),14));}}
+state.pickupMode = "gps";
+state.liveLat = null;
+state.liveLng = null;
+state.lastGpsAddressAt = 0;
 
-async function geocode(text){try{const r=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(text)}`,{cache:"no-store"});const j=await r.json().catch(()=>[]);const x=Array.isArray(j)?j[0]:null;const lat=Number(x?.lat),lng=Number(x?.lon);if(Number.isFinite(lat)&&Number.isFinite(lng))return {lat,lng,name:String(x?.display_name||text).slice(0,120)};}catch(_){ }return null;}
-async function routeApiDistanceDuration(){if(state.pickupLat==null||state.pickupLng==null||state.dropLat==null||state.dropLng==null)return null;try{const url=`https://router.project-osrm.org/route/v1/driving/${state.pickupLng},${state.pickupLat};${state.dropLng},${state.dropLat}?overview=false`;const r=await fetch(url,{cache:"no-store"});const j=await r.json().catch(()=>null);const rt=j?.routes?.[0];const distKm=Number(rt?.distance||0)/1000;const durMin=Number(rt?.duration||0)/60;if(distKm>0&&durMin>0)return {distanceKm:distKm,durationMin:durMin};}catch(_){ }const d=haversineKm(state.pickupLat,state.pickupLng,state.dropLat,state.dropLng);return {distanceKm:d,durationMin:Math.max((d/pricing[state.vehicle].speed)*60,3)};}
+function ensureRideExtrasUI(){
+  const top = document.querySelector(".top-search");
+  if(top && !document.getElementById("liveAddressLabel")){
+    const label = document.createElement("div");
+    label.id = "liveAddressLabel";
+    label.className = "muted";
+    label.style.marginTop = "6px";
+    label.style.marginLeft = "2px";
+    label.style.marginRight = "2px";
+    label.style.background = "rgba(255,255,255,0.92)";
+    label.style.padding = "6px 8px";
+    label.style.borderRadius = "10px";
+    label.textContent = "Current location: detecting...";
+    top.insertAdjacentElement("afterend", label);
+  }
 
-async function updateFare(){const r=await routeApiDistanceDuration();if(!r)return;state.distanceKm=r.distanceKm;state.durationMin=r.durationMin;renderRideTypes();}
-function estimate(type){if(state.distanceKm<=0||state.durationMin<=0)return null;const c=pricing[type];const f=c.base+(state.distanceKm*c.perKm)+(state.durationMin*c.perMin);return {fare:f,eta:Math.max(2,Math.round(state.durationMin*1.15))};}
-function renderRideTypes(){const box=document.getElementById("rideTypes");box.innerHTML="";Object.keys(pricing).forEach(type=>{const c=pricing[type];const e=estimate(type);const d=document.createElement("div");d.className="ride-type"+(state.vehicle===type?" active":"");d.innerHTML=`<div><b>${c.label}</b><div class='muted'>ETA ${e?e.eta:"-"} min</div></div><div><b>${e?money(e.fare):"Set drop"}</b></div>`;d.onclick=()=>{state.vehicle=type;renderRideTypes();};box.appendChild(d);});const s=estimate(state.vehicle);if(s){state.fare=s.fare;}}
+  const routeMeta = document.getElementById("routeMeta");
+  if(routeMeta && !document.getElementById("nearbyInfo")){
+    const near = document.createElement("div");
+    near.id = "nearbyInfo";
+    near.className = "muted";
+    near.style.marginTop = "8px";
+    near.textContent = "Nearby drivers: checking...";
+    routeMeta.parentElement.insertBefore(near, routeMeta);
+  }
 
-async function startBookingFromEntry(){const dest=String(document.getElementById("entryDestination").value||"").trim();if(!dest){alert("Enter destination");return;}state.dropText=dest;document.getElementById("dropInput").value=dest;setScreen("bookingCard");initMap();const g=await geocode(dest);if(g){state.dropLat=g.lat;state.dropLng=g.lng;state.dropText=g.name;document.getElementById("dropInput").value=g.name;drawRoute();}await updateFare();}
+  const row = document.querySelector("#idlePanel .row[style*='margin-top:8px']");
+  if(row && !document.getElementById("recentWrap")){
+    const wrap = document.createElement("div");
+    wrap.id = "recentWrap";
+    wrap.className = "muted";
+    wrap.style.marginTop = "8px";
+    wrap.innerHTML = "Recent destinations";
+    const chips = document.createElement("div");
+    chips.id = "recentList";
+    chips.style.display = "flex";
+    chips.style.gap = "6px";
+    chips.style.overflowX = "auto";
+    chips.style.marginTop = "5px";
+    chips.style.paddingBottom = "2px";
+    wrap.appendChild(chips);
+    row.insertAdjacentElement("afterend", wrap);
+  }
 
-async function createRideRequest(){const me=await ensureUser();if(!me)return;if(state.pickupLat==null||state.pickupLng==null||state.dropLat==null||state.dropLng==null){alert("Set pickup and drop first");return;}
-const estimatePayload={vehicle_type:state.vehicle,pickup_lat:state.pickupLat,pickup_lng:state.pickupLng,drop_lat:state.dropLat,drop_lng:state.dropLng,distance_km:state.distanceKm,duration_min:state.durationMin};
-const est=await apiPost("/api/local/rides/fare-estimate",estimatePayload);
-if(est?.estimate?.fare_inr){state.fare=Number(est.estimate.fare_inr||0);}
-const r=await apiPost("/api/local/rides/request",{user_id:me.id,pickup_lat:state.pickupLat,pickup_lng:state.pickupLng,drop_lat:state.dropLat,drop_lng:state.dropLng,pickup_text:state.pickupText||"Current",drop_text:state.dropText||document.getElementById("dropInput").value||"Drop",vehicle_type:state.vehicle});if(!r){alert("Ride request failed. Ensure consumer role + backend ready.");return;}state.requestId=String(r.ride_request?.id||"");state.matchSecond=0;state.matchAttempt=1;state.lastRematchAt=0;saveRideState();setScreen("matchingCard");startTracking();}
+  const matchingText = document.getElementById("matchingText");
+  if(matchingText && !document.getElementById("matchingTimer")){
+    const timer = document.createElement("div");
+    timer.id = "matchingTimer";
+    timer.className = "muted status-line";
+    timer.textContent = "Elapsed: 0s";
+    matchingText.insertAdjacentElement("afterend", timer);
+  }
+}
 
-function startTracking(){stopTracking();state.trackTimer=setInterval(async()=>{if(!state.requestId)return;state.matchSecond+=3;const msg=document.getElementById("matchText");if(msg){const secInCycle=state.matchSecond%10;const remain=secInCycle===0?10:(10-secInCycle);msg.textContent=`Finding nearby drivers in 3km... Attempt ${state.matchAttempt} | retry in ${remain}s`;}
-const t=await apiGet(`/api/local/rides/track?request_id=${encodeURIComponent(state.requestId)}`);if(!t)return;const status=String(t.ride_request?.status||"");const phone=String(t.driver_phone||"").trim();const loc=t.driver_location||null;if(status==="searching"){const now=Date.now();if(state.matchSecond>0&&state.matchSecond%10===0&&now-state.lastRematchAt>8000){state.lastRematchAt=now;const rem=await apiPost("/api/local/rides/rematch",{request_id:state.requestId,rider_user_id:state.me?.id||"",pickup_lat:state.pickupLat,pickup_lng:state.pickupLng});state.matchAttempt+=1;if(msg&&rem?.offered_driver_count!=null){msg.textContent=`3km search | Attempt ${state.matchAttempt} | offered ${Number(rem.offered_driver_count||0)} drivers`;}}return;}
-if(status==="accepted"||status==="arriving"){
- saveRideState();
- setScreen("confirmedCard");
- document.getElementById("rideStatus").textContent=`Status: ${status}`;
- document.getElementById("driverPhone").textContent=`Phone: ${phone||"-"}`;
- const driverName = String(t.driver_profile?.name || "").trim();
- document.getElementById("driverName").textContent=driverName || "Assigned Driver";
- const driverPhoto = document.getElementById("driverPhoto");
- if(driverPhoto){
-   driverPhoto.src = String(t.driver_profile?.image_url || "").trim() || "Images/no-image.jpg";
-   driverPhoto.onerror = () => { driverPhoto.src = "Images/no-image.jpg"; };
- }
- const rating=Number(t.driver_profile?.rating||4.8).toFixed(1);
- const vehicleNo=String(t.ride_request?.driver_vehicle_number||t.driver_profile?.vehicle_number||"MH-12-AB-0001");
- document.getElementById("driverMeta").textContent=`Rating ${rating} | Vehicle ${vehicleNo}`;
- const callBtn=document.getElementById("callDriverBtn");
- if(callBtn){callBtn.href=phone?`tel:${phone}`:"#";}
- let eta=Math.max(2,Math.round(state.durationMin*0.5));
- if(loc&&Number.isFinite(Number(loc.lat))&&Number.isFinite(Number(loc.lng))){
-  const dLat=Number(loc.lat),dLng=Number(loc.lng);
-  if(!driverMarker){driverMarker=L.circleMarker([dLat,dLng],{radius:7,color:"#dc2626"}).addTo(map);}else{driverMarker.setLatLng([dLat,dLng]);}
-  if(state.pickupLat!=null&&state.pickupLng!=null){
-    const pickupDist=haversineKm(dLat,dLng,state.pickupLat,state.pickupLng);
-    eta=Math.max(1,Math.round((pickupDist/24)*60));
-    if(map){
-      if(driverGuideLine){map.removeLayer(driverGuideLine);}
-      driverGuideLine=L.polyline([[dLat,dLng],[state.pickupLat,state.pickupLng]],{color:"#dc2626",weight:4,dashArray:"6,6"}).addTo(map);
+function loadRecentDestinations(){
+  try{
+    const raw = localStorage.getItem(RECENT_DEST_KEY);
+    if(!raw) return [];
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list : [];
+  }catch(_){
+    return [];
+  }
+}
+
+function saveRecentDestination(place){
+  const text = String(place?.text || "").trim().slice(0, 140);
+  const lat = Number(place?.lat);
+  const lng = Number(place?.lng);
+  if(!text || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  const list = loadRecentDestinations();
+  const filtered = list.filter((it) => String(it?.text || "").toLowerCase() !== text.toLowerCase());
+  filtered.unshift({ text, lat, lng });
+  const finalList = filtered.slice(0, MAX_RECENT_DEST);
+  try{ localStorage.setItem(RECENT_DEST_KEY, JSON.stringify(finalList)); }catch(_){ }
+}
+
+function renderRecentDestinations(){
+  const box = document.getElementById("recentList");
+  if(!box) return;
+  box.innerHTML = "";
+  const list = loadRecentDestinations();
+  if(!list.length){
+    const t = document.createElement("span");
+    t.textContent = "No recent destination";
+    t.style.fontSize = "11px";
+    box.appendChild(t);
+    return;
+  }
+  list.forEach((item) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = String(item?.text || "Recent").slice(0, 45);
+    btn.style.border = "1px solid #dce3f0";
+    btn.style.borderRadius = "999px";
+    btn.style.padding = "6px 10px";
+    btn.style.background = "#fff";
+    btn.style.whiteSpace = "nowrap";
+    btn.style.cursor = "pointer";
+    btn.onclick = () => {
+      setDrop(Number(item?.lat), Number(item?.lng), false, String(item?.text || ""))
+        .then(() => loadRouteAndFare())
+        .catch(() => {});
+    };
+    box.appendChild(btn);
+  });
+}
+
+function shouldRestoreSavedState(saved){
+  const ts = Number(saved?.savedAt || 0);
+  return ts > 0 && (Date.now() - ts) <= RIDE_STATE_TTL_MS;
+}
+
+function updateLiveAddressLabel(text){
+  const label = document.getElementById("liveAddressLabel");
+  if(!label) return;
+  label.textContent = "Current location: " + (String(text || "").trim() || "detecting...");
+}
+
+function setMatchingText(text){
+  const el = document.getElementById("matchingText");
+  if(el) el.textContent = text;
+}
+
+function setMatchingTimerText(text){
+  const el = document.getElementById("matchingTimer");
+  if(el) el.textContent = text;
+}
+
+function setNearbyInfo(text){
+  const el = document.getElementById("nearbyInfo");
+  if(el) el.textContent = text;
+}
+
+function setRideHint(text){
+  const msg = String(text || "").trim();
+  if(!msg) return;
+  const routeMeta = document.getElementById("routeMeta");
+  if(routeMeta) routeMeta.textContent = msg;
+  setMatchingText(msg);
+}
+
+async function ensureConsumerRole(){
+  const me = await ensureMe();
+  if(!me) return false;
+  const roles = await apiGet(`/api/local/roles?user_id=${encodeURIComponent(me.id)}`);
+  const hasConsumer = Array.isArray(roles?.roles)
+    && roles.roles.some((r) => String(r?.role || "") === "consumer" && String(r?.status || "") === "active");
+  if(hasConsumer) return true;
+  const displayName = String(me?.user_metadata?.full_name || me?.user_metadata?.name || me?.email || "Consumer").slice(0, 80);
+  const enroll = await apiPost("/api/local/role/enroll", {
+    user_id: me.id,
+    role: "consumer",
+    display_name: displayName,
+    fee_paid: true,
+    payment_ref: "consumer_auto"
+  });
+  return Boolean(enroll?.ok);
+}
+
+async function setPickup(lat, lng, fromGps){
+  if(!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return;
+  state.pickupLat = Number(lat);
+  state.pickupLng = Number(lng);
+  setPickupMarker();
+
+  const now = Date.now();
+  const shouldResolve = !state.pickupText || (now - state.lastReverseAt > 9000) || !fromGps;
+  if(shouldResolve){
+    state.lastReverseAt = now;
+    const name = await reverseGeocode(state.pickupLat, state.pickupLng);
+    if(name) state.pickupText = name;
+  }
+
+  document.getElementById("pickupInput").value = state.pickupText || "";
+  updateLiveAddressLabel(state.pickupText || "detecting...");
+
+  if(map && fromGps && state.phase === "idle"){
+    map.setView([state.pickupLat, state.pickupLng], Math.max(15, map.getZoom()));
+  }
+
+  if(state.dropLat != null && state.dropLng != null){
+    await loadRouteAndFare();
+  }
+
+  if(state.phase === "idle"){
+    await fetchNearbyDrivers();
+  }
+
+  saveState();
+}
+
+async function setDrop(lat, lng, fromMap, explicitName){
+  if(!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return;
+  state.dropLat = Number(lat);
+  state.dropLng = Number(lng);
+  setDropMarker();
+
+  let dropName = String(explicitName || "").trim();
+  if(!dropName){
+    dropName = await reverseGeocode(state.dropLat, state.dropLng);
+  }
+  state.dropText = String(dropName || "").trim().slice(0, 160);
+
+  const dropInput = document.getElementById("dropInput");
+  const whereInput = document.getElementById("whereToInput");
+  dropInput.value = state.dropText;
+  whereInput.value = state.dropText;
+
+  if(map && fromMap){
+    map.fitBounds([[state.pickupLat || state.dropLat, state.pickupLng || state.dropLng], [state.dropLat, state.dropLng]], { padding: [24, 24] });
+  }
+
+  if(state.dropText){
+    saveRecentDestination({ text: state.dropText, lat: state.dropLat, lng: state.dropLng });
+    renderRecentDestinations();
+  }
+
+  saveState();
+}
+
+function updateGpsBadgeLive(accuracy){
+  const badge = document.getElementById("gpsBadge");
+  const accTxt = Number.isFinite(accuracy) ? ` (${Math.round(accuracy)}m)` : "";
+  badge.textContent = `GPS: live${accTxt}`;
+}
+
+function updateGpsBadgeBlocked(){
+  document.getElementById("gpsBadge").textContent = "GPS: blocked";
+  updateLiveAddressLabel("permission required");
+}
+
+async function fetchNearbyDrivers(){
+  if(state.pickupLat == null || state.pickupLng == null) return;
+  const now = Date.now();
+  if(now - state.lastNearbyAt < 2500) return;
+  state.lastNearbyAt = now;
+
+  const res = await apiGet(`/api/local/riders/nearby?lat=${encodeURIComponent(String(state.pickupLat))}&lng=${encodeURIComponent(String(state.pickupLng))}&radius_km=3&limit=20`);
+  if(!res?.ok){
+    setNearbyInfo("Nearby drivers unavailable right now");
+    if(nearbyLayer) nearbyLayer.clearLayers();
+    return;
+  }
+
+  const drivers = Array.isArray(res.drivers) ? res.drivers : [];
+  if(nearbyLayer) nearbyLayer.clearLayers();
+  drivers.forEach((driver) => {
+    const lat = Number(driver?.lat);
+    const lng = Number(driver?.lng);
+    if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const marker = L.circleMarker([lat, lng], {
+      radius: 5,
+      color: "#0f766e",
+      fillColor: "#14b8a6",
+      fillOpacity: 0.85,
+      weight: 1
+    }).addTo(nearbyLayer);
+    const store = String(driver?.store_name || "Nearby driver").trim();
+    const distance = Number(driver?.distance_km);
+    marker.bindTooltip(Number.isFinite(distance) ? `${store} - ${distance.toFixed(2)} km` : store);
+  });
+  setNearbyInfo(`${drivers.length} nearby driver(s) in 3 km`);
+}
+
+function startNearbyLoop(){
+  if(state.nearbyTimer){
+    clearInterval(state.nearbyTimer);
+    state.nearbyTimer = null;
+  }
+  state.nearbyTimer = setInterval(() => {
+    if(state.phase !== "idle") return;
+    fetchNearbyDrivers().catch(() => {});
+  }, NEARBY_INTERVAL_MS);
+}
+
+function stopNearbyLoop(){
+  if(state.nearbyTimer){
+    clearInterval(state.nearbyTimer);
+    state.nearbyTimer = null;
+  }
+}
+
+function startGpsWatch(){
+  if(!navigator.geolocation){
+    document.getElementById("gpsBadge").textContent = "GPS: unsupported";
+    updateLiveAddressLabel("unsupported on this device");
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const lat = Number(pos?.coords?.latitude);
+      const lng = Number(pos?.coords?.longitude);
+      const acc = Number(pos?.coords?.accuracy);
+      if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      state.liveLat = lat;
+      state.liveLng = lng;
+      updateGpsBadgeLive(acc);
+      if(state.phase === "idle" && state.pickupMode !== "manual"){
+        await setPickup(lat, lng, true);
+      }
+    },
+    () => updateGpsBadgeBlocked(),
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+  );
+
+  if(state.watchId != null){
+    navigator.geolocation.clearWatch(state.watchId);
+    state.watchId = null;
+  }
+
+  state.watchId = navigator.geolocation.watchPosition(
+    async (pos) => {
+      const lat = Number(pos?.coords?.latitude);
+      const lng = Number(pos?.coords?.longitude);
+      const acc = Number(pos?.coords?.accuracy);
+      if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      state.liveLat = lat;
+      state.liveLng = lng;
+      updateGpsBadgeLive(acc);
+      if(state.phase === "idle" && state.pickupMode !== "manual"){
+        await setPickup(lat, lng, true);
+      }
+    },
+    () => updateGpsBadgeBlocked(),
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+  );
+}
+
+async function focusCurrentLocation(){
+  if(state.liveLat != null && state.liveLng != null){
+    if(map) map.setView([state.liveLat, state.liveLng], Math.max(15, map.getZoom()));
+    state.pickupMode = "gps";
+    if(state.phase === "idle"){
+      await setPickup(state.liveLat, state.liveLng, true);
+    }
+    return;
+  }
+
+  if(!navigator.geolocation){
+    updateGpsBadgeBlocked();
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const lat = Number(pos?.coords?.latitude);
+      const lng = Number(pos?.coords?.longitude);
+      const acc = Number(pos?.coords?.accuracy);
+      if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      state.liveLat = lat;
+      state.liveLng = lng;
+      updateGpsBadgeLive(acc);
+      if(map) map.setView([lat, lng], 15);
+      state.pickupMode = "gps";
+      await setPickup(lat, lng, true);
+    },
+    () => updateGpsBadgeBlocked(),
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+  );
+}
+
+async function handleDestinationInput(text){
+  const query = String(text || "").trim();
+  if(!query) return;
+  const found = await geocode(query);
+  if(!found){
+    setRideHint("Destination not found. Try area + city.");
+    return;
+  }
+  await setDrop(Number(found.lat), Number(found.lng), true, String(found.name || query));
+  await loadRouteAndFare();
+}
+
+function stopMatchingLoop(){
+  if(state.matchTimer){
+    clearInterval(state.matchTimer);
+    state.matchTimer = null;
+  }
+}
+
+function stopTrackLoop(){
+  if(state.trackTimer){
+    clearInterval(state.trackTimer);
+    state.trackTimer = null;
+  }
+}
+
+function updateDriverGuide(){
+  clearDriverGuide();
+  if(!map || state.driverLat == null || state.driverLng == null) return;
+  const toLat = state.phase === "trip" ? state.dropLat : state.pickupLat;
+  const toLng = state.phase === "trip" ? state.dropLng : state.pickupLng;
+  if(toLat == null || toLng == null) return;
+  driverGuideLine = L.polyline([[state.driverLat, state.driverLng], [toLat, toLng]], {
+    color: "#f97316",
+    weight: 4,
+    dashArray: "8,8"
+  }).addTo(map);
+}
+
+function applyDriverFromTrack(track, status){
+  const profile = track?.driver_profile || {};
+  const loc = track?.driver_location || {};
+  const driverName = String(profile?.name || "Assigned Driver").trim() || "Assigned Driver";
+  const image = String(profile?.image_url || "").trim();
+  const phone = String(track?.driver_phone || "").trim();
+
+  document.getElementById("driverName").textContent = driverName;
+  document.getElementById("driverMeta").textContent = `Vehicle ${String(PRICING[state.vehicle]?.label || state.vehicle).toUpperCase()} | ${status}`;
+  document.getElementById("confirmedStatus").textContent = `Status: ${status}`;
+  document.getElementById("driverPhone").textContent = phone ? `Phone: ${phone}` : "Phone: unavailable";
+  document.getElementById("driverPhoto").src = image || "Images/no-image.jpg";
+
+  const callBtn = document.getElementById("callDriverBtn");
+  callBtn.href = phone ? `tel:${phone}` : "#";
+  callBtn.style.opacity = phone ? "1" : "0.6";
+
+  const dLat = Number(loc?.lat);
+  const dLng = Number(loc?.lng);
+  if(Number.isFinite(dLat) && Number.isFinite(dLng)){
+    state.driverLat = dLat;
+    state.driverLng = dLng;
+    updateDriverMarker();
+    updateDriverGuide();
+
+    if(state.pickupLat != null && state.pickupLng != null){
+      const etaKm = haversineKm(dLat, dLng, state.pickupLat, state.pickupLng);
+      const etaMin = Math.max(1, Math.round((etaKm / 24) * 60));
+      document.getElementById("driverEta").textContent = `ETA ${etaMin} min`;
     }
   }
- }
- document.getElementById("etaTag").textContent=`ETA ${eta}m`;
- return;
 }
-if(status==="on_trip"){
- saveRideState();
- setScreen("inRideCard");
- let remainKm=Math.max(0,state.distanceKm-(state.matchSecond/120));
- let etaMin=Math.max(1,Math.round(state.durationMin-(state.matchSecond/60)));
- if(loc&&Number.isFinite(Number(loc.lat))&&Number.isFinite(Number(loc.lng))){
-  const dLat=Number(loc.lat),dLng=Number(loc.lng);
-  if(!driverMarker){driverMarker=L.circleMarker([dLat,dLng],{radius:7,color:"#dc2626"}).addTo(map);}else{driverMarker.setLatLng([dLat,dLng]);}
-  if(state.dropLat!=null&&state.dropLng!=null){
-    remainKm=haversineKm(dLat,dLng,state.dropLat,state.dropLng);
-    etaMin=Math.max(1,Math.round((remainKm/28)*60));
-    if(map){
-      if(driverGuideLine){map.removeLayer(driverGuideLine);}
-      driverGuideLine=L.polyline([[dLat,dLng],[state.dropLat,state.dropLng]],{color:"#16a34a",weight:4}).addTo(map);
-    }
+
+function updateTripStats(){
+  let remainKm = 0;
+  if(state.driverLat != null && state.driverLng != null && state.dropLat != null && state.dropLng != null){
+    remainKm = haversineKm(state.driverLat, state.driverLng, state.dropLat, state.dropLng);
+  }else{
+    remainKm = Number(state.distanceKm || 0);
   }
- }
- document.getElementById("remainText").textContent=`Distance remaining: ${Math.max(0,remainKm).toFixed(1)} km`;
- document.getElementById("inRideEta").textContent=`ETA: ${Math.max(1,etaMin)} min`;
- return;
-}
-if(status==="completed"){
- stopTracking();
- clearRideState();
- await finishRideBreakdown();
- return;
-}
-if(status==="cancelled"){
- stopTracking();
- clearRideState();
- alert("Ride cancelled.");
- resetRide();
-}
-},3000);}
-function stopTracking(){if(state.trackTimer){clearInterval(state.trackTimer);state.trackTimer=null;}}
-
-async function verifyOtpStart(){const me=await ensureUser();if(!me)return;const otp=String(document.getElementById("otpInput").value||"").trim();if(!otp){alert("Enter OTP");return;}const r=await apiPost("/api/local/rides/otp/verify",{request_id:state.requestId,rider_user_id:me.id,otp});if(!r){alert("OTP verify failed");return;}setScreen("inRideCard");}
-
-async function completeRideRiderSide(){
- const t = state.requestId ? await apiGet(`/api/local/rides/track?request_id=${encodeURIComponent(state.requestId)}`) : null;
- const status = String(t?.ride_request?.status || "").trim().toLowerCase();
- if(status && status !== "completed"){
-   alert("Driver must end ride first. Current status: " + status);
-   return;
- }
- await finishRideBreakdown();
+  const etaMin = Math.max(1, Math.round((remainKm / 24) * 60));
+  document.getElementById("remainText").textContent = `Distance remaining: ${remainKm.toFixed(1)} km`;
+  document.getElementById("tripEtaText").textContent = `ETA: ${etaMin} min`;
 }
 
-async function finishRideBreakdown(){setScreen("completeCard");const tip=Number(document.getElementById("tipInput")?.value||0);
-const tipClean=(Number.isFinite(tip)&&tip>0)?tip:0;
-const summary=state.requestId?await apiGet(`/api/local/rides/summary?request_id=${encodeURIComponent(state.requestId)}&vehicle_type=${encodeURIComponent(state.vehicle)}&tip_inr=${encodeURIComponent(String(tipClean))}`):null;
-if(summary?.summary){
-  const s=summary.summary;
-  state.fare=Number(s.fare_inr||0);
-  document.getElementById("fareOut").textContent=money(s.fare_inr);
-  document.getElementById("driverOut").textContent=money(s.driver_earning_inr);
-  document.getElementById("totalOut").textContent=money(s.total_fare_inr);
-  state.driverWallet+=Number(s.driver_earning_inr||0);
-  state.platformWallet+=Number(s.commission_inr||0);
-  return;
-}
-const total=Math.max(0,state.fare+tipClean);const comm=total*0.10;const drv=total-comm;state.driverWallet+=drv;state.platformWallet+=comm;document.getElementById("fareOut").textContent=money(state.fare);document.getElementById("commissionOut").textContent=money(comm);document.getElementById("driverOut").textContent=money(drv);document.getElementById("totalOut").textContent=money(total);}
-function resetRide(){stopTracking();state.requestId="";state.dropLat=null;state.dropLng=null;state.distanceKm=0;state.durationMin=0;state.fare=0;state.matchSecond=0;state.matchAttempt=1;state.lastRematchAt=0;clearRideState();if(map&&driverGuideLine){map.removeLayer(driverGuideLine);driverGuideLine=null;}if(map&&driverMarker){map.removeLayer(driverMarker);driverMarker=null;}document.getElementById("entryDestination").value="";document.getElementById("dropInput").value="";setScreen("entryCard");}
-async function restoreActiveRideIfAny(){const snap=loadRideState();if(!snap?.requestId)return false;state.requestId=String(snap.requestId||"");state.vehicle=String(snap.vehicle||state.vehicle||"auto");if(Number.isFinite(Number(snap.pickupLat)))state.pickupLat=Number(snap.pickupLat);if(Number.isFinite(Number(snap.pickupLng)))state.pickupLng=Number(snap.pickupLng);if(Number.isFinite(Number(snap.dropLat)))state.dropLat=Number(snap.dropLat);if(Number.isFinite(Number(snap.dropLng)))state.dropLng=Number(snap.dropLng);state.pickupText=String(snap.pickupText||state.pickupText||"");state.dropText=String(snap.dropText||state.dropText||"");document.getElementById("pickupInput").value=state.pickupText||document.getElementById("pickupInput").value;document.getElementById("dropInput").value=state.dropText||document.getElementById("dropInput").value;document.getElementById("pickupText").textContent="Pickup: "+(state.pickupText||"Current location");setVehicle(state.vehicle);updateEntryMapPickup();initMap();drawRoute();const t=await apiGet(`/api/local/rides/track?request_id=${encodeURIComponent(state.requestId)}`);const st=String(t?.ride_request?.status||"").toLowerCase();if(st==="completed"||st==="cancelled"||!st){clearRideState();state.requestId="";return false;}if(st==="accepted"||st==="arriving"){setScreen("confirmedCard");}else if(st==="on_trip"){setScreen("inRideCard");}else{setScreen("matchingCard");}startTracking();return true;}
-
-async function cancelSearching(){
-  const me=await ensureUser();if(!me)return;
-  if(!state.requestId){resetRide();return;}
-  const r=await apiPost("/api/local/rides/cancel",{request_id:state.requestId,user_id:me.id,by:"rider"});
-  if(!r){alert("Cancel failed. Please try again.");return;}
-  stopTracking();
-  alert("Ride request cancelled.");
-  resetRide();
-}
-async function cancelAfterAccept(){
-  const me=await ensureUser();if(!me)return;
-  if(!state.requestId){resetRide();return;}
-  const r=await apiPost("/api/local/rides/cancel",{request_id:state.requestId,user_id:me.id,by:"rider"});
-  if(!r){alert("Cancel failed for current status.");return;}
-  stopTracking();
-  alert("Ride cancelled.");
-  resetRide();
+async function rematchRide(){
+  if(!state.requestId || state.phase !== "matching") return;
+  const me = await ensureMe();
+  if(!me) return;
+  const rematch = await apiPost("/api/local/rides/rematch", {
+    request_id: state.requestId,
+    rider_user_id: me.id,
+    pickup_lat: state.pickupLat,
+    pickup_lng: state.pickupLng
+  });
+  if(rematch?.ok){
+    const offered = Number(rematch?.newly_offered_count || 0);
+    setMatchingText(offered > 0 ? `Offered to ${offered} new driver(s)...` : "Still checking next nearest rider...");
+  }
 }
 
-function setTab(tab){document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.nav===tab));document.getElementById("rideSection").classList.toggle("hide",tab!=="ride");document.getElementById("foodSection").classList.toggle("hide",tab!=="food");document.getElementById("agentSection").classList.toggle("hide",tab!=="agent");document.getElementById("headerTitle").textContent=tab==="ride"?"Book a Ride":(tab==="food"?"Food & Groceries":"Book an Agent");}
+function startMatchingAndTrackLoops(){
+  stopMatchingLoop();
+  stopTrackLoop();
+  state.matchSecond = 0;
+  setMatchingTimerText("Elapsed: 0s");
+  state.matchTimer = setInterval(() => {
+    state.matchSecond += 1;
+    setMatchingTimerText(`Elapsed: ${state.matchSecond}s`);
+    if(state.matchSecond % REMATCH_INTERVAL_SEC === 0){
+      rematchRide().catch(() => {});
+    }
+  }, 1000);
 
-document.querySelectorAll(".vehicle").forEach(v=>v.onclick=()=>setVehicle(v.dataset.vehicle));
-document.getElementById("entryContinueBtn").onclick=startBookingFromEntry;
-document.getElementById("pickupInput").addEventListener("change",async e=>{const g=await geocode(String(e.target.value||"").trim());if(!g)return;state.pickupLat=g.lat;state.pickupLng=g.lng;state.pickupText=g.name;document.getElementById("pickupText").textContent="Pickup: "+state.pickupText;updateEntryMapPickup();drawRoute();updateFare();updateDriverLocation(true).catch(()=>{});});
-document.getElementById("dropInput").addEventListener("change",async e=>{const g=await geocode(String(e.target.value||"").trim());if(!g)return;state.dropLat=g.lat;state.dropLng=g.lng;state.dropText=g.name;drawRoute();updateFare();});
-document.getElementById("confirmBtn").onclick=createRideRequest;
-document.getElementById("cancelSearchBtn").onclick=cancelSearching;
-document.getElementById("otpVerifyBtn").onclick=verifyOtpStart;
-document.getElementById("cancelAfterAcceptBtn").onclick=cancelAfterAccept;
-document.getElementById("completeBtn").onclick=completeRideRiderSide;
-document.getElementById("sosBtn").onclick=()=>alert("SOS sent to emergency contact and support");
-document.getElementById("bookAgainBtn").onclick=resetRide;
-document.querySelectorAll(".nav-item").forEach(n=>n.onclick=()=>{const t=n.dataset.nav;if(t==="home")return location.href="index.html";if(t==="account")return location.href="F-account.html";setTab(t);});
+  state.trackTimer = setInterval(() => {
+    pollRideTrack().catch(() => {});
+  }, TRACK_INTERVAL_MS);
+}
 
-(async function init(){await ensureUser();renderRecent();setVehicle("auto");setTab("ride");setScreen("entryCard");initEntryMap();detectPickup();startLivePickupWatch();const restored=await restoreActiveRideIfAny();if(!restored){setScreen("entryCard");}setInterval(()=>{if(state.pickupLat!=null&&state.pickupLng!=null){updateDriverLocation(true).catch(()=>{});}},15000);})();
+function startTrackLoopOnly(){
+  stopTrackLoop();
+  state.trackTimer = setInterval(() => {
+    pollRideTrack().catch(() => {});
+  }, TRACK_INTERVAL_MS);
+}
+
+async function pollRideTrack(){
+  if(!state.requestId) return;
+  const track = await apiGet(`/api/local/rides/track?request_id=${encodeURIComponent(state.requestId)}`);
+  if(!track?.ok) return;
+  const status = String(track?.ride_request?.status || "").trim().toLowerCase();
+
+  if(status === "searching"){
+    if(state.phase !== "matching"){
+      setPhase("matching");
+      startMatchingAndTrackLoops();
+    }
+    saveState();
+    return;
+  }
+
+  if(status === "accepted" || status === "arriving"){
+    stopMatchingLoop();
+    setPhase("confirmed");
+    applyDriverFromTrack(track, status);
+    saveState();
+    return;
+  }
+
+  if(status === "on_trip"){
+    stopMatchingLoop();
+    setPhase("trip");
+    applyDriverFromTrack(track, status);
+    updateTripStats();
+    saveState();
+    return;
+  }
+
+  if(status === "completed"){
+    stopMatchingLoop();
+    stopTrackLoop();
+    setPhase("done");
+    await renderRideSummary();
+    saveState();
+    return;
+  }
+
+  if(status === "cancelled" || status === "rejected"){
+    stopMatchingLoop();
+    stopTrackLoop();
+    await resetRideFlow(true);
+  }
+}
+
+async function requestRide(){
+  const me = await ensureMe();
+  if(!me) return;
+  if(state.pickupLat == null || state.pickupLng == null){
+    setRideHint("Pickup not detected yet. Tap Current Location.");
+    return;
+  }
+  if(state.dropLat == null || state.dropLng == null){
+    setRideHint("Please set destination first.");
+    return;
+  }
+
+  const roleOk = await ensureConsumerRole();
+  if(!roleOk){
+    setRideHint("Consumer role setup failed. Retry in few seconds.");
+    return;
+  }
+
+  const fareRes = await apiPost("/api/local/rides/fare-estimate", {
+    pickup_lat: state.pickupLat,
+    pickup_lng: state.pickupLng,
+    drop_lat: state.dropLat,
+    drop_lng: state.dropLng,
+    vehicle_type: state.vehicle,
+    distance_km: state.distanceKm,
+    duration_min: state.durationMin
+  });
+  if(fareRes?.ok && fareRes?.estimate?.fare_inr){
+    state.fare = Number(fareRes.estimate.fare_inr);
+  }
+
+  const req = await apiPost("/api/local/rides/request", {
+    user_id: me.id,
+    pickup_lat: state.pickupLat,
+    pickup_lng: state.pickupLng,
+    drop_lat: state.dropLat,
+    drop_lng: state.dropLng,
+    pickup_text: String(state.pickupText || "Pickup").slice(0, 160),
+    drop_text: String(state.dropText || "Drop").slice(0, 160),
+    vehicle_type: state.vehicle,
+    payment_method: document.getElementById("paymentMethod").value,
+    fare_inr: state.fare,
+    distance_km: state.distanceKm,
+    duration_min: state.durationMin
+  });
+
+  if(!req?.ok || !req?.ride_request?.id){
+    const msg = String(req?.message || req?.error || "Ride request failed");
+    setRideHint(msg);
+    return;
+  }
+
+  state.requestId = String(req.ride_request.id || "").trim();
+  setPhase("matching");
+  setMatchingText("Searching in 3km...");
+  startMatchingAndTrackLoops();
+  saveState();
+}
+
+async function verifyOtp(){
+  const me = await ensureMe();
+  if(!me || !state.requestId) return;
+  const otp = String(document.getElementById("otpInput").value || "").trim();
+  if(!otp){
+    document.getElementById("confirmedStatus").textContent = "Status: enter OTP first";
+    return;
+  }
+  const out = await apiPost("/api/local/rides/otp/verify", {
+    request_id: state.requestId,
+    rider_user_id: me.id,
+    otp
+  });
+  if(!out?.ok){
+    document.getElementById("confirmedStatus").textContent = "Status: invalid OTP";
+    return;
+  }
+  setPhase("trip");
+  updateTripStats();
+  saveState();
+}
+
+async function cancelRideAsRider(){
+  const me = await ensureMe();
+  if(!me || !state.requestId) return;
+  await apiPost("/api/local/rides/cancel", {
+    request_id: state.requestId,
+    user_id: me.id,
+    by: "rider"
+  });
+  await resetRideFlow(true);
+}
+
+async function renderRideSummary(){
+  const tipRaw = Number(document.getElementById("tipInput").value || 0);
+  const tip = Number.isFinite(tipRaw) && tipRaw > 0 ? tipRaw : 0;
+  const summary = await apiGet(`/api/local/rides/summary?request_id=${encodeURIComponent(state.requestId)}&vehicle_type=${encodeURIComponent(state.vehicle)}&tip_inr=${encodeURIComponent(String(tip))}`);
+
+  let fare = Number(state.fare || 0);
+  let driver = Number((fare * 0.9).toFixed(2));
+  let total = Number((fare + tip).toFixed(2));
+
+  if(summary?.ok && summary?.summary){
+    fare = Number(summary.summary.fare_inr || fare);
+    driver = Number(summary.summary.driver_earning_inr || driver);
+    total = Number(summary.summary.total_fare_inr || total);
+  }
+
+  document.getElementById("fareOut").textContent = money(fare);
+  document.getElementById("driverOut").textContent = money(driver);
+  document.getElementById("totalOut").textContent = money(total);
+}
+
+async function resetRideFlow(keepPickup){
+  stopMatchingLoop();
+  stopTrackLoop();
+
+  state.requestId = "";
+  state.matchSecond = 0;
+  state.driverLat = null;
+  state.driverLng = null;
+
+  if(routeLine && map){ map.removeLayer(routeLine); routeLine = null; }
+  if(dropMarker && map){ map.removeLayer(dropMarker); dropMarker = null; }
+  if(driverMarker && map){ map.removeLayer(driverMarker); driverMarker = null; }
+  clearDriverGuide();
+
+  state.dropLat = null;
+  state.dropLng = null;
+  state.dropText = "";
+  state.distanceKm = 0;
+  state.durationMin = 0;
+  state.fare = 0;
+
+  document.getElementById("dropInput").value = "";
+  document.getElementById("whereToInput").value = "";
+  document.getElementById("otpInput").value = "";
+
+  if(!keepPickup){
+    state.pickupLat = null;
+    state.pickupLng = null;
+    state.pickupText = "";
+    if(pickupMarker && map){ map.removeLayer(pickupMarker); pickupMarker = null; }
+  }
+
+  setPhase("idle");
+  clearState();
+  document.getElementById("routeMeta").textContent = "Set destination to see fare and ETA.";
+  renderVehicleList();
+
+  if(state.phase === "idle"){
+    await fetchNearbyDrivers();
+  }
+}
+
+function setActiveView(view){
+  const ride = document.getElementById("rideView");
+  const food = document.getElementById("foodView");
+  const agent = document.getElementById("agentView");
+
+  ride.classList.toggle("hide", view !== "ride");
+  food.classList.toggle("hide", view !== "food");
+  agent.classList.toggle("hide", view !== "agent");
+
+  document.querySelectorAll(".nav-item").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-nav") === view);
+  });
+
+  if(view === "ride" && map){
+    setTimeout(() => map.invalidateSize(), 80);
+  }
+}
+
+async function restoreStateIfPresent(){
+  const saved = loadState();
+  if(!saved || !shouldRestoreSavedState(saved)) return;
+
+  state.requestId = String(saved.requestId || "").trim();
+  state.phase = String(saved.phase || "idle").trim() || "idle";
+  state.vehicle = PRICING[saved.vehicle] ? saved.vehicle : "auto";
+  state.pickupLat = Number.isFinite(Number(saved.pickupLat)) ? Number(saved.pickupLat) : null;
+  state.pickupLng = Number.isFinite(Number(saved.pickupLng)) ? Number(saved.pickupLng) : null;
+  state.dropLat = Number.isFinite(Number(saved.dropLat)) ? Number(saved.dropLat) : null;
+  state.dropLng = Number.isFinite(Number(saved.dropLng)) ? Number(saved.dropLng) : null;
+  state.pickupText = String(saved.pickupText || "").trim().slice(0, 160);
+  state.dropText = String(saved.dropText || "").trim().slice(0, 160);
+  state.distanceKm = Number(saved.distanceKm || 0);
+  state.durationMin = Number(saved.durationMin || 0);
+  state.fare = Number(saved.fare || 0);
+
+  document.getElementById("pickupInput").value = state.pickupText;
+  document.getElementById("dropInput").value = state.dropText;
+  document.getElementById("whereToInput").value = state.dropText;
+
+  if(state.pickupLat != null && state.pickupLng != null){
+    setPickupMarker();
+    updateLiveAddressLabel(state.pickupText || "detecting...");
+  }
+  if(state.dropLat != null && state.dropLng != null){
+    setDropMarker();
+    await loadRouteAndFare();
+  }
+
+  if(state.requestId && ["matching", "confirmed", "trip", "done"].includes(state.phase)){
+    setPhase(state.phase === "done" ? "matching" : state.phase);
+    if(state.phase === "matching"){
+      startMatchingAndTrackLoops();
+    }else{
+      stopMatchingLoop();
+      startTrackLoopOnly();
+    }
+    await pollRideTrack();
+  }else{
+    setPhase("idle");
+  }
+}
+
+function bindRideEvents(){
+  document.getElementById("whereSetBtn").onclick = () => {
+    handleDestinationInput(document.getElementById("whereToInput").value).catch(() => {});
+  };
+
+  document.getElementById("whereToInput").addEventListener("keydown", (e) => {
+    if(e.key === "Enter"){
+      e.preventDefault();
+      handleDestinationInput(document.getElementById("whereToInput").value).catch(() => {});
+    }
+  });
+
+  document.getElementById("dropInput").addEventListener("keydown", (e) => {
+    if(e.key === "Enter"){
+      e.preventDefault();
+      handleDestinationInput(document.getElementById("dropInput").value).catch(() => {});
+    }
+  });
+
+  document.getElementById("pickupInput").addEventListener("keydown", (e) => {
+    if(e.key === "Enter"){
+      e.preventDefault();
+      const q = String(document.getElementById("pickupInput").value || "").trim();
+      if(!q) return;
+      geocode(q).then(async (found) => {
+        if(!found) return;
+        state.pickupMode = "manual";
+        state.pickupText = String(found.name || q).slice(0, 160);
+        await setPickup(Number(found.lat), Number(found.lng), false);
+      }).catch(() => {});
+    }
+  });
+
+  document.getElementById("locBtn").onclick = () => {
+    focusCurrentLocation().catch(() => {});
+  };
+
+  document.getElementById("confirmRideBtn").onclick = () => {
+    requestRide().catch(() => {});
+  };
+
+  document.getElementById("cancelMatchingBtn").onclick = () => {
+    cancelRideAsRider().catch(() => {});
+  };
+
+  document.getElementById("cancelAfterAcceptBtn").onclick = () => {
+    cancelRideAsRider().catch(() => {});
+  };
+
+  document.getElementById("verifyOtpBtn").onclick = () => {
+    verifyOtp().catch(() => {});
+  };
+
+  document.getElementById("checkCompleteBtn").onclick = () => {
+    pollRideTrack().catch(() => {});
+  };
+
+  document.getElementById("sosBtn").onclick = () => {
+    location.href = "tel:112";
+  };
+
+  document.getElementById("tipInput").addEventListener("change", () => {
+    if(state.phase === "done"){
+      renderRideSummary().catch(() => {});
+    }
+  });
+
+  document.getElementById("bookAgainBtn").onclick = () => {
+    resetRideFlow(true).catch(() => {});
+  };
+
+  document.querySelectorAll(".nav-item").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const nav = String(btn.getAttribute("data-nav") || "").trim();
+      if(nav === "home"){
+        location.href = "index.html";
+        return;
+      }
+      if(nav === "account"){
+        location.href = "f-account.html";
+        return;
+      }
+      if(nav === "food"){
+        setActiveView("food");
+        return;
+      }
+      if(nav === "agent"){
+        setActiveView("agent");
+        return;
+      }
+      setActiveView("ride");
+    });
+  });
+}
+
+async function bootRidePage(){
+  ensureRideExtrasUI();
+  renderRecentDestinations();
+  initMap();
+  bindRideEvents();
+  renderVehicleList();
+  setPhase("idle");
+  setActiveView("ride");
+
+  await ensureMe();
+  await restoreStateIfPresent();
+
+  startGpsWatch();
+  startNearbyLoop();
+
+  if(state.phase === "idle"){
+    await fetchNearbyDrivers();
+  }
+}
+
+bootRidePage().catch((err) => {
+  console.error("ride_boot_failed", err);
+});
 </script>
 </body>
 </html>
