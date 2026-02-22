@@ -218,6 +218,25 @@ function estimateAutoFare(ride){
   return { fare, earning, dist };
 }
 
+function rideStatusPublic(statusRaw){
+  const s = String(statusRaw || "").trim().toLowerCase();
+  if(s === "arriving") return "arrived";
+  if(s === "on_trip") return "started";
+  return s;
+}
+
+function isRideSearching(statusRaw){
+  return rideStatusPublic(statusRaw) === "searching";
+}
+
+function isRideArrived(statusRaw){
+  return rideStatusPublic(statusRaw) === "arrived";
+}
+
+function isRideStarted(statusRaw){
+  return rideStatusPublic(statusRaw) === "started";
+}
+
 function initMap(){
   if(map) return;
   map = L.map("driverMap", { zoomControl: true }).setView([18.5204, 73.8567], 13);
@@ -294,7 +313,7 @@ async function drawGuideRoute(targetLat, targetLng, mode){
   if(!route) return;
 
   if(guideLine){ map.removeLayer(guideLine); guideLine = null; }
-  const isTrip = String(mode || "").toLowerCase() === "on_trip";
+  const isTrip = isRideStarted(mode);
   guideLine = L.polyline(route.path, {
     color: isTrip ? "#16a34a" : "#dc2626",
     weight: 4,
@@ -347,11 +366,11 @@ async function updateMapForRide(activeRide){
       dropMarker.setLatLng([dLat, dLng]);
     }
   }
-  const status = String(activeRide.status || "").toLowerCase();
+  const status = rideStatusPublic(activeRide.status);
   if(state.lat != null && state.lng != null){
-    if(status === "accepted" || status === "arriving"){
+    if(status === "accepted" || status === "arrived"){
       await drawGuideRoute(pLat, pLng, status);
-    }else if(status === "on_trip"){
+    }else if(status === "started"){
       await drawGuideRoute(dLat, dLng, status);
     }else{
       if(guideLine){ map.removeLayer(guideLine); guideLine = null; }
@@ -513,7 +532,7 @@ function ensureQueueTimer(ride){
 function renderQueue(rides){
   const queue = document.getElementById("queueList");
   queue.innerHTML = "";
-  const waiting = rides.filter((r) => String(r?.status || "") === "searching");
+  const waiting = rides.filter((r) => isRideSearching(r?.status));
   document.getElementById("queueBadge").textContent = waiting.length + " waiting";
   if(!waiting.length){
     queue.innerHTML = '<div class="muted" style="margin-top:8px">No pending requests</div>';
@@ -551,8 +570,8 @@ function getActiveRide(rides){
     if(found) return found;
   }
   return all.find((r) => {
-    const s = String(r?.status || "").toLowerCase();
-    return s === "accepted" || s === "arriving" || s === "on_trip";
+    const s = rideStatusPublic(r?.status);
+    return s === "accepted" || s === "arrived" || s === "started";
   }) || null;
 }
 
@@ -575,7 +594,7 @@ function renderActiveRide(rides){
   state.activeRideId = String(active.id || "");
   saveDriverState();
 
-  const s = String(active.status || "").toLowerCase();
+  const s = rideStatusPublic(active.status);
   badge.textContent = s || "active";
   const estimate = estimateAutoFare(active);
   const toPickup = (state.lat != null && state.lng != null)
@@ -609,12 +628,12 @@ function renderActiveRide(rides){
     actions.appendChild(b);
   };
 
-  if(s === "accepted") addAction("Start Arriving", "arriving", "brand");
-  if(s === "accepted" || s === "arriving") addAction("Start Ride", "on_trip", "ok");
-  if(s === "on_trip") addAction("End Ride", "completed", "ok");
-  if(s === "accepted" || s === "arriving" || s === "on_trip") addAction("Cancel", "cancelled", "bad");
-  if(s === "accepted" || s === "arriving") addNav("Navigate Pickup", active.pickup_lat, active.pickup_lng);
-  if(s === "on_trip") addNav("Navigate Drop", active.drop_lat, active.drop_lng);
+  if(s === "accepted") addAction("Mark Arrived", "arrived", "brand");
+  if(s === "accepted" || s === "arrived") addAction("Start Ride", "started", "ok");
+  if(s === "started") addAction("End Ride", "completed", "ok");
+  if(s === "accepted" || s === "arrived" || s === "started") addAction("Cancel", "cancelled", "bad");
+  if(s === "accepted" || s === "arrived") addNav("Navigate Pickup", active.pickup_lat, active.pickup_lng);
+  if(s === "started") addNav("Navigate Drop", active.drop_lat, active.drop_lng);
 
   updateMapForRide(active).catch(() => {});
 }

@@ -218,6 +218,7 @@ const state = {
   gpsLastFixAt: 0,
   gpsFailCount: 0,
   gpsRefreshTimer: null,
+  driverUserId: "",
   driverLat: null,
   driverLng: null
 };
@@ -232,6 +233,8 @@ let driverGuideLine = null;
 let suggestPopup = null;
 let suggestSeq = 0;
 let suggestDebounceTimer = null;
+let rideRealtimeChannel = null;
+let driverLocationRealtimeChannel = null;
 
 function money(v){ return "INR " + Number(v || 0).toFixed(2); }
 function haversineKm(lat1, lon1, lat2, lon2){
@@ -241,6 +244,33 @@ function haversineKm(lat1, lon1, lat2, lon2){
   const dLon = toRad(lon2 - lon1);
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
   return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
+function rideStatusPublic(statusRaw){
+  const s = String(statusRaw || "").trim().toLowerCase();
+  if(s === "arriving") return "arrived";
+  if(s === "on_trip") return "started";
+  return s;
+}
+
+function rideStatusLabel(statusRaw){
+  const s = rideStatusPublic(statusRaw);
+  if(!s) return "unknown";
+  if(s === "searching") return "searching";
+  if(s === "accepted") return "accepted";
+  if(s === "arrived") return "arrived at pickup";
+  if(s === "started") return "ride started";
+  if(s === "completed") return "completed";
+  if(s === "cancelled") return "cancelled";
+  return s;
+}
+
+function isRideArrived(statusRaw){
+  return rideStatusPublic(statusRaw) === "arrived";
+}
+
+function isRideStarted(statusRaw){
+  return rideStatusPublic(statusRaw) === "started";
 }
 
 function apiBases(){
@@ -1181,31 +1211,127 @@ function stopTrackLoop(){
   }
 }
 
+async function stopRideRealtime(){
+  if(!rideRealtimeChannel) return;
+  try{
+    await supa.removeChannel(rideRealtimeChannel);
+  }catch(_){ }
+  rideRealtimeChannel = null;
+}
+
+async function stopDriverLocationRealtime(){
+  if(!driverLocationRealtimeChannel) return;
+  try{
+    await supa.removeChannel(driverLocationRealtimeChannel);
+  }catch(_){ }
+  driverLocationRealtimeChannel = null;
+}
+
+async function startDriverLocationRealtime(driverUserId){
+  const id = String(driverUserId || "").trim();
+  if(!id) return;
+  if(state.driverUserId === id && driverLocationRealtimeChannel) return;
+  await stopDriverLocationRealtime();
+  state.driverUserId = id;
+
+  const channelName = `ride-driver-loc-${id}-${Date.now()}`;
+  driverLocationRealtimeChannel = supa.channel(channelName);
+  driverLocationRealtimeChannel
+    .on("postgres_changes", {
+      event: "*",
+      schema: "public",
+      table: "local_rider_locations",
+      filter: `user_id=eq.${id}`
+    }, (payload) => {
+      const row = payload?.new || payload?.record || {};
+      const lat = Number(row?.lat);
+      const lng = Number(row?.lng);
+      if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      state.driverLat = lat;
+      state.driverLng = lng;
+      updateDriverMarker();
+      updateDriverGuide();
+      if(state.pickupLat != null && state.pickupLng != null){
+        const etaKm = haversineKm(lat, lng, state.pickupLat, state.pickupLng);
+        const etaMin = Math.max(1, Math.round((etaKm / 24) * 60));
+        document.getElementById("driverEta").textContent = `ETA ${etaMin} min`;
+      }
+      if(state.phase === "trip"){
+        updateTripStats();
+      }
+    })
+    .subscribe((status) => {
+      if(status === "CHANNEL_ERROR"){
+        stopDriverLocationRealtime().catch(() => {});
+      }
+    });
+}
+
+async function startRideRealtime(requestId){
+  const reqId = String(requestId || "").trim();
+  if(!reqId) return;
+  if(rideRealtimeChannel && state.requestId === reqId) return;
+  await stopRideRealtime();
+
+  const channelName = `ride-status-${reqId}-${Date.now()}`;
+  rideRealtimeChannel = supa.channel(channelName);
+  rideRealtimeChannel
+    .on("postgres_changes", {
+      event: "*",
+      schema: "public",
+      table: "local_ride_requests",
+      filter: `id=eq.${reqId}`
+    }, (payload) => {
+      const row = payload?.new || payload?.record || {};
+      const status = rideStatusPublic(row?.status);
+      const driverUserId = String(row?.driver_user_id || "").trim();
+      if(driverUserId){
+        startDriverLocationRealtime(driverUserId).catch(() => {});
+      }
+      if(status === "cancelled" || status === "completed"){
+        stopDriverLocationRealtime().catch(() => {});
+      }
+      pollRideTrack().catch(() => {});
+    })
+    .subscribe((status) => {
+      if(status === "CHANNEL_ERROR"){
+        stopRideRealtime().catch(() => {});
+      }
+    });
+}
+
 function updateDriverGuide(){
   clearDriverGuide();
   if(!map || state.driverLat == null || state.driverLng == null) return;
-  const toLat = state.phase === "trip" ? state.dropLat : state.pickupLat;
-  const toLng = state.phase === "trip" ? state.dropLng : state.pickupLng;
+  const onTrip = state.phase === "trip";
+  const toLat = onTrip ? state.dropLat : state.pickupLat;
+  const toLng = onTrip ? state.dropLng : state.pickupLng;
   if(toLat == null || toLng == null) return;
   driverGuideLine = L.polyline([[state.driverLat, state.driverLng], [toLat, toLng]], {
-    color: "#f97316",
+    color: onTrip ? "#16a34a" : "#f97316",
     weight: 4,
-    dashArray: "8,8"
+    dashArray: onTrip ? undefined : "8,8"
   }).addTo(map);
 }
 
 function applyDriverFromTrack(track, status){
   const profile = track?.driver_profile || {};
   const loc = track?.driver_location || {};
+  const ride = track?.ride_request || {};
+  const publicStatus = rideStatusPublic(status);
+  const driverUserId = String(ride?.driver_user_id || "").trim();
   const driverName = String(profile?.name || "Assigned Driver").trim() || "Assigned Driver";
   const image = String(profile?.image_url || "").trim();
   const phone = String(track?.driver_phone || "").trim();
 
   document.getElementById("driverName").textContent = driverName;
-  document.getElementById("driverMeta").textContent = `Vehicle ${String(PRICING[state.vehicle]?.label || state.vehicle).toUpperCase()} | ${status}`;
-  document.getElementById("confirmedStatus").textContent = `Status: ${status}`;
+  document.getElementById("driverMeta").textContent = `Vehicle ${String(PRICING[state.vehicle]?.label || state.vehicle).toUpperCase()} | ${rideStatusLabel(publicStatus)}`;
+  document.getElementById("confirmedStatus").textContent = `Status: ${rideStatusLabel(publicStatus)}`;
   document.getElementById("driverPhone").textContent = phone ? `Phone: ${phone}` : "Phone: unavailable";
   document.getElementById("driverPhoto").src = image || "Images/no-image.jpg";
+  if(driverUserId){
+    startDriverLocationRealtime(driverUserId).catch(() => {});
+  }
 
   const callBtn = document.getElementById("callDriverBtn");
   callBtn.href = phone ? `tel:${phone}` : "#";
@@ -1284,7 +1410,13 @@ async function pollRideTrack(){
   if(!state.requestId) return;
   const track = await apiGet(`/api/local/rides/track?request_id=${encodeURIComponent(state.requestId)}`);
   if(!track?.ok) return;
-  const status = String(track?.ride_request?.status || "").trim().toLowerCase();
+  const rideRow = track?.ride_request || {};
+  const status = rideStatusPublic(rideRow?.status);
+  const driverUserId = String(rideRow?.driver_user_id || "").trim();
+  if(driverUserId){
+    state.driverUserId = driverUserId;
+    startDriverLocationRealtime(driverUserId).catch(() => {});
+  }
 
   if(status === "searching"){
     if(state.phase !== "matching"){
@@ -1295,7 +1427,7 @@ async function pollRideTrack(){
     return;
   }
 
-  if(status === "accepted" || status === "arriving"){
+  if(status === "accepted" || isRideArrived(status)){
     stopMatchingLoop();
     setPhase("confirmed");
     applyDriverFromTrack(track, status);
@@ -1303,7 +1435,7 @@ async function pollRideTrack(){
     return;
   }
 
-  if(status === "on_trip"){
+  if(isRideStarted(status)){
     stopMatchingLoop();
     setPhase("trip");
     applyDriverFromTrack(track, status);
@@ -1315,6 +1447,8 @@ async function pollRideTrack(){
   if(status === "completed"){
     stopMatchingLoop();
     stopTrackLoop();
+    await stopDriverLocationRealtime();
+    await stopRideRealtime();
     setPhase("done");
     await renderRideSummary();
     saveState();
@@ -1324,6 +1458,8 @@ async function pollRideTrack(){
   if(status === "cancelled" || status === "rejected"){
     stopMatchingLoop();
     stopTrackLoop();
+    await stopDriverLocationRealtime();
+    await stopRideRealtime();
     await resetRideFlow(true);
   }
 }
@@ -1385,6 +1521,7 @@ async function requestRide(){
   state.requestId = String(req.ride_request.id || "").trim();
   setPhase("matching");
   setMatchingText("Searching in 3km...");
+  startRideRealtime(state.requestId).catch(() => {});
   startMatchingAndTrackLoops();
   saveState();
 }
@@ -1445,9 +1582,12 @@ async function renderRideSummary(){
 async function resetRideFlow(keepPickup){
   stopMatchingLoop();
   stopTrackLoop();
+  await stopRideRealtime();
+  await stopDriverLocationRealtime();
 
   state.requestId = "";
   state.matchSecond = 0;
+  state.driverUserId = "";
   state.driverLat = null;
   state.driverLng = null;
 
@@ -1542,6 +1682,7 @@ async function restoreStateIfPresent(){
 
   if(state.requestId && ["matching", "confirmed", "trip", "done"].includes(state.phase)){
     setPhase(state.phase === "done" ? "matching" : state.phase);
+    startRideRealtime(state.requestId).catch(() => {});
     if(state.phase === "matching"){
       startMatchingAndTrackLoops();
     }else{
@@ -1728,12 +1869,18 @@ async function bootRidePage(){
   window.addEventListener("beforeunload", () => {
     stopGpsWatch();
     stopNearbyLoop();
+    stopRideRealtime().catch(() => {});
+    stopDriverLocationRealtime().catch(() => {});
     hideSuggestPopup();
   });
 
   document.addEventListener("visibilitychange", () => {
     if(document.visibilityState === "visible"){
       startGpsWatch();
+      if(state.requestId){
+        startRideRealtime(state.requestId).catch(() => {});
+        pollRideTrack().catch(() => {});
+      }
       if(state.phase === "idle"){
         fetchNearbyDrivers().catch(() => {});
       }

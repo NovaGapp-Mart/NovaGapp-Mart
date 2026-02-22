@@ -6095,7 +6095,7 @@ app.post("/api/local/rides/request", async (req, res) => {
     });
     return res.json({
       ok:true,
-      ride_request: created,
+      ride_request: mapRideStatusRowPublic(created),
       offered_driver_count: offeredDrivers.length,
       search_radius_km: RIDE_MATCH_RADIUS_KM
     });
@@ -6108,6 +6108,37 @@ const RIDE_MATCH_RADIUS_KM = 3;
 const RIDE_INITIAL_OFFER_COUNT = 5;
 const RIDE_REMATCH_BATCH_COUNT = 1;
 const RIDE_DRIVER_LOCATION_MAX_AGE_MS = 2 * 60 * 1000;
+const RIDE_STATUS_ALIAS_TO_INTERNAL = Object.freeze({
+  arrived: "arriving",
+  started: "on_trip"
+});
+const RIDE_STATUS_INTERNAL_TO_PUBLIC = Object.freeze({
+  arriving: "arrived",
+  on_trip: "started"
+});
+
+function rideStatusToInternal(statusRaw){
+  const clean = String(statusRaw || "").trim().toLowerCase();
+  if(!clean) return "";
+  return RIDE_STATUS_ALIAS_TO_INTERNAL[clean] || clean;
+}
+
+function rideStatusToPublic(statusRaw){
+  const internal = rideStatusToInternal(statusRaw);
+  if(!internal) return "";
+  return RIDE_STATUS_INTERNAL_TO_PUBLIC[internal] || internal;
+}
+
+function mapRideStatusRowPublic(row){
+  if(!row || typeof row !== "object") return row;
+  const mappedStatus = rideStatusToPublic(row.status);
+  if(!mappedStatus) return row;
+  return { ...row, status: mappedStatus };
+}
+
+function mapRideStatusRowsPublic(rows){
+  return (Array.isArray(rows) ? rows : []).map(mapRideStatusRowPublic);
+}
 
 function isFreshRideDriverLocation(updatedAtRaw){
   const updatedAt = Date.parse(String(updatedAtRaw || ""));
@@ -6226,9 +6257,9 @@ app.post("/api/local/rides/rematch", async (req, res) => {
     if(sanitizeUserId(ride.rider_user_id) !== riderUserId){
       return res.status(403).json({ ok:false, error:"rematch_forbidden" });
     }
-    const currentStatus = String(ride.status || "").trim().toLowerCase();
+    const currentStatus = rideStatusToInternal(ride.status);
     if(currentStatus !== "searching"){
-      return res.json({ ok:true, skipped:true, reason:"ride_not_searching", status: currentStatus });
+      return res.json({ ok:true, skipped:true, reason:"ride_not_searching", status: rideStatusToPublic(currentStatus) });
     }
     const pickupLat = pickupLatRaw !== null ? pickupLatRaw : sanitizeGeoNumber(ride.pickup_lat);
     const pickupLng = pickupLngRaw !== null ? pickupLngRaw : sanitizeGeoNumber(ride.pickup_lng);
@@ -6270,7 +6301,7 @@ app.post("/api/local/rides/rematch", async (req, res) => {
     });
     return res.json({
       ok:true,
-      ride_request: Array.isArray(patched) ? patched[0] || null : null,
+      ride_request: mapRideStatusRowPublic(Array.isArray(patched) ? patched[0] || null : null),
       offered_driver_count: merged.length,
       newly_offered_count: nextBatch.length,
       search_radius_km: RIDE_MATCH_RADIUS_KM
@@ -6406,7 +6437,7 @@ app.get("/api/local/rides/summary", async (req, res) => {
     const driver = total - commission;
     return res.json({
       ok:true,
-      ride_status: String(ride.status || ""),
+      ride_status: rideStatusToPublic(ride.status),
       summary: {
         ...base,
         tip_inr: Number(tip.toFixed(2)),
@@ -6442,7 +6473,7 @@ app.post("/api/local/rides/accept", async (req, res) => {
     if(!request){
       return res.status(404).json({ ok:false, error:"ride_request_not_found" });
     }
-    if(String(request.status || "") !== "searching"){
+    if(rideStatusToInternal(request.status) !== "searching"){
       return res.status(409).json({ ok:false, error:"ride_request_not_searching" });
     }
     const offered = Array.isArray(request.offered_driver_ids) ? request.offered_driver_ids.map(sanitizeUserId) : [];
@@ -6477,7 +6508,7 @@ app.post("/api/local/rides/accept", async (req, res) => {
       body: `Your ride is confirmed. Start OTP: ${otp}`,
       data: { type:"ride_accepted", request_id: requestId, start_otp: otp }
     }).catch(() => {});
-    return res.json({ ok:true, ride_request: acceptedRide });
+    return res.json({ ok:true, ride_request: mapRideStatusRowPublic(acceptedRide) });
   }catch(err){
     return res.status(500).json({ ok:false, error:"ride_accept_failed", message:String(err?.message || "") });
   }
@@ -6505,7 +6536,7 @@ app.post("/api/local/rides/reject", async (req, res) => {
     if(!ride){
       return res.status(404).json({ ok:false, error:"ride_request_not_found" });
     }
-    if(String(ride.status || "").trim().toLowerCase() !== "searching"){
+    if(rideStatusToInternal(ride.status) !== "searching"){
       return res.json({ ok:true, skipped:true, reason:"ride_not_searching" });
     }
     const offered = Array.isArray(ride.offered_driver_ids) ? ride.offered_driver_ids.map(sanitizeUserId).filter(Boolean) : [];
@@ -6521,7 +6552,7 @@ app.post("/api/local/rides/reject", async (req, res) => {
     });
     return res.json({
       ok:true,
-      ride_request: Array.isArray(patched) ? patched[0] || null : null
+      ride_request: mapRideStatusRowPublic(Array.isArray(patched) ? patched[0] || null : null)
     });
   }catch(err){
     return res.status(500).json({ ok:false, error:"ride_reject_failed", message:String(err?.message || "") });
@@ -6619,7 +6650,7 @@ app.post("/api/local/rides/otp/verify", async (req, res) => {
     if(sanitizeUserId(ride.rider_user_id) !== riderUserId){
       return res.status(403).json({ ok:false, error:"otp_verify_forbidden" });
     }
-    if(String(ride.status || "") !== "accepted"){
+    if(rideStatusToInternal(ride.status) !== "accepted"){
       return res.status(409).json({ ok:false, error:"otp_verify_invalid_status" });
     }
     if(String(ride.ride_start_otp || "") !== otp){
@@ -6630,12 +6661,12 @@ app.post("/api/local/rides/otp/verify", async (req, res) => {
       body: {
         otp_verified: true,
         otp_verified_at: new Date().toISOString(),
-        status: "on_trip",
+        status: rideStatusToInternal("started"),
         updated_at: new Date().toISOString()
       },
       prefer: "return=representation"
     });
-    return res.json({ ok:true, ride_request: Array.isArray(patched) ? patched[0] || null : null });
+    return res.json({ ok:true, ride_request: mapRideStatusRowPublic(Array.isArray(patched) ? patched[0] || null : null) });
   }catch(err){
     return res.status(500).json({ ok:false, error:"ride_otp_verify_failed", message:String(err?.message || "") });
   }
@@ -6893,14 +6924,14 @@ app.get("/api/local/rides/for-rider", async (req, res) => {
       }
     });
     const filtered = (Array.isArray(rows) ? rows : []).filter((row) => {
-      const status = String(row?.status || "");
+      const status = rideStatusToInternal(row?.status);
       const driver = sanitizeUserId(row?.driver_user_id);
       if(driver && driver === userId) return true;
       if(status !== "searching") return false;
       const offered = Array.isArray(row?.offered_driver_ids) ? row.offered_driver_ids.map(sanitizeUserId) : [];
       return offered.includes(userId);
     });
-    return res.json({ ok:true, rides: filtered });
+    return res.json({ ok:true, rides: mapRideStatusRowsPublic(filtered) });
   }catch(err){
     return res.json({ ok:true, rides: [], warning: "rider_feed_temporarily_unavailable" });
   }
@@ -6909,7 +6940,8 @@ app.get("/api/local/rides/for-rider", async (req, res) => {
 app.post("/api/local/rides/status", async (req, res) => {
   const requestId = String(req.body?.request_id || "").trim();
   const userId = sanitizeUserId(req.body?.user_id);
-  const status = String(req.body?.status || "").trim().toLowerCase();
+  const statusRaw = String(req.body?.status || "").trim().toLowerCase();
+  const status = rideStatusToInternal(statusRaw);
   const allowed = new Set(["arriving","on_trip","completed","cancelled"]);
   if(!requestId || !userId || !allowed.has(status)){
     return res.status(400).json({ ok:false, error:"invalid_ride_status_payload" });
@@ -6925,6 +6957,7 @@ app.post("/api/local/rides/status", async (req, res) => {
     if(sanitizeUserId(ride.driver_user_id) !== userId){
       return res.status(403).json({ ok:false, error:"ride_status_forbidden" });
     }
+    const current = rideStatusToInternal(ride.status);
     const flow = {
       accepted: ["arriving", "on_trip", "cancelled"],
       arriving: ["on_trip", "cancelled"],
@@ -6932,7 +6965,7 @@ app.post("/api/local/rides/status", async (req, res) => {
       completed: [],
       cancelled: []
     };
-    if(!canTransitionStatus(ride.status, status, flow)){
+    if(!canTransitionStatus(current, status, flow)){
       return res.status(409).json({ ok:false, error:"invalid_ride_status_transition" });
     }
     const patched = await localServicesSupabaseRequest("local_ride_requests", "PATCH", {
@@ -6940,7 +6973,7 @@ app.post("/api/local/rides/status", async (req, res) => {
       body: { status, updated_at: new Date().toISOString() },
       prefer: "return=representation"
     });
-    return res.json({ ok:true, ride_request: Array.isArray(patched) ? patched[0] || null : null });
+    return res.json({ ok:true, ride_request: mapRideStatusRowPublic(Array.isArray(patched) ? patched[0] || null : null) });
   }catch(err){
     return res.status(500).json({ ok:false, error:"local_ride_status_failed", message:String(err?.message || "") });
   }
@@ -6967,7 +7000,7 @@ app.post("/api/local/rides/cancel", async (req, res) => {
     }
     const riderId = sanitizeUserId(ride.rider_user_id);
     const driverId = sanitizeUserId(ride.driver_user_id);
-    const current = String(ride.status || "").trim().toLowerCase();
+    const current = rideStatusToInternal(ride.status);
     const allowedCurrent = new Set(["searching","accepted","arriving","on_trip"]);
     if(!allowedCurrent.has(current)){
       return res.status(409).json({ ok:false, error:"ride_not_cancellable" });
@@ -6992,7 +7025,7 @@ app.post("/api/local/rides/cancel", async (req, res) => {
       },
       prefer: "return=representation"
     });
-    return res.json({ ok:true, ride_request: Array.isArray(patched) ? patched[0] || null : null });
+    return res.json({ ok:true, ride_request: mapRideStatusRowPublic(Array.isArray(patched) ? patched[0] || null : null) });
   }catch(err){
     return res.status(500).json({ ok:false, error:"local_ride_cancel_failed", message:String(err?.message || "") });
   }
@@ -7528,7 +7561,7 @@ app.get("/api/local/rides/track", async (req, res) => {
     }
     return res.json({
       ok:true,
-      ride_request: request,
+      ride_request: mapRideStatusRowPublic(request),
       driver_location: driverLocation,
       driver_phone: driverPhone,
       driver_profile: driverProfile
