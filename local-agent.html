@@ -1,9 +1,68 @@
-<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Local Agent</title><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="global.js"></script><script src="public-config.js"></script><style>body{font-family:Arial;background:#f5f5f5;margin:0}.top{background:#111;color:#fff;padding:12px;font-weight:700}.box{background:#fff;margin:10px;border-radius:12px;padding:12px}.row{border:1px solid #eee;border-radius:10px;padding:10px;margin:8px 0}.btn{border:none;border-radius:8px;padding:8px 10px;background:#ff6a00;color:#fff;cursor:pointer;margin-right:8px}</style></head><body><div class="top">Agent Booking Panel</div><div class="box"><button class="btn" onclick="loadBookings()">Refresh</button><div id="list"></div></div><script>
-const supa=window.supa||window.novaCreateSupabaseClient();let me=null;function bases(){const o=[];const p=v=>{v=String(v||'').trim().replace(/\/+$/g,'');if(v&&/^https?:\/\//i.test(v)&&!o.includes(v))o.push(v)};p(window.CONTEST_API_BASE||window.API_BASE||'');try{p(localStorage.getItem('contest_api_base'));p(localStorage.getItem('api_base'))}catch(_){};if(/^https?:\/\//i.test(location.origin||''))p(location.origin);p('https://novagapp-mart.onrender.com');return o}
-async function meUser(){if(me)return me;const {data}=await supa.auth.getSession();me=data?.session?.user||null;if(!me){location.href='login.html';return null;}return me;}
-async function loadBookings(){const u=await meUser(); if(!u)return; for(const b of bases()){try{const r=await fetch(`${b}/api/local/agent/bookings?user_id=${encodeURIComponent(u.id)}&side=agent`);const j=await r.json().catch(()=>null);if(r.ok&&j?.ok){render(j.bookings||[]);return}}catch(_){}}}
-function render(rows){const box=document.getElementById('list');box.innerHTML=''; if(!rows.length){box.textContent='No bookings';return;} rows.forEach(r=>{const d=document.createElement('div');d.className='row';d.innerHTML=`<b>Booking</b><div>${r.service_address||''}</div><div>Status: ${r.status||''}</div><button class='btn' onclick="setStatus('${r.id}','accepted')">Accept</button><button class='btn' onclick="setStatus('${r.id}','on_the_way')">On the way</button><button class='btn' onclick="setStatus('${r.id}','completed')">Complete</button>`;box.appendChild(d)})}
-async function setStatus(id,status){const u=await meUser();if(!u)return;for(const b of bases()){try{const r=await fetch(b+'/api/local/agent/bookings/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({booking_id:id,user_id:u.id,status})});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok){loadBookings();return}}catch(_){}}alert('update failed')}
-meUser().then(loadBookings);
-</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="global.js"></script>
+<script src="public-config.js"></script>
+<style>
+body{margin:0;font-family:Arial;background:#f6f8fc;color:#0f172a}
+.top{position:sticky;top:0;background:#111;color:#fff;padding:12px;display:flex;justify-content:space-between}
+.w{padding:10px 10px 72px}
+.c{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px;margin-bottom:10px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.r3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}
+.in,select{width:100%;padding:9px;border:1px solid #d3dae8;border-radius:8px}
+.b{border:none;border-radius:8px;padding:9px 10px;background:#ff6a00;color:#fff;font-weight:700;cursor:pointer}
+.bg{background:#334155}.bo{background:#0f9f50}.bb{background:#c62828}
+.mut{font-size:12px;color:#64748b}
+.list{border:1px solid #e2e8f0;border-radius:10px;padding:10px;margin-top:8px}
+.kpi{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.k{border:1px solid #e2e8f0;border-radius:10px;padding:10px}
+@media(max-width:900px){.row,.r3,.kpi{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="top"><b>Agent Dashboard</b><div><button class="b bg" onclick="location.href='F-account.html'">F-Account</button> <button class="b" onclick="location.href='food-auto.html'">Services</button></div></div>
+<div class="w">
+<div class="c"><b>Agent Profile</b><div id="u" class="mut" style="margin-top:6px">Checking login...</div>
+  <div class="row"><select id="cat"><option value="electrician">Electrician</option><option value="plumber">Plumber</option><option value="ac_repair">AC Repair</option><option value="carpenter">Carpenter</option><option value="mechanic">Mechanic</option><option value="painter">Painter</option><option value="cleaning">Cleaning</option></select><input id="title" class="in" placeholder="Profile title"></div>
+  <div class="row"><input id="ph" class="in" placeholder="Phone"><input id="img" class="in" placeholder="Image URL"></div>
+  <div class="r3"><input id="exp" class="in" type="number" placeholder="Experience"><input id="visit" class="in" type="number" placeholder="Visit charge"><input id="hour" class="in" type="number" placeholder="Per hour"></div>
+  <div class="row"><input id="rad" class="in" type="number" placeholder="Service radius km"><select id="av"><option value="true">Available</option><option value="false">Offline</option></select></div>
+  <div class="row"><button id="gps" class="b">Use GPS</button><button id="save" class="b">Save Profile</button></div>
+  <div class="row"><input id="lat" class="in" placeholder="Latitude"><input id="lng" class="in" placeholder="Longitude"></div>
+  <div id="st" class="mut" style="margin-top:8px">Not saved</div>
+</div>
+
+<div class="c"><b>Bookings</b><div class="row"><button id="bref" class="b bg">Refresh Bookings</button><div id="bc" class="mut" style="align-self:center">-</div></div><div id="bookings"></div></div>
+
+<div class="c"><b>Earnings</b>
+  <div class="kpi"><div class="k"><div class="mut">Wallet</div><b id="wb">INR 0.00</b></div><div class="k"><div class="mut">Completed</div><b id="comp">0</b></div><div class="k"><div class="mut">Gross</div><b id="gross">INR 0.00</b></div></div>
+  <button id="eref" class="b bg" style="margin-top:8px;width:100%">Refresh Wallet</button>
+  <div id="tx" style="margin-top:8px"></div>
+</div>
+
+<script>
+const supa=window.supa||window.novaCreateSupabaseClient();
+const S={me:null,agent:null};
+const q=id=>document.getElementById(id);
+function bases(){const o=[];const p=v=>{v=String(v||"").trim().replace(/\/+$/g,"");if(v&&/^https?:\/\//i.test(v)&&!o.includes(v))o.push(v)};p(window.CONTEST_API_BASE||window.API_BASE||"");try{p(localStorage.getItem("contest_api_base"));p(localStorage.getItem("api_base"))}catch(_){ }if(/^https?:\/\//i.test(location.origin||""))p(location.origin);p("https://novagapp-mart.onrender.com");return o}
+async function g(path){for(const b of bases()){try{const r=await fetch(b+path,{cache:"no-store"});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok)return j}catch(_){ }}return null}
+async function p(path,body){for(const b of bases()){try{const r=await fetch(b+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok)return j;if(j?.error)return {ok:false,error:String(j.error||"api_error")}}catch(_){ }}return {ok:false,error:"api_unreachable"}}
+function money(v){return "INR "+Number(v||0).toFixed(2)}
+async function me(){const {data}=await supa.auth.getSession();S.me=data?.session?.user||null;if(!S.me){location.href="login.html";return null}q("u").textContent=`${S.me.email||"Logged in"} (${S.me.id})`;return S.me}
+async function gps(){if(!navigator.geolocation){q("st").textContent="GPS unsupported";return}q("st").textContent="Detecting GPS...";navigator.geolocation.getCurrentPosition((pos)=>{q("lat").value=String(Number(pos?.coords?.latitude||0));q("lng").value=String(Number(pos?.coords?.longitude||0));q("st").textContent=`GPS locked (${Math.round(Number(pos?.coords?.accuracy||0))}m)`},(e)=>{q("st").textContent=`GPS error: ${String(e?.message||"denied")}`},{enableHighAccuracy:true,timeout:18000,maximumAge:0})}
+async function loadAgent(){if(!S.me)return;const out=await g(`/api/local/agents/for-owner?user_id=${encodeURIComponent(S.me.id)}`);const rows=Array.isArray(out?.agents)?out.agents:[];const active=rows.find(a=>String(a.service_category||"")===String(q("cat").value||""))||rows[0]||null;S.agent=active;if(!active){q("st").textContent="No profile yet";return}q("cat").value=String(active.service_category||"electrician");q("title").value=String(active.title||"");q("ph").value=String(active.phone||"");q("img").value=String(active.image_url||"");q("exp").value=String(Number(active.experience_years||0));q("visit").value=String(Number(active.price_per_visit_inr||0));q("hour").value=String(Number(active.per_hour_rate_inr||0));q("rad").value=String(Number(active.service_radius_km||5));q("av").value=String(Boolean(active.available_now));q("lat").value=String(Number(active.lat||0));q("lng").value=String(Number(active.lng||0));q("st").textContent=`Profile status: ${String(active.status||"active")}`}
+async function saveAgent(){if(!S.me)return;const body={user_id:S.me.id,service_category:String(q("cat").value||"electrician"),title:String(q("title").value||"").trim(),phone:String(q("ph").value||"").trim(),image_url:String(q("img").value||"").trim(),experience_years:Number(q("exp").value||0),price_per_visit_inr:Number(q("visit").value||0),per_hour_rate_inr:Number(q("hour").value||0),service_radius_km:Number(q("rad").value||5),available_now:String(q("av").value||"true")==="true",lat:Number(q("lat").value||0),lng:Number(q("lng").value||0)};if(!body.title||!body.phone||!Number.isFinite(body.lat)||!Number.isFinite(body.lng)){alert("Title, phone, lat, lng required");return}q("st").textContent="Saving...";const out=await p("/api/local/agents/create",body);if(!out?.ok){q("st").textContent=`Save failed: ${String(out?.error||"error")}`;return}if(S.agent?.id){await p("/api/local/agents/availability",{agent_id:S.agent.id,user_id:S.me.id,available_now:body.available_now})}q("st").textContent="Profile saved";await loadAgent()}
+async function loadBookings(){if(!S.me)return;const out=await g(`/api/local/agent/bookings?user_id=${encodeURIComponent(S.me.id)}&side=agent`);const rows=Array.isArray(out?.bookings)?out.bookings:[];q("bc").textContent=`${rows.length} booking(s)`;const box=q("bookings");box.innerHTML="";if(!rows.length){box.innerHTML='<div class="mut">No bookings</div>';return}rows.forEach(r=>{const d=document.createElement("div");d.className="list";d.innerHTML=`<b>${String(r.service_address||"Service booking")}</b><div class="mut" style="margin-top:4px">Amount: ${money(r.estimated_price_inr)} | Status: ${String(r.status||"")}</div><div class="mut">Note: ${String(r.note||"-")}</div><div style="display:flex;gap:6px;margin-top:8px"><button class="b" onclick="setBooking('${String(r.id||"")}','accepted')">Accept</button><button class="b bg" onclick="setBooking('${String(r.id||"")}','on_the_way')">On the way</button><button class="b bo" onclick="setBooking('${String(r.id||"")}','started')">Start</button><button class="b bo" onclick="setBooking('${String(r.id||"")}','completed')">Complete</button><button class="b bb" onclick="setBooking('${String(r.id||"")}','cancelled')">Cancel</button></div>`;box.appendChild(d)})}
+async function setBooking(id,status){if(!S.me||!id)return;const out=await p("/api/local/agent/bookings/status",{booking_id:id,user_id:S.me.id,status});if(!out?.ok){alert(`Status failed: ${String(out?.error||"error")}`);return}await loadBookings();await loadEarnings()}
+async function loadEarnings(){if(!S.me)return;const w=await g(`/api/local/wallet?owner_user_id=${encodeURIComponent(S.me.id)}&owner_type=agent`);const row=w?.wallet||(Array.isArray(w?.wallets)?w.wallets[0]:null);q("wb").textContent=money(row?.balance_inr||0);const out=await g(`/api/local/agent/bookings?user_id=${encodeURIComponent(S.me.id)}&side=agent`);const rows=Array.isArray(out?.bookings)?out.bookings:[];const done=rows.filter(r=>String(r.status||"")==="completed");const gross=done.reduce((s,r)=>s+Number(r.estimated_price_inr||0),0);q("comp").textContent=String(done.length);q("gross").textContent=money(gross);const tx=await g(`/api/local/transactions?user_id=${encodeURIComponent(S.me.id)}&owner_type=agent&limit=8`);const tr=Array.isArray(tx?.transactions)?tx.transactions:[];const tbox=q("tx");tbox.innerHTML="";if(!tr.length){tbox.innerHTML='<div class="mut">No transactions</div>';return}tr.forEach(t=>{const d=document.createElement("div");d.className="list";d.innerHTML=`<b>${String(t.transaction_type||"txn")}</b><div class="mut">${money(t.amount_inr)} | net ${money(t.net_inr)} | commission ${money(t.commission_inr)}</div><div class="mut">${String(t.reference_type||"")} #${String(t.reference_id||"")}</div>`;tbox.appendChild(d)})}
+function bind(){q("gps").onclick=()=>gps().catch(()=>{});q("save").onclick=()=>saveAgent().catch(()=>{});q("bref").onclick=()=>loadBookings().catch(()=>{});q("eref").onclick=()=>loadEarnings().catch(()=>{});q("cat").onchange=()=>loadAgent().catch(()=>{})}
+(async()=>{bind();await me();await loadAgent();await loadBookings();await loadEarnings();setInterval(()=>{loadBookings().catch(()=>{});},12000)})();
+window.setBooking=setBooking;
+</script>
+</div>
+</body>
+</html>

@@ -1,9 +1,78 @@
-<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Local Seller</title><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="global.js"></script><script src="public-config.js"></script><style>body{font-family:Arial;background:#f5f5f5;margin:0}.top{background:#111;color:#fff;padding:12px;font-weight:700}.box{background:#fff;margin:10px;border-radius:12px;padding:12px}.row{border:1px solid #eee;border-radius:10px;padding:10px;margin:8px 0}.btn{border:none;border-radius:8px;padding:8px 10px;background:#ff6a00;color:#fff;cursor:pointer;margin-right:8px}</style></head><body><div class="top">Seller Orders</div><div class="box"><button class="btn" onclick="loadOrders()">Refresh</button><div id="list"></div></div><script>
-const supa=window.supa||window.novaCreateSupabaseClient();let me=null;function bases(){const o=[];const p=v=>{v=String(v||'').trim().replace(/\/+$/g,'');if(v&&/^https?:\/\//i.test(v)&&!o.includes(v))o.push(v)};p(window.CONTEST_API_BASE||window.API_BASE||'');try{p(localStorage.getItem('contest_api_base'));p(localStorage.getItem('api_base'))}catch(_){};if(/^https?:\/\//i.test(location.origin||''))p(location.origin);p('https://novagapp-mart.onrender.com');return o}
-async function meUser(){if(me)return me;const {data}=await supa.auth.getSession();me=data?.session?.user||null; if(!me){location.href='login.html';return null;} return me;}
-async function loadOrders(){const u=await meUser(); if(!u) return; for(const b of bases()){try{const r=await fetch(`${b}/api/local/orders/for-seller?user_id=${encodeURIComponent(u.id)}`);const j=await r.json().catch(()=>null);if(r.ok&&j?.ok){render(j.orders||[]);return}}catch(_){}}}
-function render(rows){const box=document.getElementById('list');box.innerHTML=''; if(!rows.length){box.textContent='No orders';return;} rows.forEach(r=>{const d=document.createElement('div');d.className='row';d.innerHTML=`<b>${r.service_type||''}</b> | INR ${Number(r.amount_inr||0).toFixed(2)}<div>${r.delivery_address||''}</div><div>Status: ${r.status||''}</div><button class='btn' onclick="setStatus('${r.id}','accepted')">Accept</button><button class='btn' onclick="setStatus('${r.id}','out_for_delivery')">Out</button><button class='btn' onclick="setStatus('${r.id}','completed')">Done</button>`;box.appendChild(d)})}
-async function setStatus(id,status){const u=await meUser(); if(!u)return; for(const b of bases()){try{const r=await fetch(b+'/api/local/orders/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:id,user_id:u.id,status})});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok){loadOrders();return}}catch(_){}}alert('update failed')}
-meUser().then(()=>{loadOrders();setInterval(()=>{loadOrders().catch(()=>{});},10000);});
-</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Seller Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="global.js"></script>
+<script src="public-config.js"></script>
+<style>
+body{margin:0;font-family:Arial;background:#f6f8fc;color:#0f172a}
+.top{position:sticky;top:0;background:#111;color:#fff;padding:12px;display:flex;justify-content:space-between}
+.w{padding:10px 10px 72px}
+.c{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px;margin-bottom:10px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.r3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}
+.in,select{width:100%;padding:9px;border:1px solid #d3dae8;border-radius:8px}
+.b{border:none;border-radius:8px;padding:9px 10px;background:#ff6a00;color:#fff;font-weight:700;cursor:pointer}
+.bg{background:#334155}.bo{background:#0f9f50}.bb{background:#c62828}
+.mut{font-size:12px;color:#64748b}
+.list{border:1px solid #e2e8f0;border-radius:10px;padding:10px;margin-top:8px}
+.kpi{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.k{border:1px solid #e2e8f0;border-radius:10px;padding:10px}
+@media(max-width:900px){.row,.r3,.kpi{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="top"><b>Seller Dashboard</b><div><button class="b bg" onclick="location.href='F-account.html'">F-Account</button> <button class="b" onclick="location.href='food-auto.html'">Services</button></div></div>
+<div class="w">
+<div class="c"><b>Seller Profile</b><div id="u" class="mut" style="margin-top:6px">Checking login...</div>
+  <div class="row"><select id="lt"><option value="food">Food</option><option value="grocery">Grocery</option></select><input id="sn" class="in" placeholder="Store name"></div>
+  <div class="row"><input id="ph" class="in" placeholder="Phone"><input id="img" class="in" placeholder="Image URL"></div>
+  <div class="r3"><input id="dc" class="in" type="number" placeholder="Delivery charge"><input id="mo" class="in" type="number" placeholder="Minimum order"><input id="open" class="in" placeholder="Open time (09:00)"></div>
+  <div class="row"><input id="close" class="in" placeholder="Close time (22:00)"><button id="gps" class="b">Use GPS</button></div>
+  <div class="row"><input id="lat" class="in" placeholder="Latitude"><input id="lng" class="in" placeholder="Longitude"></div>
+  <div class="row"><button id="save" class="b">Save Profile</button><div id="st" class="mut" style="align-self:center">Not saved</div></div>
+</div>
+
+<div class="c"><b>Menu Management</b>
+  <div class="row"><input id="mi" class="in" placeholder="Item name"><input id="mc" class="in" placeholder="Category"></div>
+  <div class="r3"><input id="mp" class="in" type="number" placeholder="Price INR"><input id="ms" class="in" type="number" placeholder="Stock qty"><input id="mimg" class="in" placeholder="Image URL"></div>
+  <button id="add" class="b" style="margin-top:8px;width:100%">Add / Upsert Item</button>
+  <div id="items" style="margin-top:8px"></div>
+</div>
+
+<div class="c"><b>Orders</b><div class="row"><button id="oref" class="b bg">Refresh Orders</button><div id="oc" class="mut" style="align-self:center">-</div></div><div id="orders"></div></div>
+
+<div class="c"><b>Earnings</b>
+  <div class="kpi"><div class="k"><div class="mut">Wallet</div><b id="wb">INR 0.00</b></div><div class="k"><div class="mut">Completed</div><b id="comp">0</b></div><div class="k"><div class="mut">Gross</div><b id="gross">INR 0.00</b></div></div>
+  <button id="eref" class="b bg" style="margin-top:8px;width:100%">Refresh Wallet</button>
+  <div id="tx" style="margin-top:8px"></div>
+</div>
+
+<script>
+const supa=window.supa||window.novaCreateSupabaseClient();
+const S={me:null,listing:null};
+const q=id=>document.getElementById(id);
+function bases(){const o=[];const p=v=>{v=String(v||"").trim().replace(/\/+$/g,"");if(v&&/^https?:\/\//i.test(v)&&!o.includes(v))o.push(v)};p(window.CONTEST_API_BASE||window.API_BASE||"");try{p(localStorage.getItem("contest_api_base"));p(localStorage.getItem("api_base"))}catch(_){ }if(/^https?:\/\//i.test(location.origin||""))p(location.origin);p("https://novagapp-mart.onrender.com");return o}
+async function g(path){for(const b of bases()){try{const r=await fetch(b+path,{cache:"no-store"});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok)return j}catch(_){ }}return null}
+async function p(path,body){for(const b of bases()){try{const r=await fetch(b+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok)return j;if(j?.error)return {ok:false,error:String(j.error||"api_error")}}catch(_){ }}return {ok:false,error:"api_unreachable"}}
+function money(v){return "INR "+Number(v||0).toFixed(2)}
+async function me(){const {data}=await supa.auth.getSession();S.me=data?.session?.user||null;if(!S.me){location.href="login.html";return null}q("u").textContent=`${S.me.email||"Logged in"} (${S.me.id})`;return S.me}
+async function gps(){if(!navigator.geolocation){q("st").textContent="GPS unsupported";return}q("st").textContent="Detecting GPS...";navigator.geolocation.getCurrentPosition((pos)=>{q("lat").value=String(Number(pos?.coords?.latitude||0));q("lng").value=String(Number(pos?.coords?.longitude||0));q("st").textContent=`GPS locked (${Math.round(Number(pos?.coords?.accuracy||0))}m)`},(e)=>{q("st").textContent=`GPS error: ${String(e?.message||"denied")}`},{enableHighAccuracy:true,timeout:18000,maximumAge:0})}
+async function loadProfile(){if(!S.me)return;const type=String(q("lt").value||"food");const out=await g(`/api/local/listings/for-owner?user_id=${encodeURIComponent(S.me.id)}&listing_type=${encodeURIComponent(type)}`);const row=Array.isArray(out?.listings)?out.listings[0]:null;S.listing=row||null;if(!row){q("st").textContent="No profile yet";q("items").innerHTML="";return}q("sn").value=String(row.store_name||"");q("ph").value=String(row.phone||"");q("img").value=String(row.image_url||"");q("dc").value=String(Number(row.delivery_charge_inr||0));q("mo").value=String(Number(row.minimum_order_inr||0));q("open").value=String(row.open_time||"");q("close").value=String(row.close_time||"");q("lat").value=String(Number(row.lat||0));q("lng").value=String(Number(row.lng||0));q("st").textContent=`Profile status: ${String(row.status||"active")}`;await loadItems();}
+async function saveProfile(){if(!S.me)return;const payload={user_id:S.me.id,listing_type:String(q("lt").value||"food"),store_name:String(q("sn").value||"").trim(),phone:String(q("ph").value||"").trim(),image_url:String(q("img").value||"").trim(),delivery_charge_inr:Number(q("dc").value||0),minimum_order_inr:Number(q("mo").value||0),open_time:String(q("open").value||"").trim(),close_time:String(q("close").value||"").trim(),lat:Number(q("lat").value||0),lng:Number(q("lng").value||0),open_now:true,self_delivery:true};if(!payload.store_name||!payload.phone||!Number.isFinite(payload.lat)||!Number.isFinite(payload.lng)){alert("Store name, phone, lat, lng required");return}q("st").textContent="Saving...";let out;if(S.listing?.id){out=await p("/api/local/listings/update",Object.assign({listing_id:String(S.listing.id)},payload))}else{out=await p("/api/local/listings/create",payload)}if(!out?.ok){q("st").textContent=`Save failed: ${String(out?.error||"error")}`;return}q("st").textContent="Profile saved";await loadProfile();}
+async function loadItems(){if(!S.me||!S.listing?.id){q("items").innerHTML="";return}const out=await g(`/api/local/listings/items?listing_id=${encodeURIComponent(S.listing.id)}&include_inactive=1&user_id=${encodeURIComponent(S.me.id)}`);const rows=Array.isArray(out?.items)?out.items:[];const box=q("items");box.innerHTML="";if(!rows.length){box.innerHTML='<div class="mut">No items yet</div>';return}rows.forEach(it=>{const d=document.createElement("div");d.className="list";d.innerHTML=`<b>${String(it.name||"")}</b> <span class="mut">(${String(it.category||"-")})</span><div class="mut" style="margin-top:4px">Price: ${money(it.price_inr)} | Stock: ${Number(it.stock_qty||0)} | Active: ${Boolean(it.is_active)?"Yes":"No"}</div><div style="margin-top:8px;display:flex;gap:6px"><button class="b bg" onclick="editItem('${String(it.id||"")}')">Edit</button><button class="b bb" onclick="deactivateItem('${String(it.id||"")}')">Deactivate</button></div>`;box.appendChild(d)})}
+async function addItem(){if(!S.me||!S.listing?.id){alert("Save profile first");return}const body={user_id:S.me.id,listing_id:S.listing.id,name:String(q("mi").value||"").trim(),category:String(q("mc").value||"").trim(),price_inr:Number(q("mp").value||0),stock_qty:Number(q("ms").value||0),image_url:String(q("mimg").value||"").trim()};if(!body.name||body.price_inr<=0){alert("Item name and price required");return}const out=await p("/api/local/listings/item",body);if(!out?.ok){alert(`Item save failed: ${String(out?.error||"error")}`);return}q("mi").value="";q("mc").value="";q("mp").value="";q("ms").value="";q("mimg").value="";await loadItems();}
+async function editItem(id){if(!S.me||!id)return;const name=prompt("New name (optional)","");const price=prompt("New price INR","");const stock=prompt("New stock qty","");const out=await p("/api/local/listings/item/update",{user_id:S.me.id,item_id:id,name:String(name||""),price_inr:Number(price||0),stock_qty:Number(stock||0),is_active:true});if(!out?.ok){alert(`Update failed: ${String(out?.error||"error")}`);return}await loadItems();}
+async function deactivateItem(id){if(!S.me||!id)return;if(!confirm("Deactivate this item?"))return;const out=await p("/api/local/listings/item/delete",{user_id:S.me.id,item_id:id});if(!out?.ok){alert(`Deactivate failed: ${String(out?.error||"error")}`);return}await loadItems();}
+async function loadOrders(){if(!S.me)return;const out=await g(`/api/local/orders/for-seller?user_id=${encodeURIComponent(S.me.id)}`);const rows=Array.isArray(out?.orders)?out.orders:[];q("oc").textContent=`${rows.length} order(s)`;const box=q("orders");box.innerHTML="";if(!rows.length){box.innerHTML='<div class="mut">No orders</div>';return}rows.forEach(r=>{const d=document.createElement("div");d.className="list";d.innerHTML=`<b>${String(r.service_type||"order").toUpperCase()}</b><div class="mut" style="margin-top:4px">Amount: ${money(r.amount_inr)} | Status: ${String(r.status||"")}</div><div class="mut">Address: ${String(r.delivery_address||"-")}</div><div style="display:flex;gap:6px;margin-top:8px"><button class="b" onclick="orderStatus('${String(r.id||"")}','accepted')">Accept</button><button class="b bg" onclick="orderStatus('${String(r.id||"")}','preparing')">Preparing</button><button class="b bo" onclick="orderStatus('${String(r.id||"")}','out_for_delivery')">Out</button><button class="b bo" onclick="orderStatus('${String(r.id||"")}','delivered')">Delivered</button></div>`;box.appendChild(d)})}
+async function orderStatus(id,status){if(!S.me||!id)return;const out=await p("/api/local/orders/status",{order_id:id,user_id:S.me.id,status});if(!out?.ok){alert(`Status failed: ${String(out?.error||"error")}`);return}await loadOrders();await loadEarnings();}
+async function loadEarnings(){if(!S.me)return;const w=await g(`/api/local/wallet?owner_user_id=${encodeURIComponent(S.me.id)}&owner_type=seller`);const row=w?.wallet||(Array.isArray(w?.wallets)?w.wallets[0]:null);q("wb").textContent=money(row?.balance_inr||0);const out=await g(`/api/local/orders/for-seller?user_id=${encodeURIComponent(S.me.id)}`);const rows=Array.isArray(out?.orders)?out.orders:[];const done=rows.filter(r=>String(r.status||"")==="completed"||String(r.status||"")==="delivered");const gross=done.reduce((s,r)=>s+Number(r.amount_inr||0),0);q("comp").textContent=String(done.length);q("gross").textContent=money(gross);const tx=await g(`/api/local/transactions?user_id=${encodeURIComponent(S.me.id)}&owner_type=seller&limit=8`);const tr=Array.isArray(tx?.transactions)?tx.transactions:[];const tbox=q("tx");tbox.innerHTML="";if(!tr.length){tbox.innerHTML='<div class="mut">No transactions</div>';return}tr.forEach(t=>{const d=document.createElement("div");d.className="list";d.innerHTML=`<b>${String(t.transaction_type||"txn")}</b><div class="mut">${money(t.amount_inr)} | net ${money(t.net_inr)} | commission ${money(t.commission_inr)}</div><div class="mut">${String(t.reference_type||"")} #${String(t.reference_id||"")}</div>`;tbox.appendChild(d)})}
+function bind(){q("gps").onclick=()=>gps().catch(()=>{});q("save").onclick=()=>saveProfile().catch(()=>{});q("add").onclick=()=>addItem().catch(()=>{});q("oref").onclick=()=>loadOrders().catch(()=>{});q("eref").onclick=()=>loadEarnings().catch(()=>{});q("lt").onchange=()=>loadProfile().catch(()=>{})}
+(async()=>{bind();await me();await loadProfile();await loadOrders();await loadEarnings();setInterval(()=>{loadOrders().catch(()=>{});},12000)})();
+window.editItem=editItem;window.deactivateItem=deactivateItem;window.orderStatus=orderStatus;
+</script>
+</div>
+</body>
+</html>

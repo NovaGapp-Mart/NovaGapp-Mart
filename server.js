@@ -883,6 +883,15 @@ function normalizeSystemState(input){
   if(!state.push.token_index || typeof state.push.token_index !== "object"){
     state.push.token_index = {};
   }
+  if(!state.local_services || typeof state.local_services !== "object"){
+    state.local_services = {};
+  }
+  if(!state.local_services.provider_otp || typeof state.local_services.provider_otp !== "object"){
+    state.local_services.provider_otp = {};
+  }
+  if(!state.local_services.provider_otp.challenges || typeof state.local_services.provider_otp.challenges !== "object"){
+    state.local_services.provider_otp.challenges = {};
+  }
   if(!state.tryon || typeof state.tryon !== "object"){
     state.tryon = {};
   }
@@ -1103,6 +1112,38 @@ function sanitizeLocalRole(value){
   const raw = String(value || "").trim().toLowerCase();
   if(raw === "consumer" || raw === "seller" || raw === "rider" || raw === "agent") return raw;
   return "";
+}
+
+function sanitizePhoneForOtp(value){
+  const raw = String(value || "").trim();
+  const digits = raw.replace(/[^\d+]/g, "");
+  if(!digits) return "";
+  if(digits.startsWith("+")){
+    if(!/^\+\d{10,15}$/.test(digits)) return "";
+    return digits;
+  }
+  const only = digits.replace(/\D/g, "");
+  if(only.length === 10){
+    return `+91${only}`;
+  }
+  if(only.length >= 11 && only.length <= 15){
+    return `+${only}`;
+  }
+  return "";
+}
+
+function maskPhone(phoneInput){
+  const phone = sanitizePhoneForOtp(phoneInput);
+  if(!phone) return "";
+  const digits = phone.replace(/\D/g, "");
+  if(digits.length < 4) return phone;
+  return `+${digits.slice(0, Math.max(2, digits.length - 4)).replace(/\d/g, "*")}${digits.slice(-4)}`;
+}
+
+function hashProviderOtp(tokenInput, codeInput){
+  const token = String(tokenInput || "").trim();
+  const code = String(codeInput || "").trim();
+  return crypto.createHash("sha256").update(`${token}:${code}`).digest("hex");
 }
 
 const LOCAL_AGENT_CATEGORIES = new Set([
@@ -1446,6 +1487,128 @@ async function hasActiveLocalRole(userIdInput, roleInput){
   }catch(_){
     return false;
   }
+}
+
+async function issueProviderOtpChallenge(userIdInput, phoneInput){
+  const userId = sanitizeUserId(userIdInput);
+  const phone = sanitizePhoneForOtp(phoneInput);
+  if(!userId || !phone){
+    return null;
+  }
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const token = crypto.randomBytes(18).toString("hex");
+  const now = Date.now();
+  const expiresAt = new Date(now + (5 * 60 * 1000)).toISOString();
+  await mutateSystemState((state) => {
+    const challenges = state?.local_services?.provider_otp?.challenges || {};
+    const cutoff = Date.now() - (24 * 60 * 60 * 1000);
+    Object.keys(challenges).forEach((id) => {
+      const row = challenges[id];
+      const createdTs = Number(new Date(row?.created_at || 0).getTime());
+      const expiresTs = Number(new Date(row?.expires_at || 0).getTime());
+      const stale = !Number.isFinite(createdTs) || createdTs < cutoff || (Number.isFinite(expiresTs) && expiresTs < (Date.now() - (10 * 60 * 1000)));
+      if(stale){
+        delete challenges[id];
+      }
+    });
+    challenges[token] = {
+      token,
+      user_id: userId,
+      phone,
+      phone_masked: maskPhone(phone),
+      code_hash: hashProviderOtp(token, code),
+      attempts: 0,
+      verified: false,
+      created_at: new Date(now).toISOString(),
+      expires_at: expiresAt,
+      verified_at: null
+    };
+    state.local_services.provider_otp.challenges = challenges;
+    return true;
+  });
+  return {
+    token,
+    code,
+    phone,
+    phoneMasked: maskPhone(phone),
+    expiresInSec: 300
+  };
+}
+
+async function verifyProviderOtpChallenge(userIdInput, tokenInput, codeInput){
+  const userId = sanitizeUserId(userIdInput);
+  const token = String(tokenInput || "").trim();
+  const code = String(codeInput || "").trim();
+  if(!userId || !token || !/^\d{6}$/.test(code)){
+    return { ok:false, error:"invalid_otp_verify_payload" };
+  }
+  return mutateSystemState((state) => {
+    const challenges = state?.local_services?.provider_otp?.challenges || {};
+    const row = challenges[token];
+    if(!row){
+      return { ok:false, error:"otp_challenge_not_found" };
+    }
+    if(String(row.user_id || "") !== userId){
+      return { ok:false, error:"otp_challenge_forbidden" };
+    }
+    const nowTs = Date.now();
+    const expTs = Number(new Date(row.expires_at || 0).getTime());
+    if(!Number.isFinite(expTs) || expTs < nowTs){
+      delete challenges[token];
+      return { ok:false, error:"otp_expired" };
+    }
+    if(Boolean(row.verified)){
+      return {
+        ok:true,
+        already_verified:true,
+        token,
+        phone: String(row.phone || ""),
+        phone_masked: String(row.phone_masked || "")
+      };
+    }
+    row.attempts = Math.max(0, Math.floor(safeNumber(row.attempts || 0))) + 1;
+    if(row.attempts > 7){
+      delete challenges[token];
+      return { ok:false, error:"otp_attempt_limit_reached" };
+    }
+    const expected = String(row.code_hash || "");
+    const incoming = hashProviderOtp(token, code);
+    if(!expected || expected !== incoming){
+      challenges[token] = row;
+      return { ok:false, error:"otp_invalid" };
+    }
+    row.verified = true;
+    row.verified_at = new Date().toISOString();
+    row.code_hash = null;
+    challenges[token] = row;
+    return {
+      ok:true,
+      token,
+      phone: String(row.phone || ""),
+      phone_masked: String(row.phone_masked || ""),
+      verified_at: row.verified_at
+    };
+  });
+}
+
+async function isProviderOtpVerified(userIdInput, phoneInput, tokenInput){
+  const userId = sanitizeUserId(userIdInput);
+  const phone = sanitizePhoneForOtp(phoneInput);
+  const token = String(tokenInput || "").trim();
+  if(!userId || !phone || !token){
+    return false;
+  }
+  const state = await readSystemState();
+  const row = state?.local_services?.provider_otp?.challenges?.[token];
+  if(!row) return false;
+  if(String(row.user_id || "") !== userId) return false;
+  if(String(row.phone || "") !== phone) return false;
+  if(!Boolean(row.verified)) return false;
+  const verifiedTs = Number(new Date(row.verified_at || 0).getTime());
+  if(!Number.isFinite(verifiedTs)) return false;
+  const ageMs = Date.now() - verifiedTs;
+  if(ageMs > (12 * 60 * 60 * 1000)) return false;
+  return true;
 }
 
 async function readSystemState(){
@@ -6167,7 +6330,7 @@ app.post("/api/local/listings/create", async (req, res) => {
         lng,
         listing_fee_inr: 500,
         platform_monthly_share_percent: 5,
-        status: "pending_approval",
+        status: "approved",
         open_now: openNow,
         delivery_charge_inr: deliveryChargeInr,
         minimum_order_inr: minimumOrderInr,
@@ -7771,7 +7934,7 @@ app.post("/api/local/agent/bookings/status", async (req, res) => {
           payeeUserId: sanitizeUserId(patchedBooking?.agent_user_id || booking?.agent_user_id),
           payeeOwnerType: "agent",
           grossInr: roundMoney(patchedBooking?.estimated_price_inr || booking?.estimated_price_inr || 0),
-          commissionPercent: 15,
+          commissionPercent: 10,
           paymentMethod: sanitizePaymentMethod(patchedBooking?.payment_method || booking?.payment_method || "cash"),
           paymentStatus: sanitizePaymentStatus(patchedBooking?.payment_status || booking?.payment_status || "cod"),
           paymentGateway: "local_services",
@@ -7823,13 +7986,85 @@ app.post("/api/local/agent/bookings/status", async (req, res) => {
   }
 });
 
+app.post("/api/local/provider/otp/send", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  const phone = sanitizePhoneForOtp(req.body?.phone);
+  if(!userId || !phone){
+    return res.status(400).json({ ok:false, error:"user_id_and_phone_required" });
+  }
+  if(localRateLimitHit(`provider_otp_send:${userId}:${phone}`, 6, 15 * 60 * 1000)){
+    return res.status(429).json({ ok:false, error:"rate_limited" });
+  }
+  try{
+    const issued = await issueProviderOtpChallenge(userId, phone);
+    if(!issued){
+      return res.status(400).json({ ok:false, error:"otp_issue_failed" });
+    }
+    const state = await readSystemState();
+    const tokens = getPushTokensForUser(state, userId);
+    let delivery = "in_app";
+    if(tokens.length){
+      const body = `Your OTP is ${issued.code}. Valid for 5 minutes.`;
+      await sendFcmNotificationToTokens(tokens, {
+        title: "NovaGapp OTP",
+        body,
+        data: {
+          type: "provider_otp",
+          otp_token: issued.token,
+          phone: issued.phone
+        }
+      }).catch(() => {});
+      delivery = "push";
+    }
+    const response = {
+      ok:true,
+      otp_token: issued.token,
+      phone_masked: issued.phoneMasked,
+      expires_in_sec: issued.expiresInSec,
+      delivery
+    };
+    // Fallback delivery for devices without active push token.
+    if(delivery !== "push"){
+      response.otp_preview = issued.code;
+      response.warning = "push_token_missing_using_in_app_otp_preview";
+    }
+    return res.json(response);
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"provider_otp_send_failed", message:String(err?.message || "") });
+  }
+});
+
+app.post("/api/local/provider/otp/verify", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  const otpToken = String(req.body?.otp_token || "").trim();
+  const otp = String(req.body?.otp || "").trim();
+  if(!userId || !otpToken || !otp){
+    return res.status(400).json({ ok:false, error:"user_id_otp_token_otp_required" });
+  }
+  try{
+    const verified = await verifyProviderOtpChallenge(userId, otpToken, otp);
+    if(!verified?.ok){
+      return res.status(400).json({ ok:false, error:String(verified?.error || "otp_verify_failed") });
+    }
+    return res.json({
+      ok:true,
+      verified:true,
+      otp_token: otpToken,
+      phone_masked: String(verified?.phone_masked || ""),
+      verified_at: String(verified?.verified_at || new Date().toISOString())
+    });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"provider_otp_verify_failed", message:String(err?.message || "") });
+  }
+});
+
 app.post("/api/local/role/fee/order", async (req, res) => {
   const userId = sanitizeUserId(req.body?.user_id);
   const role = sanitizeLocalRole(req.body?.role);
   if(!userId || !role){
     return res.status(400).json({ ok:false, error:"user_id_and_role_required" });
   }
-  if(!["seller","rider"].includes(role)){
+  if(!["seller","rider","agent"].includes(role)){
     return res.status(400).json({ ok:false, error:"fee_not_required_for_role" });
   }
   if(!isContestRazorpayConfigured()){
@@ -7909,13 +8144,25 @@ app.post("/api/local/role/enroll", async (req, res) => {
   const userId = sanitizeUserId(req.body?.user_id);
   const role = sanitizeLocalRole(req.body?.role);
   const displayName = sanitizeDisplayName(req.body?.display_name || "");
-  const phone = String(req.body?.phone || "").trim().slice(0, 30);
+  const phoneRaw = String(req.body?.phone || "").trim().slice(0, 30);
+  const phone = sanitizePhoneForOtp(phoneRaw);
   const paymentRef = String(req.body?.payment_ref || "").trim().slice(0, 120);
   const feePaid = Boolean(req.body?.fee_paid);
+  const otpToken = String(req.body?.otp_token || "").trim().slice(0, 120);
   if(!userId || !role){
     return res.status(400).json({ ok:false, error:"user_id_and_role_required" });
   }
-  const feeRequired = role === "seller" || role === "rider";
+  const feeRequired = role === "seller" || role === "rider" || role === "agent";
+  const otpRequired = role === "seller" || role === "rider" || role === "agent";
+  if(otpRequired){
+    if(!phone){
+      return res.status(400).json({ ok:false, error:"phone_required_for_provider_role" });
+    }
+    const verifiedOtp = await isProviderOtpVerified(userId, phone, otpToken);
+    if(!verifiedOtp){
+      return res.status(403).json({ ok:false, error:"otp_verification_required" });
+    }
+  }
   if(feeRequired && !feePaid && !paymentRef){
     return res.status(402).json({ ok:false, error:"listing_fee_required", amount_inr:500 });
   }
@@ -7941,7 +8188,7 @@ app.post("/api/local/role/enroll", async (req, res) => {
         user_id: userId,
         role,
         display_name: displayName || null,
-        phone: phone || null,
+        phone: phone || phoneRaw || null,
         fee_required_inr: feeRequired ? 500 : 0,
         fee_paid: true,
         payment_ref: paymentRef || null,
@@ -7951,6 +8198,16 @@ app.post("/api/local/role/enroll", async (req, res) => {
       query: { on_conflict: "user_id,role" },
       prefer: "resolution=merge-duplicates,return=representation"
     });
+    const ownerTypeByRole = {
+      consumer: "customer",
+      seller: "seller",
+      rider: "driver",
+      agent: "agent"
+    };
+    const walletOwnerType = sanitizeWalletOwnerType(ownerTypeByRole[role] || "");
+    if(walletOwnerType){
+      await ensureWalletRow(userId, walletOwnerType).catch(() => null);
+    }
     return res.json({ ok:true, role: Array.isArray(rows) ? rows[0] || null : null });
   }catch(err){
     return res.status(500).json({ ok:false, error:"local_role_enroll_failed", message:String(err?.message || "") });

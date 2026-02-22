@@ -330,6 +330,7 @@ let driverGuideLine = null;
 let suggestPopup = null;
 let suggestSeq = 0;
 let suggestDebounceTimer = null;
+let pickupResolveSeq = 0;
 let rideRealtimeChannel = null;
 let driverLocationRealtimeChannel = null;
 
@@ -1012,7 +1013,10 @@ async function setPickup(lat, lng, fromGps){
   const shouldResolve = !state.pickupText || (now - state.lastReverseAt > 9000) || !fromGps;
   if(shouldResolve){
     state.lastReverseAt = now;
+    const seq = ++pickupResolveSeq;
     const name = await reverseGeocode(state.pickupLat, state.pickupLng);
+    if(seq !== pickupResolveSeq) return;
+    if(fromGps && state.pickupMode === "manual") return;
     if(name) state.pickupText = name;
   }
 
@@ -1073,7 +1077,7 @@ function updateGpsBadgeLive(accuracy){
 
 function updateGpsBadgeBlocked(){
   state.gpsFailCount = (Number(state.gpsFailCount || 0) + 1);
-  document.getElementById("gpsBadge").textContent = "GPS: blocked";
+  document.getElementById("gpsBadge").textContent = "GPS: permission required";
   updateLiveAddressLabel("permission required");
 }
 
@@ -1087,7 +1091,7 @@ async function applyGpsFix(pos, shouldCenter){
   state.liveLat = lat;
   state.liveLng = lng;
   updateGpsBadgeLive(acc);
-  if(state.phase === "idle" && state.pickupMode !== "manual"){
+  if(state.phase === "idle" && state.pickupMode === "gps"){
     await setPickup(lat, lng, true);
   }else if(shouldCenter && map){
     map.setView([lat, lng], Math.max(15, map.getZoom()));
@@ -1096,22 +1100,9 @@ async function applyGpsFix(pos, shouldCenter){
 }
 
 async function tryApproxLocationFallback(){
-  if(state.gpsLastFixAt && (Date.now() - state.gpsLastFixAt) < 15000) return;
-  try{
-    const res = await fetch("https://ipapi.co/json/", { cache: "no-store" });
-    const data = await res.json().catch(() => null);
-    const lat = Number(data?.latitude);
-    const lng = Number(data?.longitude);
-    if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    state.liveLat = lat;
-    state.liveLng = lng;
-    if(state.phase === "idle" && state.pickupMode !== "manual"){
-      await setPickup(lat, lng, false);
-    }else if(map){
-      map.setView([lat, lng], Math.max(13, map.getZoom()));
-    }
-    document.getElementById("gpsBadge").textContent = "GPS: approx";
-  }catch(_){ }
+  // Avoid random IP-based auto pickup. Force real GPS permission instead.
+  document.getElementById("gpsBadge").textContent = "GPS: permission required";
+  updateLiveAddressLabel("Allow device location for accurate pickup");
 }
 
 async function fetchNearbyDrivers(){
@@ -1180,9 +1171,6 @@ function startGpsWatch(){
       },
       async () => {
         updateGpsBadgeBlocked();
-        if(state.gpsFailCount >= 2){
-          await tryApproxLocationFallback();
-        }
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
@@ -1211,9 +1199,6 @@ function startGpsWatch(){
     },
     async () => {
       updateGpsBadgeBlocked();
-      if(state.gpsFailCount >= 3){
-        await tryApproxLocationFallback();
-      }
     },
     { enableHighAccuracy: true, timeout: 20000, maximumAge: 1000 }
   );
@@ -1242,7 +1227,6 @@ async function focusCurrentLocation(){
 
   if(!navigator.geolocation){
     updateGpsBadgeBlocked();
-    await tryApproxLocationFallback();
     return;
   }
 
@@ -1252,7 +1236,6 @@ async function focusCurrentLocation(){
     },
     async () => {
       updateGpsBadgeBlocked();
-      await tryApproxLocationFallback();
     },
     { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
   );
@@ -2671,7 +2654,7 @@ function bindRideEvents(){
         return;
       }
       if(nav === "account"){
-        location.href = "f-account.html";
+        location.href = "F-account.html";
         return;
       }
       if(nav === "food"){

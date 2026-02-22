@@ -1,229 +1,54 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>F-Account - NovaGapp Local</title>
+<!doctype html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>F-Account</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-<script src="global.js"></script>
-<script src="public-config.js"></script>
+<script src="global.js"></script><script src="public-config.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
-body{margin:0;font-family:Arial,sans-serif;background:#f5f5f5;padding-bottom:90px}
-.top{background:#111;color:#fff;padding:12px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
-.section{background:#fff;margin:10px;border-radius:12px;padding:12px;box-shadow:0 4px 12px rgba(0,0,0,.06)}
-.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.card{border:1px solid #ececec;border-radius:10px;padding:10px}
-.btn{border:none;border-radius:8px;padding:9px 12px;background:#ff6a00;color:#fff;cursor:pointer}
-.btn.dark{background:#111}
-.muted{font-size:12px;color:#666}
-.input{width:100%;box-sizing:border-box;padding:9px;border:1px solid #ddd;border-radius:8px;margin-top:8px}
-.roles{display:flex;gap:8px;flex-wrap:wrap}
-.pill{padding:6px 10px;border-radius:999px;background:#eef3ff;color:#1a3ea6;font-size:12px;font-weight:700}
-</style>
-</head>
-<body>
-<div class="top">
-  <span>F-Account (Local Services)</span>
-  <button class="btn dark" onclick="location.href='food-auto.html'">Services</button>
+body{margin:0;font-family:Arial;background:#f6f8fc;color:#0f172a;padding-bottom:72px}.top{position:sticky;top:0;background:#111;color:#fff;padding:12px;display:flex;justify-content:space-between}.w{padding:10px}.c{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px;margin-bottom:10px}.row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}.r3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}.in,select{width:100%;padding:9px;border:1px solid #d3dae8;border-radius:8px}.b{border:none;border-radius:8px;padding:9px 10px;background:#ff6a00;color:#fff;font-weight:700;cursor:pointer}.bd{background:#111}.bg{background:#334155}.bo{background:#0f9f50}.mut{font-size:12px;color:#64748b}.roles{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.role{border:1px solid #d9e3f3;border-radius:10px;padding:10px;cursor:pointer}.role.a{border-color:#ff6a00;background:#fff3ea}.hide{display:none!important}#m{height:200px;border:1px solid #dbe3f1;border-radius:10px;margin-top:8px}.p{display:flex;gap:6px;flex-wrap:wrap}.pill{padding:6px 10px;border-radius:999px;background:#eef2ff;color:#1e40af;font-size:12px;font-weight:700}
+@media(max-width:900px){.roles,.row,.r3{grid-template-columns:1fr}}
+</style></head><body>
+<div class="top"><b>F-Account Provider Setup</b><div><button class="b bd" onclick="location.href='index.html'">Home</button> <button class="b" onclick="location.href='food-auto.html'">Services</button></div></div>
+<div class="w">
+<div class="c"><b>Flow</b><div class="mut" style="margin-top:6px">Role select -> OTP verify -> INR 500 payment -> activate provider profile</div></div>
+<div class="c"><b>1) Select Role</b><div class="roles" style="margin-top:8px"><button id="rr" class="role" onclick="sel('rider')"><b>Driver</b><div class="mut">Ride provider</div></button><button id="rs" class="role" onclick="sel('seller')"><b>Food Seller</b><div class="mut">Food/Grocery listing</div></button><button id="ra" class="role" onclick="sel('agent')"><b>Service Agent</b><div class="mut">Electrician/Plumber</div></button></div><div class="mut" style="margin-top:8px">Selected: <span id="sr">None</span></div></div>
+<div class="c"><b>2) Profile + OTP + Location</b><div id="u" class="mut" style="margin-top:6px">Checking login...</div><div class="row"><input id="nm" class="in" placeholder="Full name"><input id="ph" class="in" placeholder="Phone (+91...)"/></div><div class="row"><button id="send" class="b bg">Send OTP</button><div style="display:flex;gap:6px"><input id="otp" class="in" placeholder="OTP"><button id="ver" class="b bo">Verify</button></div></div><div id="os" class="mut" style="margin-top:6px">OTP not sent</div><div class="row"><input id="ad" class="in" placeholder="Address by GPS"><button id="gps" class="b">Use GPS</button></div><div id="gs" class="mut" style="margin-top:6px">GPS not locked</div><div id="m"></div></div>
+<div class="c"><b>3) Role Details</b>
+  <div id="fr" class="hide"><div class="row"><select id="vtype"><option value="bike">Bike</option><option value="auto" selected>Auto</option><option value="car">Car</option></select><input id="vno" class="in" placeholder="Vehicle number"></div><div class="r3"><input id="bf" class="in" type="number" placeholder="Base fare"><input id="pk" class="in" type="number" placeholder="Per km"><input id="pm" class="in" type="number" placeholder="Per min"></div><div class="row"><input id="rrad" class="in" type="number" placeholder="Service radius km"><input id="docs" class="in" placeholder="Docs URL"></div></div>
+  <div id="fs" class="hide"><div class="row"><select id="stype"><option value="food">Food</option><option value="grocery">Grocery</option></select><input id="sn" class="in" placeholder="Store name"></div><div class="r3"><input id="dc" class="in" type="number" placeholder="Delivery charge"><input id="mo" class="in" type="number" placeholder="Min order"><input id="ot" class="in" placeholder="Open time"></div><div class="row"><input id="ct" class="in" placeholder="Close time"><input id="si" class="in" placeholder="Image URL"></div></div>
+  <div id="fa" class="hide"><div class="row"><select id="ac"><option value="electrician">Electrician</option><option value="plumber">Plumber</option><option value="ac_repair">AC Repair</option><option value="carpenter">Carpenter</option><option value="mechanic">Mechanic</option><option value="painter">Painter</option><option value="cleaning">Cleaning</option></select><input id="at" class="in" placeholder="Profile title"></div><div class="r3"><input id="ae" class="in" type="number" placeholder="Experience"><input id="av" class="in" type="number" placeholder="Visit charge"><input id="ah" class="in" type="number" placeholder="Per hour"></div><div class="row"><input id="ar" class="in" type="number" placeholder="Service radius km"><select id="aa"><option value="true">Available</option><option value="false">Offline</option></select></div></div>
 </div>
-
-<div class="section">
-  <strong>Profile</strong>
-  <div id="userText" class="muted" style="margin-top:8px">Checking login...</div>
-  <input id="displayName" class="input" placeholder="Display name">
-  <input id="phone" class="input" placeholder="Phone number">
+<div class="c"><b>4) Activate</b><div class="row"><div><div class="mut">Provider fee</div><b>INR 500</b></div><div><div class="mut">Commission</div><b>10%</b></div></div><button id="act" class="b" style="margin-top:10px;width:100%">Pay & Activate</button><div id="as" class="mut" style="margin-top:6px">Pending</div></div>
+<div class="c"><b>Active roles & wallet</b><div id="rb" class="p" style="margin-top:8px"></div><div class="row"><button class="b bg" onclick="rw()">Refresh wallet</button><div id="wt" class="mut" style="align-self:center">Wallet not loaded</div></div><div class="row"><button class="b" onclick="location.href='local-rider.html'">Driver dashboard</button><button class="b" onclick="location.href='local-seller.html'">Seller dashboard</button></div><div class="row"><button class="b" onclick="location.href='local-agent.html'">Agent dashboard</button><button class="b bd" onclick="location.href='food-auto.html'">Service app</button></div></div>
 </div>
-
-<div class="section">
-  <strong>Select Role</strong>
-  <div class="muted" style="margin-top:6px">Consumer free. Seller and Rider require INR 500 onboarding fee.</div>
-  <div class="grid" style="margin-top:8px">
-    <div class="card">
-      <b>Consumer</b>
-      <div class="muted">Order rides, food, grocery, agents.</div>
-      <button class="btn" style="margin-top:8px" onclick="enroll('consumer', false)">Activate Free</button>
-    </div>
-    <div class="card">
-      <b>Seller</b>
-      <div class="muted">List food/grocery store and receive orders.</div>
-      <button class="btn" style="margin-top:8px" onclick="enroll('seller', true)">Activate INR 500</button>
-    </div>
-    <div class="card">
-      <b>Rider</b>
-      <div class="muted">Receive ride requests near your location.</div>
-      <button class="btn" style="margin-top:8px" onclick="enroll('rider', true)">Activate INR 500</button>
-    </div>
-    <div class="card">
-      <b>Agent</b>
-      <div class="muted">List services (plumber, electrician, etc).</div>
-      <button class="btn" style="margin-top:8px" onclick="enroll('agent', false)">Activate Free</button>
-    </div>
-  </div>
-</div>
-
-<div class="section">
-  <strong>Active Roles</strong>
-  <div id="roleBox" class="roles" style="margin-top:8px"></div>
-  <div class="roles" style="margin-top:10px">
-    <button class="btn" onclick="location.href='local-seller.html'">Seller Panel</button>
-    <button class="btn" onclick="location.href='local-rider.html'">Rider Panel</button>
-    <button class="btn" onclick="location.href='local-agent.html'">Agent Panel</button>
-    <button class="btn dark" onclick="location.href='local-admin.html'">Admin Panel</button>
-  </div>
-</div>
-
 <script>
-const supa = window.supa || window.novaCreateSupabaseClient();
-let me = null;
-
-function apiBases(){
-  const out = [];
-  const push = (v) => {
-    const clean = String(v || "").trim().replace(/\/+$/g, "");
-    if(!clean || !/^https?:\/\//i.test(clean) || out.includes(clean)) return;
-    out.push(clean);
-  };
-  push(window.CONTEST_API_BASE || window.API_BASE || "");
-  try{ push(localStorage.getItem("contest_api_base")); push(localStorage.getItem("api_base")); }catch(_){}
-  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
-  push("https://novagapp-mart.onrender.com");
-  return out;
-}
-
-async function apiPost(path, payload){
-  for(const base of apiBases()){
-    try{
-      const res = await fetch(base + path, {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify(payload || {})
-      });
-      const json = await res.json().catch(()=>null);
-      if(res.ok && json?.ok) return json;
-    }catch(_){}
-  }
-  return null;
-}
-
-async function apiGet(path){
-  for(const base of apiBases()){
-    try{
-      const res = await fetch(base + path, { cache:"no-store" });
-      const json = await res.json().catch(()=>null);
-      if(res.ok && json?.ok) return json;
-    }catch(_){}
-  }
-  return null;
-}
-
-async function loadUser(){
-  if(!supa?.auth){
-    location.href = "login.html";
-    return;
-  }
-  const { data } = await supa.auth.getSession();
-  me = data?.session?.user || null;
-  if(!me){
-    location.href = "login.html";
-    return;
-  }
-  document.getElementById("userText").textContent = `${me.email || "Logged in"} (${me.id})`;
-  document.getElementById("displayName").value = (me.user_metadata?.full_name || me.user_metadata?.name || "").slice(0, 48);
-}
-
-async function loadRoles(){
-  if(!me) return;
-  const out = await apiGet(`/api/local/roles?user_id=${encodeURIComponent(me.id)}`);
-  const roleBox = document.getElementById("roleBox");
-  roleBox.innerHTML = "";
-  const roles = Array.isArray(out?.roles) ? out.roles : [];
-  if(!roles.length){
-    roleBox.innerHTML = `<span class="muted">No active role yet.</span>`;
-    return;
-  }
-  roles.forEach(r => {
-    const el = document.createElement("span");
-    el.className = "pill";
-    el.textContent = `${String(r.role || "").toUpperCase()}${r.fee_required_inr > 0 ? " (Paid)" : ""}`;
-    roleBox.appendChild(el);
-  });
-}
-
-async function enroll(role, paidRequired){
-  if(!me) return;
-  const displayName = document.getElementById("displayName").value.trim();
-  const phone = document.getElementById("phone").value.trim();
-  if(!displayName || !phone){
-    alert("Display name and phone are required.");
-    return;
-  }
-  let paymentRef = "";
-  if(paidRequired){
-    const feeOrder = await apiPost("/api/local/role/fee/order", {
-      user_id: me.id,
-      role
-    });
-    if(!feeOrder?.order?.razorpay_order_id){
-      alert("Unable to create fee order.");
-      return;
-    }
-    if(typeof window.Razorpay !== "function"){
-      alert("Razorpay SDK not loaded.");
-      return;
-    }
-    const paid = await new Promise((resolve) => {
-      const rz = new window.Razorpay({
-        key: feeOrder.order.key_id,
-        amount: feeOrder.order.amount_paise,
-        currency: "INR",
-        name: "NovaGapp Local",
-        description: `${role.toUpperCase()} onboarding fee`,
-        order_id: feeOrder.order.razorpay_order_id,
-        handler: async (resp) => {
-          const verify = await apiPost("/api/local/role/fee/verify", {
-            user_id: me.id,
-            role,
-            razorpay_order_id: resp.razorpay_order_id,
-            razorpay_payment_id: resp.razorpay_payment_id,
-            razorpay_signature: resp.razorpay_signature
-          });
-          resolve(!!verify?.ok);
-        },
-        modal: {
-          ondismiss: () => resolve(false)
-        },
-        prefill: {
-          name: displayName,
-          email: me.email || "",
-          contact: phone
-        }
-      });
-      rz.open();
-    });
-    if(!paid){
-      alert("Fee payment not completed.");
-      return;
-    }
-    paymentRef = `rzp_${Date.now()}`;
-  }
-  const out = await apiPost("/api/local/role/enroll", {
-    user_id: me.id,
-    role,
-    display_name: displayName,
-    phone,
-    fee_paid: true,
-    payment_ref: paymentRef
-  });
-  if(!out){
-    alert("Role activation failed.");
-    return;
-  }
-  alert(`${role.toUpperCase()} role activated.`);
-  loadRoles();
-}
-
-loadUser().then(loadRoles);
-</script>
-</body>
-</html>
+const supa=window.supa||window.novaCreateSupabaseClient();
+const s={me:null,role:"",otpTok:"",otpOk:false,lat:null,lng:null,wType:""};
+let map=null,mk=null;
+const q=(id)=>document.getElementById(id);
+const lab=(r)=>r==="rider"?"Driver":r==="seller"?"Food Seller":r==="agent"?"Service Agent":"None";
+const wType=(r)=>r==="rider"?"driver":r==="seller"?"seller":r==="agent"?"agent":"";
+function bases(){const o=[];const p=v=>{v=String(v||"").trim().replace(/\/+$/g,"");if(v&&/^https?:\/\//i.test(v)&&!o.includes(v))o.push(v)};p(window.CONTEST_API_BASE||window.API_BASE||"");try{p(localStorage.getItem("contest_api_base"));p(localStorage.getItem("api_base"))}catch(_){ }if(/^https?:\/\//i.test(location.origin||""))p(location.origin);p("https://novagapp-mart.onrender.com");return o}
+async function g(path){for(const b of bases()){try{const r=await fetch(b+path,{cache:"no-store"});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok)return j}catch(_){ }}return null}
+async function p(path,body){for(const b of bases()){try{const r=await fetch(b+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});const j=await r.json().catch(()=>null);if(r.ok&&j?.ok)return j;if(j?.error)return {ok:false,error:String(j.error||"api_error"),message:String(j.message||"")}}catch(_){ }}return {ok:false,error:"api_unreachable"}}
+function phone(v){v=String(v||"").trim();if(v.startsWith("+"))return v.replace(/[^\d+]/g,"");const d=v.replace(/\D/g,"");if(d.length===10)return "+91"+d;if(d.length>=11&&d.length<=15)return "+"+d;return v}
+function sel(r){s.role=r;s.wType=wType(r);s.otpTok="";s.otpOk=false;q("sr").textContent=lab(r);["rr","rs","ra"].forEach(id=>q(id).classList.remove("a"));if(r==="rider")q("rr").classList.add("a");if(r==="seller")q("rs").classList.add("a");if(r==="agent")q("ra").classList.add("a");q("fr").classList.toggle("hide",r!=="rider");q("fs").classList.toggle("hide",r!=="seller");q("fa").classList.toggle("hide",r!=="agent");q("os").textContent="OTP reset. Send again."}
+function im(){if(map)return;map=L.map("m",{zoomControl:true}).setView([18.5204,73.8567],13);L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"&copy; OpenStreetMap contributors"}).addTo(map);map.on("click",e=>loc(Number(e.latlng.lat),Number(e.latlng.lng),true))}
+async function rev(lat,lng){try{const u=new URL("https://nominatim.openstreetmap.org/reverse");u.searchParams.set("format","jsonv2");u.searchParams.set("addressdetails","1");u.searchParams.set("zoom","18");u.searchParams.set("lat",String(lat));u.searchParams.set("lon",String(lng));const r=await fetch(u.toString(),{cache:"no-store",headers:{"Accept":"application/json","Accept-Language":"en-IN,en;q=0.9"}});if(!r.ok)return "";const d=await r.json().catch(()=>null);const a=d?.address||{};return ([a.road||a.neighbourhood||a.suburb||"",a.city||a.town||a.village||a.county||"",a.state||"",a.postcode||""].filter(Boolean).join(", ")||String(d?.display_name||"")).slice(0,180)}catch(_){return ""}}
+async function loc(lat,lng,c){if(!Number.isFinite(lat)||!Number.isFinite(lng))return;s.lat=lat;s.lng=lng;if(!mk){mk=L.marker([lat,lng],{draggable:true}).addTo(map);mk.on("dragend",()=>{const p=mk.getLatLng();loc(Number(p.lat),Number(p.lng),false)})}else mk.setLatLng([lat,lng]);if(c&&map)map.setView([lat,lng],Math.max(15,map.getZoom()));const a=await rev(lat,lng);if(a)q("ad").value=a}
+async function gps(){im();if(!navigator.geolocation){q("gs").textContent="GPS unsupported";return}q("gs").textContent="Detecting GPS...";navigator.geolocation.getCurrentPosition(async pos=>{const lat=Number(pos?.coords?.latitude),lng=Number(pos?.coords?.longitude),acc=Math.round(Number(pos?.coords?.accuracy||0));if(!Number.isFinite(lat)||!Number.isFinite(lng)){q("gs").textContent="GPS read failed";return}await loc(lat,lng,true);q("gs").textContent=`GPS locked (${acc}m)`},err=>{q("gs").textContent=`Permission required (${String(err?.message||"denied")})`},{enableHighAccuracy:true,timeout:20000,maximumAge:0})}
+async function me(){const {data}=await supa.auth.getSession();s.me=data?.session?.user||null;if(!s.me){location.href="login.html";return null}q("u").textContent=`${s.me.email||"Logged in"} (${s.me.id})`;q("nm").value=String(s.me?.user_metadata?.full_name||s.me?.user_metadata?.name||"").slice(0,80);if(s.me?.phone)q("ph").value=String(s.me.phone||"").slice(0,30);return s.me}
+async function sendOtp(){const u=await me();if(!u)return;if(!s.role){alert("Select role first");return}const ph=phone(q("ph").value);if(!ph){alert("Enter valid phone");return}q("ph").value=ph;q("os").textContent="Sending OTP...";const out=await p("/api/local/provider/otp/send",{user_id:u.id,phone:ph});if(!out?.ok){q("os").textContent=`OTP failed: ${String(out?.error||"send_failed")}`;return}s.otpTok=String(out.otp_token||"");s.otpOk=false;q("os").textContent=`OTP sent (${String(out.delivery||"in_app")})`;if(out.otp_preview)alert(`OTP preview: ${out.otp_preview}`)}
+async function verifyOtp(){const u=await me();if(!u)return;if(!s.otpTok){alert("Send OTP first");return}const otp=String(q("otp").value||"").trim();if(!/^\d{6}$/.test(otp)){alert("Enter 6 digit OTP");return}const out=await p("/api/local/provider/otp/verify",{user_id:u.id,otp_token:s.otpTok,otp});if(!out?.ok){s.otpOk=false;q("os").textContent=`OTP verify failed: ${String(out?.error||"invalid")}`;return}s.otpOk=true;q("os").textContent="OTP verified"}
+async function fee(role){const u=await me();if(!u)throw new Error("login_required");const o=await p("/api/local/role/fee/order",{user_id:u.id,role});if(!o?.ok||!o?.order?.razorpay_order_id)throw new Error(String(o?.error||"fee_order_failed"));if(typeof window.Razorpay!=="function")throw new Error("razorpay_sdk_missing");const nm=String(q("nm").value||"").trim(),ph=String(q("ph").value||"").trim();return new Promise((res,rej)=>{const rz=new window.Razorpay({key:String(o.order.key_id||""),amount:Number(o.order.amount_paise||50000),currency:"INR",name:"NovaGapp",description:`${lab(role)} provider fee`,order_id:String(o.order.razorpay_order_id||""),prefill:{name:nm,email:s.me?.email||"",contact:ph},handler:async r=>{const v=await p("/api/local/role/fee/verify",{user_id:u.id,role,razorpay_order_id:String(r?.razorpay_order_id||""),razorpay_payment_id:String(r?.razorpay_payment_id||""),razorpay_signature:String(r?.razorpay_signature||"")});if(!v?.ok){rej(new Error(String(v?.error||"fee_verify_failed")));return}res({payment_ref:String(r?.razorpay_payment_id||"")})},modal:{ondismiss:()=>rej(new Error("payment_cancelled"))}});rz.open()})}
+async function upDriver(uid,nm,ph){const e=await g(`/api/local/listings/for-owner?user_id=${encodeURIComponent(uid)}&listing_type=ride`);const ex=Array.isArray(e?.listings)?e.listings[0]:null;const body={user_id:uid,listing_type:"ride",store_name:nm,phone:ph,lat:s.lat,lng:s.lng,open_now:true,ride_vehicle_type:String(q("vtype").value||"auto"),vehicle_number:String(q("vno").value||"").trim(),base_fare_inr:Number(q("bf").value||0),per_km_rate_inr:Number(q("pk").value||0),per_min_rate_inr:Number(q("pm").value||0),service_radius_km:Number(q("rrad").value||5),documents_url:String(q("docs").value||"").trim()};if(!body.vehicle_number)return {ok:false,error:"vehicle_number_required"};if(ex?.id)return p("/api/local/listings/update",Object.assign({listing_id:String(ex.id)},body));return p("/api/local/listings/create",body)}
+async function upSeller(uid,ph){const type=String(q("stype").value||"food");const name=String(q("sn").value||"").trim();if(!name)return {ok:false,error:"store_name_required"};const e=await g(`/api/local/listings/for-owner?user_id=${encodeURIComponent(uid)}&listing_type=${encodeURIComponent(type)}`);const ex=Array.isArray(e?.listings)?e.listings[0]:null;const body={user_id:uid,listing_type:type,store_name:name,phone:ph,image_url:String(q("si").value||"").trim(),lat:s.lat,lng:s.lng,open_now:true,delivery_charge_inr:Number(q("dc").value||0),minimum_order_inr:Number(q("mo").value||0),open_time:String(q("ot").value||"").trim(),close_time:String(q("ct").value||"").trim(),self_delivery:true};if(ex?.id)return p("/api/local/listings/update",Object.assign({listing_id:String(ex.id)},body));return p("/api/local/listings/create",body)}
+async function upAgent(uid,ph){const title=String(q("at").value||"").trim();if(!title)return {ok:false,error:"agent_title_required"};return p("/api/local/agents/create",{user_id:uid,service_category:String(q("ac").value||"electrician"),title,phone:ph,price_per_visit_inr:Number(q("av").value||0),per_hour_rate_inr:Number(q("ah").value||0),experience_years:Number(q("ae").value||0),service_radius_km:Number(q("ar").value||5),available_now:String(q("aa").value||"true")==="true",lat:s.lat,lng:s.lng})}
+async function activate(){const u=await me();if(!u)return;if(!s.role){alert("Select role");return}if(!s.otpOk||!s.otpTok){alert("OTP verify first");return}if(!Number.isFinite(s.lat)||!Number.isFinite(s.lng)){alert("Set GPS location first");return}const nm=String(q("nm").value||"").trim(),ph=phone(q("ph").value);if(!nm||!ph){alert("Name and phone required");return}q("as").textContent="Processing...";try{const pay=await fee(s.role);const en=await p("/api/local/role/enroll",{user_id:u.id,role:s.role,display_name:nm,phone:ph,fee_paid:true,payment_ref:String(pay?.payment_ref||""),otp_token:s.otpTok});if(!en?.ok)throw new Error(String(en?.error||"role_enroll_failed"));let pr={ok:true};if(s.role==="rider")pr=await upDriver(u.id,nm,ph);if(s.role==="seller")pr=await upSeller(u.id,ph);if(s.role==="agent")pr=await upAgent(u.id,ph);if(!pr?.ok)throw new Error(String(pr?.error||"profile_update_failed"));q("as").textContent=`${lab(s.role)} activated`;await roles();await rw();alert(`${lab(s.role)} activated`)}catch(e){q("as").textContent=`Failed: ${String(e?.message||e||"unknown")}`}}
+async function roles(){if(!s.me)return;const out=await g(`/api/local/roles?user_id=${encodeURIComponent(s.me.id)}`);const rows=Array.isArray(out?.roles)?out.roles:[];const b=q("rb");b.innerHTML="";if(!rows.length){b.innerHTML='<span class="mut">No active role</span>';return}rows.forEach(r=>{const p=document.createElement("span");p.className="pill";p.textContent=`${lab(String(r.role||""))} | ${String(r.status||"active")}`;b.appendChild(p)})}
+async function rw(){if(!s.me){q("wt").textContent="Login required";return}const t=s.wType||wType(s.role);if(!t){q("wt").textContent="Select role";return}const w=await g(`/api/local/wallet?owner_user_id=${encodeURIComponent(s.me.id)}&owner_type=${encodeURIComponent(t)}`);const row=w?.wallet||(Array.isArray(w?.wallets)?w.wallets[0]:null);const tx=await g(`/api/local/transactions?user_id=${encodeURIComponent(s.me.id)}&owner_type=${encodeURIComponent(t)}&limit=5`);q("wt").textContent=row?`${t} wallet: INR ${Number(row.balance_inr||0).toFixed(2)} | tx: ${Array.isArray(tx?.transactions)?tx.transactions.length:0}`:`${t} wallet not found`}
+function bind(){q("send").onclick=()=>sendOtp().catch(()=>{});q("ver").onclick=()=>verifyOtp().catch(()=>{});q("gps").onclick=()=>gps().catch(()=>{});q("act").onclick=()=>activate().catch(()=>{})}
+(async()=>{im();bind();await me();await roles();})();
+</script></body></html>
