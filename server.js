@@ -3544,10 +3544,13 @@ const contestAccountCountCache = {
   pending: null
 };
 
+const CONTEST_FREE_AD_REWARD_COINS = 5;
+const CONTEST_AD_REWARD_COOLDOWN_MS = 12 * 1000;
+
 const CONTEST_PACKS = [
-  { id:"vote_1", votes:1, usd:5, label:"1 Vote = $5" },
-  { id:"vote_7", votes:7, usd:25, label:"7 Votes = $25" },
-  { id:"vote_20", votes:20, usd:50, label:"20 Votes = $50" }
+  { id:"vote_1", votes:1, coins:5000, usd:5, label:"5000 NovaCoins = $5 (1 Vote)" },
+  { id:"vote_7", votes:7, coins:25000, usd:25, label:"25000 NovaCoins = $25 (7 Votes)" },
+  { id:"vote_20", votes:20, coins:50000, usd:50, label:"50000 NovaCoins = $50 (20 Votes)" }
 ];
 
 const CONTESTS = [
@@ -3739,6 +3742,74 @@ function getContestPackById(packId){
   return CONTEST_PACKS.find(p => p.id === packId) || null;
 }
 
+function contestPackVotes(packLike){
+  return Math.max(0, Math.round(safeNumber(packLike?.votes)));
+}
+
+function contestPackCoins(packLike){
+  return Math.max(0, Math.round(safeNumber(packLike?.coins)));
+}
+
+function applyContestVotes(state, user, contestIdInput, sideIdInput, votesInput){
+  const contestId = sanitizeToken(contestIdInput, 40).toLowerCase();
+  const sideId = sanitizeToken(sideIdInput, 40).toLowerCase();
+  const votes = Math.max(0, Math.round(safeNumber(votesInput)));
+  if(!contestId || !sideId || !votes){
+    return 0;
+  }
+
+  ensureContestVoteBuckets(state);
+  if(!state.votes[contestId] || typeof state.votes[contestId] !== "object"){
+    state.votes[contestId] = {};
+  }
+  state.votes[contestId][sideId] = safeNumber(state.votes[contestId][sideId]) + votes;
+
+  if(user){
+    user.paid_votes = safeNumber(user.paid_votes) + votes;
+    if(!user.contest_votes || typeof user.contest_votes !== "object"){
+      user.contest_votes = {};
+    }
+    user.contest_votes[contestId] = safeNumber(user.contest_votes[contestId]) + votes;
+  }
+
+  return votes;
+}
+
+function spendContestCoinsForVotes(state, user, contestId, sideId, packLike){
+  const requiredCoins = contestPackCoins(packLike);
+  const voteCount = contestPackVotes(packLike);
+  if(!user || !requiredCoins || !voteCount){
+    return { ok:false, error:"invalid_pack" };
+  }
+
+  const balance = Math.max(0, Math.round(safeNumber(user.coin_balance)));
+  if(balance < requiredCoins){
+    return {
+      ok:false,
+      error:"insufficient_coins",
+      required_coins: requiredCoins,
+      balance_coins: balance
+    };
+  }
+
+  user.coin_balance = balance - requiredCoins;
+  user.coins_spent = Math.max(0, Math.round(safeNumber(user.coins_spent))) + requiredCoins;
+
+  const votesAdded = applyContestVotes(state, user, contestId, sideId, voteCount);
+  if(!votesAdded){
+    user.coin_balance += requiredCoins;
+    user.coins_spent = Math.max(0, Math.round(safeNumber(user.coins_spent) - requiredCoins));
+    return { ok:false, error:"vote_apply_failed" };
+  }
+
+  return {
+    ok:true,
+    coins_spent: requiredCoins,
+    votes_added: votesAdded,
+    balance_coins: Math.max(0, Math.round(safeNumber(user.coin_balance)))
+  };
+}
+
 function createDefaultContestState(){
   const now = new Date().toISOString();
   const votes = {};
@@ -3756,6 +3827,7 @@ function createDefaultContestState(){
     orders: {},
     votes,
     installs: {},
+    ad_reward_log: {},
     share_visit_log: {},
     created_at: now,
     updated_at: now
@@ -3789,6 +3861,7 @@ function normalizeContestState(state){
   if(!next.users || typeof next.users !== "object") next.users = {};
   if(!next.orders || typeof next.orders !== "object") next.orders = {};
   if(!next.installs || typeof next.installs !== "object") next.installs = {};
+  if(!next.ad_reward_log || typeof next.ad_reward_log !== "object") next.ad_reward_log = {};
   if(!next.share_visit_log || typeof next.share_visit_log !== "object") next.share_visit_log = {};
   ensureContestVoteBuckets(next);
   if(!next.created_at) next.created_at = new Date().toISOString();
@@ -3879,6 +3952,11 @@ function ensureContestUser(state, userIdInput, userNameInput){
       unique_share_visits: 0,
       verified_installs: 0,
       paid_votes: 0,
+      coin_balance: 0,
+      coins_earned: 0,
+      coins_spent: 0,
+      ad_reward_claims: 0,
+      last_ad_reward_at: "",
       contest_votes: {},
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -3894,6 +3972,11 @@ function ensureContestUser(state, userIdInput, userNameInput){
   user.unique_share_visits = safeNumber(user.unique_share_visits);
   user.verified_installs = safeNumber(user.verified_installs);
   user.paid_votes = safeNumber(user.paid_votes);
+  user.coin_balance = Math.max(0, Math.round(safeNumber(user.coin_balance)));
+  user.coins_earned = Math.max(0, Math.round(safeNumber(user.coins_earned)));
+  user.coins_spent = Math.max(0, Math.round(safeNumber(user.coins_spent)));
+  user.ad_reward_claims = Math.max(0, Math.round(safeNumber(user.ad_reward_claims)));
+  user.last_ad_reward_at = String(user.last_ad_reward_at || "").trim().slice(0, 64);
   if(!user.share_actions_by_type || typeof user.share_actions_by_type !== "object"){
     user.share_actions_by_type = {};
   }
@@ -4363,6 +4446,11 @@ function buildContestPayload(state, userIdInput, userNameInput, extra){
       unique_share_visits: safeNumber(user.unique_share_visits),
       verified_installs: safeNumber(user.verified_installs),
       paid_votes: safeNumber(user.paid_votes),
+      coin_balance: Math.max(0, Math.round(safeNumber(user.coin_balance))),
+      coins_earned: Math.max(0, Math.round(safeNumber(user.coins_earned))),
+      coins_spent: Math.max(0, Math.round(safeNumber(user.coins_spent))),
+      ad_reward_claims: Math.max(0, Math.round(safeNumber(user.ad_reward_claims))),
+      last_ad_reward_at: String(user.last_ad_reward_at || ""),
       contest_votes: user.contest_votes || {},
       share_weight: computeShareWeight(user),
       weighted_entries: Math.round(computeEntryWeight(user) * 100) / 100
@@ -4387,6 +4475,7 @@ function buildContestPayload(state, userIdInput, userNameInput, extra){
     leaderboard: buildLeaderboard(state, 10),
     top_sharers: buildTopSharers(state, 10),
     user_stats: userStats,
+    free_ad_reward_coins: CONTEST_FREE_AD_REWARD_COINS,
     razorpay_ready: isContestRazorpayConfigured(),
     supabase_sync_ready: isContestSupabaseConfigured()
   };
@@ -6692,6 +6781,217 @@ app.post("/api/contest/install", async (req, res) => {
   }
 });
 
+app.post("/api/contest/coins/reward-ad", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  const userName = sanitizeDisplayName(req.body?.user_name);
+
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+  if(!canContestUserPay(userId)){
+    return res.status(401).json({
+      ok:false,
+      error:"login_required",
+      message:"Please login with a valid account."
+    });
+  }
+
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+
+  try{
+    const result = await mutateContestState(state => {
+      const user = ensureContestUser(state, userId, userName);
+      if(!state.ad_reward_log || typeof state.ad_reward_log !== "object"){
+        state.ad_reward_log = {};
+      }
+
+      const tracker = state.ad_reward_log[userId] && typeof state.ad_reward_log[userId] === "object"
+        ? state.ad_reward_log[userId]
+        : {};
+      const lastClaimMs = Math.max(0, Math.round(safeNumber(tracker.last_claim_ms)));
+      if(lastClaimMs > 0){
+        const elapsed = Math.max(0, nowMs - lastClaimMs);
+        if(elapsed < CONTEST_AD_REWARD_COOLDOWN_MS){
+          const retryAfterMs = CONTEST_AD_REWARD_COOLDOWN_MS - elapsed;
+          return {
+            ok:false,
+            error:"ad_reward_cooldown",
+            retry_after_ms: retryAfterMs,
+            retry_after_seconds: Math.max(1, Math.ceil(retryAfterMs / 1000)),
+            balance_coins: Math.max(0, Math.round(safeNumber(user.coin_balance))),
+            data: buildContestPayload(state, userId, userName)
+          };
+        }
+      }
+
+      user.coin_balance = Math.max(0, Math.round(safeNumber(user.coin_balance))) + CONTEST_FREE_AD_REWARD_COINS;
+      user.coins_earned = Math.max(0, Math.round(safeNumber(user.coins_earned))) + CONTEST_FREE_AD_REWARD_COINS;
+      user.ad_reward_claims = Math.max(0, Math.round(safeNumber(user.ad_reward_claims))) + 1;
+      user.last_ad_reward_at = nowIso;
+
+      state.ad_reward_log[userId] = {
+        last_claim_ms: nowMs,
+        last_claim_at: nowIso,
+        total_claims: Math.max(0, Math.round(safeNumber(tracker.total_claims))) + 1
+      };
+
+      return {
+        ok:true,
+        reward_coins: CONTEST_FREE_AD_REWARD_COINS,
+        balance_coins: Math.max(0, Math.round(safeNumber(user.coin_balance))),
+        user_snapshot: safeCloneJson(user),
+        data: buildContestPayload(state, userId, userName)
+      };
+    });
+
+    if(result?.error === "ad_reward_cooldown"){
+      return res.status(429).json({
+        ok:false,
+        error:"ad_reward_cooldown",
+        retry_after_ms: result.retry_after_ms || CONTEST_AD_REWARD_COOLDOWN_MS,
+        retry_after_seconds: result.retry_after_seconds || Math.ceil(CONTEST_AD_REWARD_COOLDOWN_MS / 1000),
+        balance_coins: result.balance_coins || 0,
+        message:"Please wait before claiming another ad reward.",
+        data: result.data || null
+      });
+    }
+
+    await syncContestSnapshots({ userLike: result?.user_snapshot || result?.data?.user_stats });
+    return res.json({
+      ok:true,
+      reward_coins: result?.reward_coins || CONTEST_FREE_AD_REWARD_COINS,
+      balance_coins: result?.balance_coins || 0,
+      data: result?.data || null
+    });
+  }catch(err){
+    console.error("contest_ad_reward_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"contest_ad_reward_failed" });
+  }
+});
+
+app.post("/api/contest/vote/coins", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  const userName = sanitizeDisplayName(req.body?.user_name);
+  const contestId = sanitizeToken(req.body?.contest_id, 40).toLowerCase();
+  const sideId = sanitizeToken(req.body?.side_id, 40).toLowerCase();
+  const packId = sanitizeToken(req.body?.pack_id, 40).toLowerCase();
+
+  if(!userId || !contestId || !sideId || !packId){
+    return res.status(400).json({ ok:false, error:"user_id_contest_id_side_id_pack_id_required" });
+  }
+  if(!canContestUserPay(userId)){
+    return res.status(401).json({
+      ok:false,
+      error:"login_required",
+      message:"Please login with a valid account before voting."
+    });
+  }
+
+  const contest = getContestById(contestId);
+  const pack = getContestPackById(packId);
+  const side = contest?.sides?.find(item => item.id === sideId) || null;
+  if(!contest || !pack || !side){
+    return res.status(400).json({ ok:false, error:"invalid_contest_or_pack_or_side" });
+  }
+
+  const requiredCoins = contestPackCoins(pack);
+  const voteCount = contestPackVotes(pack);
+  if(!requiredCoins || !voteCount){
+    return res.status(400).json({ ok:false, error:"invalid_coin_pack" });
+  }
+
+  try{
+    const result = await mutateContestState(state => {
+      const user = ensureContestUser(state, userId, userName);
+      const spendResult = spendContestCoinsForVotes(state, user, contest.id, side.id, pack);
+      if(!spendResult.ok){
+        return {
+          ok:false,
+          error: spendResult.error || "coin_vote_failed",
+          required_coins: spendResult.required_coins || requiredCoins,
+          balance_coins: spendResult.balance_coins ?? Math.max(0, Math.round(safeNumber(user.coin_balance))),
+          data: buildContestPayload(state, userId, userName)
+        };
+      }
+
+      const nowIso = new Date().toISOString();
+      const coinOrderId = `coin_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+      const orderRecord = {
+        razorpay_order_id: coinOrderId,
+        receipt: coinOrderId,
+        status: "paid",
+        user_id: userId,
+        contest_id: contest.id,
+        side_id: side.id,
+        pack_id: pack.id,
+        votes: spendResult.votes_added || voteCount,
+        coins: spendResult.coins_spent || requiredCoins,
+        amount_usd: 0,
+        amount_inr_paise: 0,
+        usd_inr_rate: 0,
+        currency: "COIN",
+        payment_id: "coin_wallet",
+        signature: "coin_wallet",
+        created_at: nowIso,
+        paid_at: nowIso,
+        updated_at: nowIso
+      };
+      state.orders[coinOrderId] = orderRecord;
+
+      return {
+        ok:true,
+        votes_added: spendResult.votes_added || voteCount,
+        coins_spent: spendResult.coins_spent || requiredCoins,
+        balance_coins: spendResult.balance_coins ?? Math.max(0, Math.round(safeNumber(user.coin_balance))),
+        order_snapshot: safeCloneJson(orderRecord),
+        user_snapshot: safeCloneJson(user),
+        vote_snapshot: {
+          contest_id: contest.id,
+          side_id: side.id,
+          votes: safeNumber(state.votes?.[contest.id]?.[side.id])
+        },
+        data: buildContestPayload(state, userId, userName)
+      };
+    });
+
+    if(!result?.ok){
+      if(result?.error === "insufficient_coins"){
+        return res.status(409).json({
+          ok:false,
+          error:"insufficient_coins",
+          required_coins: result.required_coins || requiredCoins,
+          balance_coins: result.balance_coins || 0,
+          message:"Not enough NovaCoins for selected pack.",
+          data: result.data || null
+        });
+      }
+      return res.status(400).json({
+        ok:false,
+        error: result?.error || "coin_vote_failed",
+        data: result?.data || null
+      });
+    }
+
+    await syncContestSnapshots({
+      userLike: result?.user_snapshot || result?.data?.user_stats,
+      orderLike: result?.order_snapshot,
+      voteLike: result?.vote_snapshot
+    });
+
+    return res.json({
+      ok:true,
+      votes_added: result?.votes_added || voteCount,
+      coins_spent: result?.coins_spent || requiredCoins,
+      balance_coins: result?.balance_coins || 0,
+      data: result?.data || null
+    });
+  }catch(err){
+    console.error("contest_coin_vote_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"contest_coin_vote_failed" });
+  }
+});
+
 app.post("/api/contest/order", async (req, res) => {
   const userId = sanitizeUserId(req.body?.user_id);
   const userName = sanitizeDisplayName(req.body?.user_name);
@@ -6753,7 +7053,8 @@ app.post("/api/contest/order", async (req, res) => {
         contest_id: contest.id,
         side_id: side.id,
         pack_id: pack.id,
-        votes: pack.votes,
+        votes: contestPackVotes(pack),
+        coins: contestPackCoins(pack),
         amount_usd: pack.usd,
         amount_inr_paise: amountPaise,
         usd_inr_rate: usdInrRate,
@@ -6781,7 +7082,8 @@ app.post("/api/contest/order", async (req, res) => {
         amount_paise: amountPaise,
         amount_inr: Math.round((amountPaise / 100) * 100) / 100,
         currency: "INR",
-        votes: pack.votes,
+        votes: contestPackVotes(pack),
+        coins: contestPackCoins(pack),
         contest_id: contest.id,
         side_id: side.id,
         pack_id: pack.id
@@ -6876,7 +7178,8 @@ app.post("/api/contest/order/verify", async (req, res) => {
           contest_id: fallbackContest.id,
           side_id: fallbackSide.id,
           pack_id: fallbackPack.id,
-          votes: fallbackPack.votes,
+          votes: contestPackVotes(fallbackPack),
+          coins: contestPackCoins(fallbackPack),
           amount_usd: fallbackPack.usd,
           amount_inr_paise: paymentAmountPaise,
           usd_inr_rate: 0,
@@ -6913,25 +7216,47 @@ app.post("/api/contest/order/verify", async (req, res) => {
 
       let payerSnapshot = null;
       if(order.status !== "paid"){
+        const resolvedPack = getContestPackById(order.pack_id);
+        const packVotes = contestPackVotes(resolvedPack || order);
+        const packCoins = contestPackCoins(resolvedPack || order);
         order.status = "paid";
         order.payment_id = paymentId;
         order.signature = signature;
         order.paid_at = new Date().toISOString();
         order.updated_at = new Date().toISOString();
-
-        ensureContestVoteBuckets(state);
-        if(!state.votes[order.contest_id]){
-          state.votes[order.contest_id] = {};
-        }
-        state.votes[order.contest_id][order.side_id] =
-          safeNumber(state.votes[order.contest_id][order.side_id]) + safeNumber(order.votes);
+        order.votes = packVotes;
+        order.coins = packCoins;
+        let votesAdded = 0;
 
         if(payerId){
           const user = ensureContestUser(state, payerId, userName);
-          user.paid_votes += safeNumber(order.votes);
-          user.contest_votes[order.contest_id] =
-            safeNumber(user.contest_votes[order.contest_id]) + safeNumber(order.votes);
+          if(packCoins > 0){
+            user.coin_balance = Math.max(0, Math.round(safeNumber(user.coin_balance))) + packCoins;
+            user.coins_earned = Math.max(0, Math.round(safeNumber(user.coins_earned))) + packCoins;
+          }
+          if(packCoins > 0 && packVotes > 0){
+            const spendResult = spendContestCoinsForVotes(state, user, order.contest_id, order.side_id, {
+              coins: packCoins,
+              votes: packVotes
+            });
+            if(spendResult.ok){
+              votesAdded = spendResult.votes_added || 0;
+              order.coins_spent = spendResult.coins_spent || 0;
+            }
+          }
+          if(!votesAdded && packVotes > 0){
+            votesAdded = applyContestVotes(state, user, order.contest_id, order.side_id, packVotes);
+            if(votesAdded){
+              order.coins_spent = 0;
+            }
+          }
           payerSnapshot = safeCloneJson(user);
+        }else if(packVotes > 0){
+          votesAdded = applyContestVotes(state, null, order.contest_id, order.side_id, packVotes);
+        }
+
+        if(votesAdded > 0){
+          order.votes = votesAdded;
         }
       }else if(payerId){
         const user = ensureContestUser(state, payerId, userName);

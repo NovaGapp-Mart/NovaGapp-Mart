@@ -432,6 +432,39 @@ h2{
   cursor:not-allowed;
   box-shadow:none;
 }
+.coin-balance{
+  margin-top:8px;
+  font-size:13px;
+  font-weight:800;
+  color:#1f2f4d;
+}
+.coin-actions{
+  margin-top:10px;
+  display:grid;
+  grid-template-columns:repeat(2,minmax(180px,1fr));
+  gap:8px;
+}
+.coin-action-btn{
+  border:1px solid #d9e1f1;
+  border-radius:10px;
+  background:#fff;
+  color:#1b2d4a;
+  font-weight:800;
+  padding:10px 12px;
+  cursor:pointer;
+}
+.coin-action-btn:hover:not(:disabled){
+  border-color:#ffba81;
+}
+.coin-action-btn:disabled{
+  opacity:.56;
+  cursor:not-allowed;
+}
+.coin-action-btn.primary{
+  background:#fff7ee;
+  color:#c64c00;
+  border-color:#ffd8b1;
+}
 .selection-summary{
   margin-top:12px;
   border:1px solid #e5ebf7;
@@ -547,6 +580,56 @@ h2{
 .toast.show{opacity:1}
 .toast.err{background:#b23622}
 .toast.ok{background:#1f8b4b}
+.ad-modal{
+  position:fixed;
+  inset:0;
+  background:rgba(9,14,24,.72);
+  display:none;
+  align-items:center;
+  justify-content:center;
+  z-index:120;
+  padding:14px;
+}
+.ad-modal.show{display:flex}
+.ad-modal-card{
+  width:min(460px,96vw);
+  background:#fff;
+  border-radius:16px;
+  border:1px solid #e3eaf8;
+  padding:14px;
+}
+.ad-slot{
+  margin-top:10px;
+  border:1px dashed #d4dcf0;
+  border-radius:10px;
+  min-height:120px;
+  padding:8px;
+  background:#f9fbff;
+}
+.ad-actions{
+  margin-top:10px;
+  display:grid;
+  grid-template-columns:repeat(2,minmax(120px,1fr));
+  gap:8px;
+}
+.ad-actions button{
+  border:1px solid #d5e0f2;
+  border-radius:10px;
+  background:#fff;
+  color:#223451;
+  font-weight:800;
+  padding:10px 12px;
+  cursor:pointer;
+}
+.ad-actions button.primary{
+  background:#ff6a00;
+  border-color:#ff6a00;
+  color:#fff;
+}
+.ad-actions button:disabled{
+  opacity:.56;
+  cursor:not-allowed;
+}
 @media (max-width:980px){
   .metrics{grid-template-columns:repeat(2,minmax(140px,1fr))}
   .battle{grid-template-columns:1fr}
@@ -573,6 +656,8 @@ h2{
   .prize-card{padding:24px 18px}
   .fighter{min-height:auto}
   .pack-btn{flex:1 1 140px}
+  .coin-actions{grid-template-columns:1fr}
+  .ad-actions{grid-template-columns:1fr}
 }
 </style>
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9977276800228616"
@@ -627,7 +712,8 @@ h2{
 
   <section class="card vote-card">
     <h2 id="voteTitle">Voting and Pricing</h2>
-    <p class="muted" id="priceInfo">1 Vote = $5, 7 Votes = $25, 20 Votes = $50</p>
+    <p class="muted" id="priceInfo">5000 NovaCoins = $5 -> 1 vote, 25000 NovaCoins = $25 -> 7 votes, 50000 NovaCoins = $50 -> 20 votes</p>
+    <p class="coin-balance" id="coinBalanceLine">NovaCoins balance: 0</p>
     <div class="side-row" id="sideRow"></div>
     <div class="pack-row" id="packRow"></div>
     <div class="selection-summary" id="selectionSummary">Select side and pack to continue checkout.</div>
@@ -635,7 +721,11 @@ h2{
       <span class="pill" id="apiPill">API: Checking</span>
       <span class="pill" id="gatewayPill">Gateway: Checking</span>
     </div>
-    <button id="payBtn" type="button">Pay and Vote</button>
+    <button id="payBtn" type="button">Buy Coins and Vote</button>
+    <div class="coin-actions">
+      <button id="coinVoteBtn" class="coin-action-btn" type="button">Use NovaCoins to Vote</button>
+      <button id="freeCoinsBtn" class="coin-action-btn primary" type="button">Get Free Coins (+5)</button>
+    </div>
     <p class="notice" id="payNotice">Select side and pack to open Razorpay payment.</p>
   </section>
 
@@ -646,6 +736,7 @@ h2{
         <h3 id="myStatsTitle">My Participation</h3>
         <div class="mini-metrics">
           <div><span id="myPaidVotesLabel">Paid votes</span>: <strong id="myPaidVotesValue">0</strong></div>
+          <div><span id="myCoinsLabel">NovaCoins</span>: <strong id="myCoinsValue">0</strong></div>
           <div><span id="myWeightedLabel">Weighted entries</span>: <strong id="myWeightedValue">0</strong></div>
           <div><span id="mySharesLabel">Share actions</span>: <strong id="mySharesValue">0</strong></div>
         </div>
@@ -659,6 +750,27 @@ h2{
 </main>
 
 <div class="toast" id="toast"></div>
+<div class="ad-modal" id="adModal" aria-hidden="true">
+  <div class="ad-modal-card">
+    <h3 id="adModalTitle">Watch ad and earn 5 NovaCoins</h3>
+    <p class="notice" id="adModalDesc">Wait until countdown ends, then claim your free coins.</p>
+    <div class="ad-slot">
+      <ins
+        class="adsbygoogle"
+        id="contestRewardAdSlot"
+        style="display:block"
+        data-ad-client="ca-pub-9977276800228616"
+        data-ad-slot="4433221100"
+        data-ad-format="auto"
+        data-full-width-responsive="true"></ins>
+    </div>
+    <p class="notice" id="adCountdown">Please wait...</p>
+    <div class="ad-actions">
+      <button class="primary" id="adClaimBtn" type="button" disabled>Claim 5 Coins</button>
+      <button id="adCloseBtn" type="button">Close</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const SUPABASE_URL = window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "";
@@ -700,6 +812,7 @@ const state = {
   userEmail:"",
   selectedSide:"",
   selectedPack:"",
+  actionBusy:false,
   paymentBusy:false,
   checkoutActive:false,
   refreshPauseUntil:0,
@@ -711,7 +824,12 @@ const state = {
   realtimeRefreshTimer:0,
   apiRetryTimer:0,
   apiRetryBusy:false,
-  compactMode:false
+  compactMode:false,
+  adModalOpen:false,
+  adCountdownLeft:0,
+  adCountdownTimer:0,
+  adRewardReady:false,
+  adSlotPushed:false
 };
 
 const dom = {
@@ -738,17 +856,22 @@ const dom = {
   packRow:document.getElementById("packRow"),
   voteTitle:document.getElementById("voteTitle"),
   priceInfo:document.getElementById("priceInfo"),
+  coinBalanceLine:document.getElementById("coinBalanceLine"),
   selectionSummary:document.getElementById("selectionSummary"),
   apiPill:document.getElementById("apiPill"),
   gatewayPill:document.getElementById("gatewayPill"),
   payBtn:document.getElementById("payBtn"),
+  coinVoteBtn:document.getElementById("coinVoteBtn"),
+  freeCoinsBtn:document.getElementById("freeCoinsBtn"),
   payNotice:document.getElementById("payNotice"),
   insightTitle:document.getElementById("insightTitle"),
   myStatsTitle:document.getElementById("myStatsTitle"),
   myPaidVotesLabel:document.getElementById("myPaidVotesLabel"),
+  myCoinsLabel:document.getElementById("myCoinsLabel"),
   myWeightedLabel:document.getElementById("myWeightedLabel"),
   mySharesLabel:document.getElementById("mySharesLabel"),
   myPaidVotesValue:document.getElementById("myPaidVotesValue"),
+  myCoinsValue:document.getElementById("myCoinsValue"),
   myWeightedValue:document.getElementById("myWeightedValue"),
   mySharesValue:document.getElementById("mySharesValue"),
   leaderboardTitle:document.getElementById("leaderboardTitle"),
@@ -757,7 +880,14 @@ const dom = {
   prizeList:document.getElementById("prizeList"),
   ruleLine:document.getElementById("ruleLine"),
   shareLinkBtn:document.getElementById("shareLinkBtn"),
-  toast:document.getElementById("toast")
+  toast:document.getElementById("toast"),
+  adModal:document.getElementById("adModal"),
+  adModalTitle:document.getElementById("adModalTitle"),
+  adModalDesc:document.getElementById("adModalDesc"),
+  adCountdown:document.getElementById("adCountdown"),
+  adClaimBtn:document.getElementById("adClaimBtn"),
+  adCloseBtn:document.getElementById("adCloseBtn"),
+  adSlot:document.getElementById("contestRewardAdSlot")
 };
 
 function getLangCode(){
@@ -790,10 +920,12 @@ const I18N = {
     supabase_local:"Local only",
     battle_section_title:"Left Side vs Right Side",
     vote_title:"Voting and Pricing",
-    pricing_line:"1 Vote = $5, 7 Votes = $25, 20 Votes = $50",
-    pay_now:"Pay and Vote",
+    pricing_line:"5000 NovaCoins = $5 -> 1 vote, 25000 NovaCoins = $25 -> 7 votes, 50000 NovaCoins = $50 -> 20 votes",
+    coin_balance_label:"NovaCoins balance",
+    coins_label:"NovaCoins",
+    pay_now:"Buy Coins and Vote",
     pay_processing:"Processing payment...",
-    pay_ready_notice:"Real Razorpay payment will open after side and pack selection.",
+    pay_ready_notice:"Razorpay checkout will open for selected NovaCoins pack.",
     gateway_not_ready_notice:"Razorpay live keys are not configured on the server.",
     gateway_live_required_notice:"Razorpay is in test mode. Set live keys before publish.",
     api_offline_notice:"Contest server connection failed. Check live API base.",
@@ -806,18 +938,30 @@ const I18N = {
     api_order_block:"Payment blocked because live contest API is unreachable.",
     razorpay_missing:"Razorpay not loaded",
     login_required_notice:"Please login first to pay and vote.",
-    select_side_pack:"Select side and vote pack",
+    select_side_pack:"Select side and NovaCoins pack",
     vote_success:"Vote success",
+    coin_vote_success:"NovaCoins vote submitted.",
+    coin_vote_btn:"Use NovaCoins to Vote",
+    free_coins_btn:"Get Free Coins (+5)",
+    insufficient_coins_notice:"Not enough NovaCoins for selected pack.",
+    free_coins_success:"5 NovaCoins added.",
+    free_coins_cooldown:"Please wait before next ad reward.",
+    ad_modal_title:"Watch ad and earn 5 NovaCoins",
+    ad_modal_desc:"Wait for countdown, then claim reward.",
+    ad_waiting_label:"Please wait",
+    ad_ready_label:"Reward ready. Claim now.",
+    ad_claim_btn:"Claim 5 Coins",
+    ad_close_btn:"Close",
     verify_failed:"Payment verify failed: ",
     payment_failed:"Payment failed",
     order_failed:"Order creation failed: ",
     order_retrying:"Rechecking contest API and retrying payment...",
     no_contest:"Contest data unavailable",
     open_from_list:"Open from contest list",
-    selection_prompt:"Select side and pack to continue checkout.",
-    selection_need_both:"Choose side and vote pack before payment.",
+    selection_prompt:"Select side and NovaCoins pack to continue.",
+    selection_need_both:"Choose side and NovaCoins pack before action.",
     selection_need_side:"Choose a side before payment.",
-    selection_need_pack:"Choose a vote pack before payment.",
+    selection_need_pack:"Choose a NovaCoins pack before action.",
     selection_ready:"Ready to pay",
     payment_cancelled:"Payment window closed.",
     verify_retry_notice:"Payment received. Vote verification will retry automatically.",
@@ -831,6 +975,7 @@ const I18N = {
     insight_title:"Live Contest Insights",
     my_stats_title:"My Participation",
     my_paid_votes:"Paid votes",
+    my_coins:"NovaCoins",
     my_weighted_entries:"Weighted entries",
     my_share_actions:"Share actions",
     leaderboard_title:"Top Supporters",
@@ -858,10 +1003,12 @@ const I18N = {
     supabase_local:"Local only",
     battle_section_title:"Left side vs Right side",
     vote_title:"Voting aur Pricing",
-    pricing_line:"1 Vote = $5, 7 Votes = $25, 20 Votes = $50",
-    pay_now:"Pay aur Vote",
+    pricing_line:"5000 NovaCoins = $5 -> 1 vote, 25000 NovaCoins = $25 -> 7 votes, 50000 NovaCoins = $50 -> 20 votes",
+    coin_balance_label:"NovaCoins balance",
+    coins_label:"NovaCoins",
+    pay_now:"Coins Buy karo aur Vote karo",
     pay_processing:"Payment process ho raha hai...",
-    pay_ready_notice:"Side aur pack select karte hi real Razorpay payment open hoga.",
+    pay_ready_notice:"Selected NovaCoins pack ke liye Razorpay checkout open hoga.",
     gateway_not_ready_notice:"Server par Razorpay live keys set nahi hain.",
     gateway_live_required_notice:"Razorpay test mode me hai. Publish se pehle live keys set karo.",
     api_offline_notice:"Contest server connection fail hua. Live API base check karo.",
@@ -874,18 +1021,30 @@ const I18N = {
     api_order_block:"Live contest API unreachable hai, payment blocked hai.",
     razorpay_missing:"Razorpay load nahi hua",
     login_required_notice:"Pay aur vote karne se pehle login karo.",
-    select_side_pack:"Pehle side aur vote pack select karo",
+    select_side_pack:"Pehle side aur NovaCoins pack select karo",
     vote_success:"Vote successful",
+    coin_vote_success:"NovaCoins vote submit ho gaya.",
+    coin_vote_btn:"NovaCoins se Vote karo",
+    free_coins_btn:"Free Coins lo (+5)",
+    insufficient_coins_notice:"Selected pack ke liye NovaCoins kam hain.",
+    free_coins_success:"5 NovaCoins add ho gaye.",
+    free_coins_cooldown:"Next ad reward se pehle wait karo.",
+    ad_modal_title:"Ad dekho aur 5 NovaCoins pao",
+    ad_modal_desc:"Countdown complete hone do, phir reward claim karo.",
+    ad_waiting_label:"Please wait",
+    ad_ready_label:"Reward ready. Claim now.",
+    ad_claim_btn:"5 Coins Claim karo",
+    ad_close_btn:"Close",
     verify_failed:"Payment verify fail: ",
     payment_failed:"Payment failed",
     order_failed:"Order creation fail: ",
     order_retrying:"Contest API dobara check karke payment retry ho raha hai...",
     no_contest:"Contest data available nahi hai",
     open_from_list:"Contest list se open karo",
-    selection_prompt:"Checkout continue karne ke liye side aur pack select karo.",
-    selection_need_both:"Payment se pehle side aur vote pack choose karo.",
+    selection_prompt:"Continue karne ke liye side aur NovaCoins pack select karo.",
+    selection_need_both:"Side aur NovaCoins pack dono choose karo.",
     selection_need_side:"Payment se pehle side choose karo.",
-    selection_need_pack:"Payment se pehle vote pack choose karo.",
+    selection_need_pack:"Action se pehle NovaCoins pack choose karo.",
     selection_ready:"Payment ready",
     payment_cancelled:"Payment window close ho gayi.",
     verify_retry_notice:"Payment mil gaya. Vote verification auto retry hoga.",
@@ -899,6 +1058,7 @@ const I18N = {
     insight_title:"Live Contest Insights",
     my_stats_title:"Meri Participation",
     my_paid_votes:"Paid votes",
+    my_coins:"NovaCoins",
     my_weighted_entries:"Weighted entries",
     my_share_actions:"Share actions",
     leaderboard_title:"Top Supporters",
@@ -926,10 +1086,12 @@ const I18N = {
     supabase_local:"Solo locale",
     battle_section_title:"Lato sinistro vs lato destro",
     vote_title:"Votazione e Prezzi",
-    pricing_line:"1 voto = $5, 7 voti = $25, 20 voti = $50",
-    pay_now:"Paga e vota",
+    pricing_line:"5000 NovaCoins = $5 -> 1 voto, 25000 NovaCoins = $25 -> 7 voti, 50000 NovaCoins = $50 -> 20 voti",
+    coin_balance_label:"Saldo NovaCoins",
+    coins_label:"NovaCoins",
+    pay_now:"Compra Coins e Vota",
     pay_processing:"Pagamento in corso...",
-    pay_ready_notice:"Il pagamento Razorpay reale si apre dopo aver scelto lato e pacchetto.",
+    pay_ready_notice:"Si apre Razorpay per il pacchetto NovaCoins selezionato.",
     gateway_not_ready_notice:"Le chiavi live Razorpay non sono configurate sul server.",
     gateway_live_required_notice:"Razorpay e in modalita test. Imposta chiavi live prima della pubblicazione.",
     api_offline_notice:"Connessione al server contest fallita. Verifica API base live.",
@@ -942,18 +1104,30 @@ const I18N = {
     api_order_block:"Pagamento bloccato: API contest live non raggiungibile.",
     razorpay_missing:"Razorpay non caricato",
     login_required_notice:"Accedi prima di pagare e votare.",
-    select_side_pack:"Seleziona lato e pacchetto voto",
+    select_side_pack:"Seleziona lato e pacchetto NovaCoins",
     vote_success:"Voto registrato",
+    coin_vote_success:"Voto con NovaCoins registrato.",
+    coin_vote_btn:"Vota con NovaCoins",
+    free_coins_btn:"Ottieni Coins Gratis (+5)",
+    insufficient_coins_notice:"NovaCoins insufficienti per il pacchetto scelto.",
+    free_coins_success:"Aggiunti 5 NovaCoins.",
+    free_coins_cooldown:"Attendi prima del prossimo reward.",
+    ad_modal_title:"Guarda annuncio e ottieni 5 NovaCoins",
+    ad_modal_desc:"Attendi il countdown e poi riscatta.",
+    ad_waiting_label:"Attendi",
+    ad_ready_label:"Reward pronto. Riscatta ora.",
+    ad_claim_btn:"Riscatta 5 Coins",
+    ad_close_btn:"Chiudi",
     verify_failed:"Verifica pagamento fallita: ",
     payment_failed:"Pagamento fallito",
     order_failed:"Creazione ordine fallita: ",
     order_retrying:"Controllo API contest e nuovo tentativo pagamento...",
     no_contest:"Dati contest non disponibili",
     open_from_list:"Apri dalla lista contest",
-    selection_prompt:"Seleziona lato e pacchetto per continuare il checkout.",
-    selection_need_both:"Scegli lato e pacchetto voto prima del pagamento.",
+    selection_prompt:"Seleziona lato e pacchetto NovaCoins per continuare.",
+    selection_need_both:"Scegli lato e pacchetto NovaCoins prima dell'azione.",
     selection_need_side:"Scegli un lato prima del pagamento.",
-    selection_need_pack:"Scegli un pacchetto voto prima del pagamento.",
+    selection_need_pack:"Scegli un pacchetto NovaCoins prima dell'azione.",
     selection_ready:"Pronto al pagamento",
     payment_cancelled:"Finestra pagamento chiusa.",
     verify_retry_notice:"Pagamento ricevuto. Verifica voto in nuovo tentativo automatico.",
@@ -967,6 +1141,7 @@ const I18N = {
     insight_title:"Insight Contest Live",
     my_stats_title:"La mia partecipazione",
     my_paid_votes:"Voti pagati",
+    my_coins:"NovaCoins",
     my_weighted_entries:"Ingressi ponderati",
     my_share_actions:"Azioni share",
     leaderboard_title:"Top Supporter",
@@ -993,17 +1168,25 @@ function applyLanguage(){
   if(dom.battleSectionTitle) dom.battleSectionTitle.textContent = tr("battle_section_title");
   if(dom.voteTitle) dom.voteTitle.textContent = tr("vote_title");
   if(dom.priceInfo) dom.priceInfo.textContent = tr("pricing_line");
+  if(dom.coinBalanceLine) dom.coinBalanceLine.textContent = tr("coin_balance_label") + ": 0";
   if(dom.selectionSummary) dom.selectionSummary.textContent = tr("selection_prompt");
   if(dom.apiPill) dom.apiPill.textContent = tr("api_pill_offline");
   if(dom.gatewayPill) dom.gatewayPill.textContent = tr("gateway_pill_pending");
+  if(dom.coinVoteBtn) dom.coinVoteBtn.textContent = tr("coin_vote_btn");
+  if(dom.freeCoinsBtn) dom.freeCoinsBtn.textContent = tr("free_coins_btn");
   if(dom.prizeTitle) dom.prizeTitle.textContent = tr("prizes_title");
   if(dom.shareLinkBtn) dom.shareLinkBtn.textContent = tr("share_dashboard");
   if(dom.insightTitle) dom.insightTitle.textContent = tr("insight_title");
   if(dom.myStatsTitle) dom.myStatsTitle.textContent = tr("my_stats_title");
   if(dom.myPaidVotesLabel) dom.myPaidVotesLabel.textContent = tr("my_paid_votes");
+  if(dom.myCoinsLabel) dom.myCoinsLabel.textContent = tr("my_coins");
   if(dom.myWeightedLabel) dom.myWeightedLabel.textContent = tr("my_weighted_entries");
   if(dom.mySharesLabel) dom.mySharesLabel.textContent = tr("my_share_actions");
   if(dom.leaderboardTitle) dom.leaderboardTitle.textContent = tr("leaderboard_title");
+  if(dom.adModalTitle) dom.adModalTitle.textContent = tr("ad_modal_title");
+  if(dom.adModalDesc) dom.adModalDesc.textContent = tr("ad_modal_desc");
+  if(dom.adClaimBtn) dom.adClaimBtn.textContent = tr("ad_claim_btn");
+  if(dom.adCloseBtn) dom.adCloseBtn.textContent = tr("ad_close_btn");
 
   if(state.data) render();
 }
@@ -1011,6 +1194,71 @@ function applyLanguage(){
 function fmtInt(v){ return new Intl.NumberFormat("en-US").format(Math.max(0,Number(v)||0)); }
 function esc(v){ return String(v||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;").replace(/'/g,"&#39;"); }
 function safeNum(v){ const n=Number(v||0); return Number.isFinite(n)?n:0; }
+function packVotes(pack){ return Math.max(0, Math.round(safeNum(pack?.votes))); }
+function packCoins(pack){ return Math.max(0, Math.round(safeNum(pack?.coins))); }
+
+function clearAdCountdownTimer(){
+  if(!state.adCountdownTimer) return;
+  clearInterval(state.adCountdownTimer);
+  state.adCountdownTimer = 0;
+}
+
+function renderAdModalState(){
+  if(!dom.adModal) return;
+  dom.adModal.classList.toggle("show", Boolean(state.adModalOpen));
+  dom.adModal.setAttribute("aria-hidden", state.adModalOpen ? "false" : "true");
+  const ready = Boolean(state.adRewardReady) && state.adCountdownLeft <= 0;
+  if(dom.adClaimBtn){
+    dom.adClaimBtn.disabled = !ready || state.actionBusy;
+  }
+  if(dom.adCountdown){
+    if(ready){
+      dom.adCountdown.textContent = tr("ad_ready_label");
+    }else{
+      const seconds = Math.max(0, Math.ceil(state.adCountdownLeft));
+      dom.adCountdown.textContent = tr("ad_waiting_label") + " " + seconds + "s";
+    }
+  }
+}
+
+function closeAdRewardModal(){
+  clearAdCountdownTimer();
+  state.adModalOpen = false;
+  state.adCountdownLeft = 0;
+  state.adRewardReady = false;
+  renderAdModalState();
+}
+
+function pushRewardAdSlot(){
+  if(state.adSlotPushed) return;
+  if(!dom.adSlot) return;
+  try{
+    (window.adsbygoogle = window.adsbygoogle || []).push({});
+    state.adSlotPushed = true;
+  }catch(_){ }
+}
+
+function openAdRewardModal(){
+  if(state.actionBusy || state.paymentBusy) return;
+  if(!isLoggedInContestUser()){
+    showToast(tr("login_required_notice"), true);
+    return;
+  }
+  state.adModalOpen = true;
+  state.adRewardReady = false;
+  state.adCountdownLeft = 8;
+  renderAdModalState();
+  pushRewardAdSlot();
+  clearAdCountdownTimer();
+  state.adCountdownTimer = setInterval(() => {
+    state.adCountdownLeft = Math.max(0, state.adCountdownLeft - 1);
+    if(state.adCountdownLeft <= 0){
+      clearAdCountdownTimer();
+      state.adRewardReady = true;
+    }
+    renderAdModalState();
+  }, 1000);
+}
 function readableApiError(err){
   const raw = String(err?.message || err || "").trim();
   const lower = raw.toLowerCase();
@@ -1032,6 +1280,13 @@ function showToast(msg, isError){
   dom.toast.className = "toast show " + (isError ? "err" : "ok");
   clearTimeout(showToast._t);
   showToast._t = setTimeout(()=>dom.toast.className="toast",2200);
+}
+
+function applyContestDataFromPayload(payload){
+  if(payload?.data && typeof payload.data === "object"){
+    state.data = payload.data;
+    state.apiError = "";
+  }
 }
 
 function pauseAutoRefresh(ms){
@@ -1390,7 +1645,10 @@ async function fetchJson(url,opt){
   const res = await fetch(url,opt);
   const data = await res.json().catch(()=>({}));
   if(!res.ok || !data?.ok){
-    throw new Error(data?.message || data?.error || ("Request failed: " + res.status));
+    const err = new Error(data?.message || data?.error || ("Request failed: " + res.status));
+    err.status = res.status;
+    err.payload = data;
+    throw err;
   }
   return data;
 }
@@ -1771,15 +2029,26 @@ function render(){
     dom.prizeList.innerHTML = "";
     dom.leaderboardList.innerHTML = "<li><span class=\"leader-name\">"+esc(tr("no_supporters"))+"</span><span class=\"leader-score\">--</span></li>";
     dom.myPaidVotesValue.textContent = "0";
+    if(dom.myCoinsValue) dom.myCoinsValue.textContent = "0";
     dom.myWeightedValue.textContent = "0";
     dom.mySharesValue.textContent = "0";
+    if(dom.coinBalanceLine) dom.coinBalanceLine.textContent = tr("coin_balance_label") + ": 0";
     dom.ruleLine.textContent = "";
     dom.payBtn.textContent = tr("pay_now");
     dom.payBtn.disabled = true;
+    if(dom.coinVoteBtn){
+      dom.coinVoteBtn.textContent = tr("coin_vote_btn");
+      dom.coinVoteBtn.disabled = true;
+    }
+    if(dom.freeCoinsBtn){
+      dom.freeCoinsBtn.textContent = tr("free_coins_btn");
+      dom.freeCoinsBtn.disabled = true;
+    }
     dom.selectionSummary.textContent = state.apiError || tr("selection_prompt");
     setPill(dom.apiPill, tr("api_pill_offline"), "bad");
     setPill(dom.gatewayPill, tr("gateway_pill_offline"), "bad");
     dom.payNotice.textContent = state.apiError || tr("api_offline_notice");
+    renderAdModalState();
     return;
   }
 
@@ -1799,9 +2068,10 @@ function render(){
     if(packs.length){
       dom.priceInfo.textContent = packs
         .map(pack => {
-          const votes = Math.max(0, Math.round(safeNum(pack.votes)));
+          const votes = packVotes(pack);
+          const coins = packCoins(pack);
           const usd = Math.max(0, safeNum(pack.usd));
-          return votes + " " + tr("votes_label") + " = $" + usd;
+          return fmtInt(coins) + " " + tr("coins_label") + " = $" + usd + " -> " + votes + " " + tr("votes_label");
         })
         .join(", ");
     }else{
@@ -1818,7 +2088,11 @@ function render(){
     dom.prizeList.innerHTML = "";
     dom.ruleLine.textContent = "";
     dom.payBtn.disabled = true;
+    if(dom.coinVoteBtn) dom.coinVoteBtn.disabled = true;
+    if(dom.freeCoinsBtn) dom.freeCoinsBtn.disabled = true;
+    if(dom.coinBalanceLine) dom.coinBalanceLine.textContent = tr("coin_balance_label") + ": 0";
     dom.selectionSummary.textContent = tr("selection_prompt");
+    renderAdModalState();
     return;
   }
 
@@ -1882,7 +2156,8 @@ function render(){
 
   dom.packRow.innerHTML = packs.map(pack => {
     const active = pack.id === state.selectedPack ? " active" : "";
-    const votes = Math.max(0, Math.round(safeNum(pack.votes)));
+    const votes = packVotes(pack);
+    const coins = packCoins(pack);
     const usd = Math.max(0, safeNum(pack.usd));
     const votePerDollar = usd > 0 ? (votes / usd) : 0;
     let tag = "";
@@ -1894,8 +2169,9 @@ function render(){
     return [
       '<button type="button" class="pack-btn'+active+'" data-pack="'+esc(pack.id)+'">',
       (tag ? '<span class="pack-tag">'+esc(tag)+'</span>' : ""),
-      '<span class="pack-label">'+esc(votes + " " + tr("votes_label"))+'</span>',
+      '<span class="pack-label">'+esc(fmtInt(coins) + " " + tr("coins_label"))+'</span>',
       '<span class="pack-price">$'+esc(usd)+'</span>',
+      '<span class="pack-label">'+esc(votes + " " + tr("votes_label"))+'</span>',
       '</button>'
     ].join("");
   }).join("");
@@ -1905,10 +2181,15 @@ function render(){
 
   const selectedPack = packs.find(pack => pack.id === state.selectedPack) || null;
   const selectedSide = (contest.sides || []).find(side => side.id === state.selectedSide) || null;
+  const currentCoinBalance = Math.max(0, Math.round(safeNum(userStats?.coin_balance)));
+  if(dom.coinBalanceLine){
+    dom.coinBalanceLine.textContent = tr("coin_balance_label") + ": " + fmtInt(currentCoinBalance);
+  }
   if(selectedPack && selectedSide){
-    const votes = Math.max(0, Math.round(safeNum(selectedPack.votes)));
+    const votes = packVotes(selectedPack);
+    const coins = packCoins(selectedPack);
     const usd = Math.max(0, safeNum(selectedPack.usd));
-    dom.selectionSummary.textContent = tr("selection_ready") + ": " + selectedSide.label + " | " + votes + " " + tr("votes_label") + " | $" + usd;
+    dom.selectionSummary.textContent = tr("selection_ready") + ": " + selectedSide.label + " | " + fmtInt(coins) + " " + tr("coins_label") + " | " + votes + " " + tr("votes_label") + " | $" + usd;
   }else if(!selectedSide && !selectedPack){
     dom.selectionSummary.textContent = tr("selection_need_both");
   }else if(!selectedSide){
@@ -1932,6 +2213,7 @@ function render(){
   );
 
   dom.myPaidVotesValue.textContent = fmtInt(safeNum(userStats?.paid_votes));
+  if(dom.myCoinsValue) dom.myCoinsValue.textContent = fmtInt(currentCoinBalance);
   dom.myWeightedValue.textContent = String(Math.round(safeNum(userStats?.weighted_entries) * 100) / 100);
   dom.mySharesValue.textContent = fmtInt(safeNum(userStats?.share_actions));
 
@@ -1947,10 +2229,19 @@ function render(){
   }
 
   dom.payBtn.textContent = state.paymentBusy ? tr("pay_processing") : tr("pay_now");
-  dom.payBtn.disabled = state.paymentBusy || !state.selectedSide || !state.selectedPack || !gatewayOnline;
+  dom.payBtn.disabled = state.paymentBusy || state.actionBusy || !state.selectedSide || !state.selectedPack || !gatewayOnline;
+  if(dom.coinVoteBtn){
+    dom.coinVoteBtn.textContent = tr("coin_vote_btn");
+    const selectedCoins = selectedPack ? packCoins(selectedPack) : 0;
+    dom.coinVoteBtn.disabled = state.paymentBusy || state.actionBusy || !loginReady || !selectedSide || !selectedPack || selectedCoins <= 0 || currentCoinBalance < selectedCoins;
+  }
+  if(dom.freeCoinsBtn){
+    dom.freeCoinsBtn.textContent = tr("free_coins_btn");
+    dom.freeCoinsBtn.disabled = state.paymentBusy || state.actionBusy || !loginReady;
+  }
 
   dom.shareLinkBtn.href = "contest.html" + (state.apiBase ? ("?api_base=" + encodeURIComponent(state.apiBase)) : "");
-  if(state.paymentBusy){
+  if(state.paymentBusy || state.actionBusy){
     dom.payNotice.textContent = tr("pay_processing");
   }else if(!loginReady){
     dom.payNotice.textContent = tr("login_required_notice");
@@ -1961,16 +2252,18 @@ function render(){
   }else if(!state.data?.razorpay_ready){
     dom.payNotice.textContent = tr("gateway_not_ready_notice");
   }else if(selectedPack){
-    const votes = Math.max(0, Math.round(safeNum(selectedPack.votes)));
+    const votes = packVotes(selectedPack);
+    const coins = packCoins(selectedPack);
     const usd = Math.max(0, safeNum(selectedPack.usd));
-    dom.payNotice.textContent = tr("pay_ready_notice") + " " + votes + " " + tr("votes_label") + " | $" + usd;
+    dom.payNotice.textContent = tr("pay_ready_notice") + " " + fmtInt(coins) + " " + tr("coins_label") + " -> " + votes + " " + tr("votes_label") + " | $" + usd;
   }else{
     dom.payNotice.textContent = tr("selection_need_pack");
   }
+  renderAdModalState();
 }
 
 async function startPayment(){
-  if(state.paymentBusy) return;
+  if(state.paymentBusy || state.actionBusy) return;
   pauseAutoRefresh(90000);
 
   if(isLoggedInContestUser()){
@@ -2152,6 +2445,93 @@ async function startPayment(){
   }
 }
 
+async function startCoinVote(){
+  if(state.paymentBusy || state.actionBusy) return;
+  if(!isLoggedInContestUser()){
+    showToast(tr("login_required_notice"), true);
+    return;
+  }
+
+  const contest = getContest();
+  const packs = Array.isArray(state.data?.packs) ? state.data.packs : [];
+  const selectedPack = packs.find(pack => String(pack?.id || "") === state.selectedPack) || null;
+  if(!contest || !state.selectedSide || !selectedPack){
+    showToast(tr("select_side_pack"), true);
+    return;
+  }
+
+  const neededCoins = packCoins(selectedPack);
+  const currentCoins = Math.max(0, Math.round(safeNum(state.data?.user_stats?.coin_balance)));
+  if(neededCoins <= 0 || currentCoins < neededCoins){
+    showToast(tr("insufficient_coins_notice"), true);
+    return;
+  }
+
+  state.actionBusy = true;
+  pauseAutoRefresh(30000);
+  render();
+  try{
+    const payload = await postJson("/api/contest/vote/coins", {
+      user_id: state.userId,
+      user_name: state.userName || "",
+      contest_id: state.contestId,
+      side_id: state.selectedSide,
+      pack_id: state.selectedPack
+    });
+    applyContestDataFromPayload(payload);
+    showToast(tr("coin_vote_success"), false);
+  }catch(err){
+    applyContestDataFromPayload(err?.payload);
+    if(String(err?.payload?.error || "").toLowerCase() === "insufficient_coins"){
+      showToast(tr("insufficient_coins_notice"), true);
+    }else{
+      showToast(String(err?.message || tr("payment_failed")), true);
+    }
+  }finally{
+    state.actionBusy = false;
+    pauseAutoRefresh(5000);
+    render();
+  }
+}
+
+async function claimFreeCoinsReward(){
+  if(state.paymentBusy || state.actionBusy) return;
+  if(!state.adRewardReady || state.adCountdownLeft > 0){
+    return;
+  }
+  if(!isLoggedInContestUser()){
+    showToast(tr("login_required_notice"), true);
+    closeAdRewardModal();
+    return;
+  }
+
+  state.actionBusy = true;
+  renderAdModalState();
+  render();
+  try{
+    const payload = await postJson("/api/contest/coins/reward-ad", {
+      user_id: state.userId,
+      user_name: state.userName || ""
+    });
+    applyContestDataFromPayload(payload);
+    showToast(tr("free_coins_success"), false);
+    closeAdRewardModal();
+  }catch(err){
+    applyContestDataFromPayload(err?.payload);
+    const errorCode = String(err?.payload?.error || "").toLowerCase();
+    if(errorCode === "ad_reward_cooldown"){
+      const wait = Math.max(1, Math.ceil(safeNum(err?.payload?.retry_after_seconds || 0)));
+      showToast(tr("free_coins_cooldown") + " (" + wait + "s)", true);
+    }else{
+      showToast(String(err?.message || tr("free_coins_cooldown")), true);
+    }
+  }finally{
+    state.actionBusy = false;
+    renderAdModalState();
+    render();
+  }
+}
+
 function bindEvents(){
   dom.sideRow.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-side]");
@@ -2168,6 +2548,25 @@ function bindEvents(){
   });
 
   dom.payBtn.addEventListener("click", startPayment);
+  if(dom.coinVoteBtn){
+    dom.coinVoteBtn.addEventListener("click", startCoinVote);
+  }
+  if(dom.freeCoinsBtn){
+    dom.freeCoinsBtn.addEventListener("click", openAdRewardModal);
+  }
+  if(dom.adClaimBtn){
+    dom.adClaimBtn.addEventListener("click", claimFreeCoinsReward);
+  }
+  if(dom.adCloseBtn){
+    dom.adCloseBtn.addEventListener("click", closeAdRewardModal);
+  }
+  if(dom.adModal){
+    dom.adModal.addEventListener("click", (event) => {
+      if(event.target === dom.adModal){
+        closeAdRewardModal();
+      }
+    });
+  }
 
   document.addEventListener("visibilitychange", () => {
     if(document.visibilityState === "visible" && state.data){
@@ -2175,6 +2574,7 @@ function bindEvents(){
     }
   });
   window.addEventListener("beforeunload", () => {
+    closeAdRewardModal();
     clearRealtimeSubscription();
     if(state.apiRetryTimer){
       clearInterval(state.apiRetryTimer);

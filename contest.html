@@ -100,6 +100,40 @@ button.ghost{background:#fff7ee;color:#f1720a;border:1px solid var(--line)}
 .notice{margin-top:8px;font-size:12px;color:var(--muted)}
 .notice.ok{color:#1f8b4b}
 .notice.warn{color:#f85f07}
+.coin-rates{margin-top:8px;padding-left:18px;display:grid;gap:6px;color:#5f3310;font-size:13px;line-height:1.4}
+.coin-actions{margin-top:10px;display:grid;grid-template-columns:repeat(2,minmax(140px,1fr));gap:8px}
+.ad-modal{
+  position:fixed;
+  inset:0;
+  background:rgba(9,14,24,.72);
+  display:none;
+  align-items:center;
+  justify-content:center;
+  z-index:120;
+  padding:14px;
+}
+.ad-modal.show{display:flex}
+.ad-card{
+  width:min(430px,95vw);
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:12px;
+}
+.ad-slot{
+  margin-top:10px;
+  min-height:120px;
+  border:1px dashed #ffd0a7;
+  border-radius:10px;
+  background:#fffaf5;
+  padding:8px;
+}
+.ad-actions{
+  margin-top:10px;
+  display:grid;
+  grid-template-columns:repeat(2,minmax(120px,1fr));
+  gap:8px;
+}
 .live-votes-list,.rank-preview-list{display:grid;gap:10px;margin-top:10px}
 .vote-card{border:1px solid var(--line);border-radius:10px;background:#fffaf5;padding:10px}
 .vote-card h3{margin:0;font-size:14px;line-height:1.3}
@@ -120,7 +154,7 @@ button.ghost{background:#fff7ee;color:#f1720a;border:1px solid var(--line)}
   .slider{max-width:340px}
   .status-grid{grid-template-columns:1fr}
   .slide-overlay h3{font-size:13px}
-  .main-actions,.extra-actions,.referral-actions{grid-template-columns:1fr}
+  .main-actions,.extra-actions,.referral-actions,.coin-actions,.ad-actions{grid-template-columns:1fr}
   button{width:100%}
   .sale-name{font-size:12px}
 }
@@ -196,6 +230,22 @@ button.ghost{background:#fff7ee;color:#f1720a;border:1px solid var(--line)}
     </div>
   </section>
 
+  <section class="card" id="coinWalletSection">
+    <h2 id="coinWalletTitle">NovaCoins Wallet</h2>
+    <ul class="coin-rates" id="coinRatesList">
+      <li>5000 NovaCoins = $5 -> 1 vote</li>
+      <li>25000 NovaCoins = $25 -> 7 votes</li>
+      <li>50000 NovaCoins = $50 -> 20 votes</li>
+      <li>Get Free Coins ad reward = +5 coins per ad</li>
+    </ul>
+    <p class="notice" id="coinBalanceNotice">NovaCoins balance: 0</p>
+    <div class="coin-actions">
+      <button id="getFreeCoinsBtn">Get Free Coins (+5)</button>
+      <button class="secondary" id="useCoinsVoteBtn">Use Coins for Vote</button>
+    </div>
+    <p class="notice" id="coinActionNotice"></p>
+  </section>
+
   <section class="card must-read">
     <h2 id="mustReadTitle">Must Be Read</h2>
     <ul>
@@ -241,6 +291,27 @@ button.ghost{background:#fff7ee;color:#f1720a;border:1px solid var(--line)}
 </main>
 
 <div class="toast" id="toast"></div>
+<div class="ad-modal" id="adModal" aria-hidden="true">
+  <div class="ad-card">
+    <h3 id="adModalTitle">Watch ad and earn 5 NovaCoins</h3>
+    <p class="notice" id="adModalDesc">Wait for countdown, then claim reward.</p>
+    <div class="ad-slot">
+      <ins
+        class="adsbygoogle"
+        id="contestLandingRewardAdSlot"
+        style="display:block"
+        data-ad-client="ca-pub-9977276800228616"
+        data-ad-slot="4433221100"
+        data-ad-format="auto"
+        data-full-width-responsive="true"></ins>
+    </div>
+    <p class="notice" id="adCountdown">Please wait...</p>
+    <div class="ad-actions">
+      <button id="adClaimBtn" disabled>Claim 5 Coins</button>
+      <button class="secondary" id="adCloseBtn">Close</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const SUPABASE_URL = window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "";
@@ -281,6 +352,23 @@ const I18N = {
     gatewayOffline: "Disconnected",
     haveReferralBtn: "Do You Have Referral Code? (Optional)",
     voteNowBtn: "Vote Now",
+    coinWalletTitle: "NovaCoins Wallet",
+    coinRates1: "5000 NovaCoins = $5 -> 1 vote",
+    coinRates2: "25000 NovaCoins = $25 -> 7 votes",
+    coinRates3: "50000 NovaCoins = $50 -> 20 votes",
+    coinRates4: "Get Free Coins ad reward = +5 coins per ad",
+    coinBalanceLabel: "NovaCoins balance",
+    getFreeCoinsBtn: "Get Free Coins (+5)",
+    useCoinsVoteBtn: "Use Coins for Vote",
+    coinActionReady: "Watch ad and claim your 5 NovaCoins.",
+    coinActionWaiting: "Please wait",
+    coinActionClaimReady: "Reward ready. Claim now.",
+    adModalTitle: "Watch ad and earn 5 NovaCoins",
+    adModalDesc: "Wait for countdown, then claim reward.",
+    adClaimBtn: "Claim 5 Coins",
+    adCloseBtn: "Close",
+    freeCoinsAdded: "5 NovaCoins added.",
+    freeCoinsCooldown: "Please wait before next ad reward.",
     mustReadTitle: "Must Be Read",
     mustRead1: "Choose your favorite contest and vote fairly.",
     mustRead2: "The more someone shares, the higher the winning chances.",
@@ -340,6 +428,23 @@ const I18N = {
     gatewayOffline: "कनेक्शन नहीं है",
     haveReferralBtn: "क्या आपके पास रेफरल कोड है? (वैकल्पिक)",
     voteNowBtn: "अभी वोट करें",
+    coinWalletTitle: "NovaCoins Wallet",
+    coinRates1: "5000 NovaCoins = $5 -> 1 vote",
+    coinRates2: "25000 NovaCoins = $25 -> 7 votes",
+    coinRates3: "50000 NovaCoins = $50 -> 20 votes",
+    coinRates4: "Get Free Coins ad reward = +5 coins per ad",
+    coinBalanceLabel: "NovaCoins balance",
+    getFreeCoinsBtn: "Free Coins लो (+5)",
+    useCoinsVoteBtn: "Coins से Vote",
+    coinActionReady: "Ad dekho aur 5 NovaCoins claim karo.",
+    coinActionWaiting: "Please wait",
+    coinActionClaimReady: "Reward ready. Claim now.",
+    adModalTitle: "Ad dekho aur 5 NovaCoins pao",
+    adModalDesc: "Countdown complete hone do, phir claim karo.",
+    adClaimBtn: "5 Coins Claim",
+    adCloseBtn: "Close",
+    freeCoinsAdded: "5 NovaCoins add ho gaye.",
+    freeCoinsCooldown: "Next reward se pehle wait karo.",
     mustReadTitle: "जरूर पढ़ें",
     mustRead1: "अपना पसंदीदा कॉन्टेस्ट चुनें और निष्पक्ष वोट करें।",
     mustRead2: "जो सबसे ज्यादा शेयर करेगा, उसके जीतने के चांस उतने ज्यादा होंगे।",
@@ -384,11 +489,18 @@ const state = {
   sliderIndex: 0,
   metricsRetryTimer: 0,
   metricsRetryBusy: false,
+  adModalOpen: false,
+  adRewardReady: false,
+  adCountdownLeft: 0,
+  adCountdownTimer: 0,
+  adSlotPushed: false,
+  adClaimBusy: false,
   metrics: {
     downloads: null,
     target: 5000000,
     resultsReady: false,
     gateway: "pending",
+    coinBalance: 0,
     contests: []
   },
   ranks: {
@@ -414,6 +526,12 @@ const dom = {
   downloadsValue: document.getElementById("downloadsValue"),
   resultStatus: document.getElementById("resultStatus"),
   gatewayStatus: document.getElementById("gatewayStatus"),
+  coinWalletTitle: document.getElementById("coinWalletTitle"),
+  coinRatesList: document.getElementById("coinRatesList"),
+  coinBalanceNotice: document.getElementById("coinBalanceNotice"),
+  getFreeCoinsBtn: document.getElementById("getFreeCoinsBtn"),
+  useCoinsVoteBtn: document.getElementById("useCoinsVoteBtn"),
+  coinActionNotice: document.getElementById("coinActionNotice"),
   heroSlider: document.getElementById("heroSlider"),
   heroSliderDots: document.getElementById("heroSliderDots"),
   haveReferralBtn: document.getElementById("haveReferralBtn"),
@@ -440,7 +558,14 @@ const dom = {
   rankPreviewSub: document.getElementById("rankPreviewSub"),
   rankPreviewList: document.getElementById("rankPreviewList"),
   topReferrerNotice: document.getElementById("topReferrerNotice"),
-  toast: document.getElementById("toast")
+  toast: document.getElementById("toast"),
+  adModal: document.getElementById("adModal"),
+  adModalTitle: document.getElementById("adModalTitle"),
+  adModalDesc: document.getElementById("adModalDesc"),
+  adCountdown: document.getElementById("adCountdown"),
+  adClaimBtn: document.getElementById("adClaimBtn"),
+  adCloseBtn: document.getElementById("adCloseBtn"),
+  adSlot: document.getElementById("contestLandingRewardAdSlot")
 };
 
 function resolveLang(){
@@ -471,6 +596,25 @@ function applyLanguage(){
   dom.metricGatewayLabel.textContent = tr("metricGatewayLabel");
   dom.haveReferralBtn.textContent = tr("haveReferralBtn");
   dom.voteNowBtn.textContent = tr("voteNowBtn");
+  if(dom.coinWalletTitle) dom.coinWalletTitle.textContent = tr("coinWalletTitle");
+  if(dom.coinRatesList){
+    dom.coinRatesList.innerHTML = [
+      tr("coinRates1"),
+      tr("coinRates2"),
+      tr("coinRates3"),
+      tr("coinRates4")
+    ].map(item => "<li>" + escapeHtml(item) + "</li>").join("");
+  }
+  if(dom.getFreeCoinsBtn) dom.getFreeCoinsBtn.textContent = tr("getFreeCoinsBtn");
+  if(dom.useCoinsVoteBtn) dom.useCoinsVoteBtn.textContent = tr("useCoinsVoteBtn");
+  if(dom.coinActionNotice){
+    dom.coinActionNotice.textContent = tr("coinActionReady");
+    dom.coinActionNotice.className = "notice";
+  }
+  if(dom.adModalTitle) dom.adModalTitle.textContent = tr("adModalTitle");
+  if(dom.adModalDesc) dom.adModalDesc.textContent = tr("adModalDesc");
+  if(dom.adClaimBtn) dom.adClaimBtn.textContent = tr("adClaimBtn");
+  if(dom.adCloseBtn) dom.adCloseBtn.textContent = tr("adCloseBtn");
   dom.mustReadTitle.textContent = tr("mustReadTitle");
   dom.mustRead1.textContent = tr("mustRead1");
   dom.mustRead2.textContent = tr("mustRead2");
@@ -491,6 +635,7 @@ function applyLanguage(){
   renderContestMetrics();
   renderLiveVotes();
   renderRankPreview();
+  renderAdModalState();
 }
 
 function showToast(message, isError){
@@ -501,6 +646,116 @@ function showToast(message, isError){
   showToast._timer = setTimeout(() => {
     dom.toast.className = "toast";
   }, 2400);
+}
+
+function clearAdCountdownTimer(){
+  if(!state.adCountdownTimer) return;
+  clearInterval(state.adCountdownTimer);
+  state.adCountdownTimer = 0;
+}
+
+function renderAdModalState(){
+  if(!dom.adModal) return;
+  dom.adModal.classList.toggle("show", Boolean(state.adModalOpen));
+  dom.adModal.setAttribute("aria-hidden", state.adModalOpen ? "false" : "true");
+  const ready = Boolean(state.adRewardReady) && state.adCountdownLeft <= 0;
+  if(dom.adClaimBtn){
+    dom.adClaimBtn.disabled = !ready || state.adClaimBusy;
+  }
+  if(dom.adCountdown){
+    if(ready){
+      dom.adCountdown.textContent = tr("coinActionClaimReady");
+    }else{
+      dom.adCountdown.textContent = tr("coinActionWaiting") + " " + Math.max(0, Math.ceil(state.adCountdownLeft)) + "s";
+    }
+  }
+}
+
+function closeAdModal(){
+  clearAdCountdownTimer();
+  state.adModalOpen = false;
+  state.adRewardReady = false;
+  state.adCountdownLeft = 0;
+  renderAdModalState();
+}
+
+function pushRewardAdSlot(){
+  if(state.adSlotPushed) return;
+  if(!dom.adSlot) return;
+  try{
+    (window.adsbygoogle = window.adsbygoogle || []).push({});
+    state.adSlotPushed = true;
+  }catch(_){ }
+}
+
+function openAdModal(){
+  if(!state.userId){
+    showToast(tr("toastLoginRequired"), true);
+    return;
+  }
+  state.adModalOpen = true;
+  state.adRewardReady = false;
+  state.adCountdownLeft = 8;
+  renderAdModalState();
+  pushRewardAdSlot();
+  clearAdCountdownTimer();
+  state.adCountdownTimer = setInterval(() => {
+    state.adCountdownLeft = Math.max(0, state.adCountdownLeft - 1);
+    if(state.adCountdownLeft <= 0){
+      clearAdCountdownTimer();
+      state.adRewardReady = true;
+    }
+    renderAdModalState();
+  }, 1000);
+}
+
+async function claimAdRewardCoins(){
+  if(state.adClaimBusy || !state.adRewardReady || state.adCountdownLeft > 0){
+    return;
+  }
+  if(!state.userId){
+    showToast(tr("toastLoginRequired"), true);
+    closeAdModal();
+    return;
+  }
+
+  state.adClaimBusy = true;
+  renderAdModalState();
+  try{
+    const payload = await postJson("/api/contest/coins/reward-ad", {
+      user_id: state.userId,
+      user_name: state.userName || ""
+    });
+    const nextBalance = safeInt(payload?.balance_coins || payload?.data?.user_stats?.coin_balance);
+    state.metrics.coinBalance = nextBalance;
+    renderContestMetrics();
+    if(dom.coinActionNotice){
+      dom.coinActionNotice.textContent = tr("freeCoinsAdded");
+      dom.coinActionNotice.className = "notice ok";
+    }
+    showToast(tr("freeCoinsAdded"), false);
+    closeAdModal();
+  }catch(err){
+    const code = String(err?.payload?.error || "").toLowerCase();
+    if(code === "ad_reward_cooldown"){
+      const wait = Math.max(1, Math.ceil(safeInt(err?.payload?.retry_after_seconds || 0)));
+      if(dom.coinActionNotice){
+        dom.coinActionNotice.textContent = tr("freeCoinsCooldown") + " (" + wait + "s)";
+        dom.coinActionNotice.className = "notice warn";
+      }
+      showToast(tr("freeCoinsCooldown"), true);
+    }else{
+      const msg = String(err?.message || tr("errNetwork"));
+      if(dom.coinActionNotice){
+        dom.coinActionNotice.textContent = msg;
+        dom.coinActionNotice.className = "notice warn";
+      }
+      showToast(msg, true);
+    }
+  }finally{
+    state.adClaimBusy = false;
+    renderAdModalState();
+  }
 }
 
 function renderSlider(index){
@@ -552,13 +807,20 @@ function renderContestMetrics(){
   dom.resultStatus.textContent = state.metrics.resultsReady ? tr("resultOpen") : tr("resultLocked");
   if(state.metrics.gateway === "online"){
     dom.gatewayStatus.textContent = tr("gatewayOnline");
-    return;
-  }
-  if(state.metrics.gateway === "pending"){
+  }else if(state.metrics.gateway === "pending"){
     dom.gatewayStatus.textContent = tr("gatewayPending");
-    return;
+  }else{
+    dom.gatewayStatus.textContent = tr("gatewayOffline");
   }
-  dom.gatewayStatus.textContent = tr("gatewayOffline");
+  if(dom.coinBalanceNotice){
+    dom.coinBalanceNotice.textContent = tr("coinBalanceLabel") + ": " + formatInt(state.metrics.coinBalance);
+  }
+  if(dom.useCoinsVoteBtn){
+    dom.useCoinsVoteBtn.disabled = safeInt(state.metrics.coinBalance) <= 0;
+  }
+  if(dom.getFreeCoinsBtn){
+    dom.getFreeCoinsBtn.disabled = !state.userId;
+  }
 }
 
 function renderLiveVotes(){
@@ -648,21 +910,30 @@ async function loadContestMetrics(){
     target: 5000000,
     resultsReady: false,
     gateway: "pending",
+    coinBalance: 0,
     contests: []
   };
   renderContestMetrics();
   renderLiveVotes();
 
   try{
-    const payload = await fetchJson(apiUrl("/api/contest/dashboard"), { method:"GET" });
+    const qp = new URLSearchParams();
+    if(state.userId){
+      qp.set("user_id", state.userId);
+      if(state.userName) qp.set("user_name", state.userName);
+    }
+    const suffix = "/api/contest/dashboard" + (qp.toString() ? ("?" + qp.toString()) : "");
+    const payload = await fetchJson(apiUrl(suffix), { method:"GET" });
     const data = payload?.data || {};
     state.metrics.downloads = safeInt(data.current_downloads);
     state.metrics.target = safeInt(data.download_target) || 5000000;
     state.metrics.resultsReady = Boolean(data.results_ready);
     state.metrics.gateway = data.razorpay_ready ? "online" : "pending";
+    state.metrics.coinBalance = safeInt(data?.user_stats?.coin_balance);
     state.metrics.contests = Array.isArray(data.contests) ? data.contests : [];
   }catch(_){
     state.metrics.gateway = "offline";
+    state.metrics.coinBalance = 0;
     state.metrics.contests = [];
   }
   renderContestMetrics();
@@ -716,6 +987,7 @@ function bindMetricsAutoRetry(){
     }
   });
   window.addEventListener("beforeunload", () => {
+    clearAdCountdownTimer();
     if(state.metricsRetryTimer){
       clearInterval(state.metricsRetryTimer);
       state.metricsRetryTimer = 0;
@@ -1242,6 +1514,36 @@ function bindEvents(){
   dom.viewRanksBtn.addEventListener("click", () => {
     window.location.href = withNavQuery("rank.html");
   });
+
+  if(dom.getFreeCoinsBtn){
+    dom.getFreeCoinsBtn.addEventListener("click", () => {
+      if(dom.coinActionNotice){
+        dom.coinActionNotice.textContent = tr("coinActionReady");
+        dom.coinActionNotice.className = "notice";
+      }
+      openAdModal();
+    });
+  }
+
+  if(dom.useCoinsVoteBtn){
+    dom.useCoinsVoteBtn.addEventListener("click", () => {
+      window.location.href = withNavQuery("vote.html");
+    });
+  }
+
+  if(dom.adClaimBtn){
+    dom.adClaimBtn.addEventListener("click", claimAdRewardCoins);
+  }
+  if(dom.adCloseBtn){
+    dom.adCloseBtn.addEventListener("click", closeAdModal);
+  }
+  if(dom.adModal){
+    dom.adModal.addEventListener("click", event => {
+      if(event.target === dom.adModal){
+        closeAdModal();
+      }
+    });
+  }
 
   document.addEventListener("languageUpdated", () => {
     applyLanguage();
