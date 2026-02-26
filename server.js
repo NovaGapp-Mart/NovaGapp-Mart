@@ -77,6 +77,10 @@ const RAZORPAY_WEBHOOK_SECRET = String(
 
 const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || "").trim();
 
+if(!ADMIN_AUTOMATION_TOKEN){
+  throw new Error("ADMIN_AUTOMATION_TOKEN is required. Refusing to start with insecure admin mode.");
+}
+
 app.use(express.json({
   limit: "15mb",
   verify: (req, _res, buf) => {
@@ -310,6 +314,93 @@ function getSocialSupabaseReadKey(){
     if(key) return key;
   }
   return "";
+}
+
+const AUTH_USER_CACHE_TTL_MS = 45 * 1000;
+const authUserCache = new Map();
+
+function getBearerTokenFromRequest(req){
+  const direct = String(req.headers?.authorization || "").trim();
+  if(/^bearer\s+/i.test(direct)){
+    return direct.replace(/^bearer\s+/i, "").trim();
+  }
+  const alt = String(req.headers?.["x-access-token"] || req.headers?.["x-auth-token"] || "").trim();
+  if(alt) return alt;
+  return "";
+}
+
+function clearExpiredAuthCache(){
+  const now = Date.now();
+  for(const [token, entry] of authUserCache.entries()){
+    if(!entry || !Number.isFinite(entry.expires_at) || entry.expires_at <= now){
+      authUserCache.delete(token);
+    }
+  }
+}
+
+async function fetchSupabaseAuthUserByToken(accessToken){
+  const token = String(accessToken || "").trim();
+  if(!token){
+    throw new Error("auth_token_missing");
+  }
+  clearExpiredAuthCache();
+  const cached = authUserCache.get(token);
+  if(cached && cached.user && Number(cached.expires_at) > Date.now()){
+    return cached.user;
+  }
+  const base = getSocialSupabaseBase();
+  if(!base || !PUBLIC_SUPABASE_ANON_KEY){
+    throw new Error("auth_supabase_unconfigured");
+  }
+  const endpoint = `${base}/auth/v1/user`;
+  const response = await fetch(endpoint, {
+    method: "GET",
+    headers: {
+      apikey: PUBLIC_SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${token}`
+    }
+  });
+  if(!response.ok){
+    const text = await response.text().catch(() => "");
+    throw new Error(`auth_user_fetch_failed_${response.status}:${String(text || "").slice(0, 160)}`);
+  }
+  const user = await response.json().catch(() => null);
+  const userId = sanitizeUserId(user?.id);
+  if(!user || !userId){
+    throw new Error("auth_user_invalid");
+  }
+  authUserCache.set(token, {
+    user,
+    expires_at: Date.now() + AUTH_USER_CACHE_TTL_MS
+  });
+  return user;
+}
+
+async function requireSupabaseAuth(req, res, next){
+  try{
+    const token = getBearerTokenFromRequest(req);
+    if(!token){
+      return res.status(401).json({ ok:false, error:"auth_token_required" });
+    }
+    const user = await fetchSupabaseAuthUserByToken(token);
+    const userId = sanitizeUserId(user?.id);
+    if(!userId){
+      return res.status(401).json({ ok:false, error:"auth_user_invalid" });
+    }
+    req.auth = {
+      token,
+      user,
+      user_id: userId,
+      email: String(user?.email || "").trim()
+    };
+    return next();
+  }catch(err){
+    return res.status(401).json({
+      ok:false,
+      error:"auth_required",
+      message:String(err?.message || "Unable to verify user token.")
+    });
+  }
 }
 
 function detectMissingColumnName(rawText){
@@ -1366,6 +1457,33 @@ async function localServicesSupabaseRequest(tableName, method, options){
     return [];
   }
   return await response.json().catch(() => []);
+}
+
+async function localServicesSupabaseRpc(functionName, payload){
+  if(!isLocalServicesSupabaseConfigured()){
+    throw new Error("local_services_supabase_unconfigured");
+  }
+  const fn = String(functionName || "").trim();
+  if(!fn){
+    throw new Error("local_services_rpc_required");
+  }
+  const base = getSocialSupabaseBase();
+  const key = getSocialSupabaseServiceRoleKey();
+  const url = `${base}/rest/v1/rpc/${encodeURIComponent(fn)}`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload && typeof payload === "object" ? payload : {})
+  });
+  if(!response.ok){
+    const text = await response.text().catch(() => "");
+    throw new Error(`local_services_rpc_failed_${fn}_${response.status}:${String(text || "").slice(0, 220)}`);
+  }
+  return await response.json().catch(() => null);
 }
 
 function sanitizeListingType(value){
@@ -3120,16 +3238,14 @@ function normalizeVerificationDecision(value){
 }
 
 function isAdminAutomationRequest(req){
-  if(!ADMIN_AUTOMATION_TOKEN){
-    return true;
-  }
   const incoming = String(
     req.headers["x-admin-token"] ||
     req.headers["x-automation-token"] ||
+    req.query?.admin_token ||
     req.body?.admin_token ||
     ""
   ).trim();
-  return incoming && incoming === ADMIN_AUTOMATION_TOKEN;
+  return Boolean(incoming && incoming === ADMIN_AUTOMATION_TOKEN);
 }
 
 async function fetchFollowersCountForUser(userIdInput){
@@ -4954,6 +5070,43 @@ function isRazorpayPaymentStatusAcceptable(status){
   return clean === "captured";
 }
 
+function getOrderSettlementDelayMinutes(){
+  const raw = Number(String(process.env.ORDER_SETTLEMENT_DELAY_MINUTES || "30").trim());
+  if(Number.isFinite(raw) && raw >= 0){
+    return Math.max(0, Math.floor(raw));
+  }
+  return 30;
+}
+
+async function enqueueOrderSettlementBuffer(orderId, payload){
+  const cleanOrderId = String(orderId || "").trim();
+  if(!cleanOrderId){
+    return { ok:false, error:"order_id_required" };
+  }
+  const delayMinutes = getOrderSettlementDelayMinutes();
+  const releaseAt = new Date(Date.now() + (delayMinutes * 60 * 1000)).toISOString();
+  try{
+    const row = {
+      order_id: cleanOrderId,
+      payment_id: String(payload?.payment_id || "").trim() || null,
+      payment_method: String(payload?.payment_method || "Online Payment").trim().slice(0, 60) || "Online Payment",
+      usd_inr_rate: Math.max(0, safeNumber(payload?.usd_inr_rate || 0)),
+      status: "pending",
+      available_at: releaseAt,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    const rows = await localServicesSupabaseRequest("order_settlement_queue", "POST", {
+      body: [row],
+      query: { on_conflict: "order_id" },
+      prefer: "resolution=merge-duplicates,return=representation"
+    });
+    return { ok:true, queued_at: releaseAt, queue_row: Array.isArray(rows) ? rows[0] || null : null };
+  }catch(err){
+    return { ok:false, error:String(err?.message || "settlement_queue_failed"), queued_at: releaseAt };
+  }
+}
+
 async function fetchRazorpayPaymentSnapshot(paymentId){
   const cleanPaymentId = sanitizeToken(paymentId, 120);
   if(!cleanPaymentId){
@@ -5002,7 +5155,7 @@ app.get("/api/payment/config", (req, res) => {
   });
 });
 
-app.post("/api/payment/razorpay/order", async (req, res) => {
+app.post("/api/payment/razorpay/order", requireSupabaseAuth, async (req, res) => {
   if(!isContestRazorpayConfigured()){
     return res.status(503).json({
       ok: false,
@@ -5023,8 +5176,14 @@ app.post("/api/payment/razorpay/order", async (req, res) => {
   }
 
   const orderId = sanitizeToken(req.body?.order_id, 120);
-  const userId = sanitizeUserId(req.body?.user_id);
-  const userName = sanitizeDisplayName(req.body?.user_name);
+  const userId = sanitizeUserId(req.auth?.user_id);
+  const userName = sanitizeDisplayName(
+    req.auth?.user?.user_metadata?.full_name ||
+    req.auth?.user?.user_metadata?.name ||
+    req.body?.user_name ||
+    req.auth?.email ||
+    ""
+  );
   const rawReceipt = sanitizeToken(req.body?.receipt, 40);
   const receipt = rawReceipt || `shop_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
   const rawNotes = sanitizePaymentNotes(req.body?.notes);
@@ -5037,9 +5196,41 @@ app.post("/api/payment/razorpay/order", async (req, res) => {
   ) || "INR";
 
   let amountPaise = clientAmountPaise;
-  if(baseAmount > 0){
+  let resolvedBaseAmount = baseAmount;
+  let resolvedBaseCurrency = baseCurrency;
+  if(orderId){
     try{
-      amountPaise = await convertBaseAmountToInrPaise(baseAmount, baseCurrency);
+      const orderRows = await localServicesSupabaseRequest("orders", "GET", {
+        query: {
+          select: "id,user_id,total,amount,currency,status,payment_status",
+          id: `eq.${orderId}`,
+          limit: "1"
+        }
+      });
+      const order = Array.isArray(orderRows) ? orderRows[0] || null : null;
+      if(!order){
+        return res.status(404).json({ ok:false, error:"order_not_found" });
+      }
+      if(sanitizeUserId(order?.user_id) !== userId){
+        return res.status(403).json({ ok:false, error:"order_payment_forbidden" });
+      }
+      const totalAmount = Math.max(0, safeNumber(order?.total || order?.amount));
+      if(totalAmount <= 0){
+        return res.status(409).json({ ok:false, error:"order_amount_invalid" });
+      }
+      resolvedBaseAmount = totalAmount;
+      resolvedBaseCurrency = sanitizeCurrencyCode(order?.currency) || baseCurrency || "USD";
+    }catch(err){
+      return res.status(500).json({
+        ok:false,
+        error:"order_fetch_failed",
+        message:String(err?.message || "Unable to prepare payment order.")
+      });
+    }
+  }
+  if(resolvedBaseAmount > 0){
+    try{
+      amountPaise = await convertBaseAmountToInrPaise(resolvedBaseAmount, resolvedBaseCurrency);
     }catch(err){
       return res.status(400).json({
         ok: false,
@@ -5060,9 +5251,9 @@ app.post("/api/payment/razorpay/order", async (req, res) => {
 
   const notes = {
     ...rawNotes,
-    base_currency: baseCurrency,
-    base_amount: baseAmount > 0
-      ? String(Math.round(baseAmount * 1000000) / 1000000)
+    base_currency: resolvedBaseCurrency,
+    base_amount: resolvedBaseAmount > 0
+      ? String(Math.round(resolvedBaseAmount * 1000000) / 1000000)
       : String(rawNotes.base_amount || ""),
     client_amount_paise: String(Math.max(0, clientAmountPaise)),
     app_amount_paise: String(amountPaise),
@@ -5099,7 +5290,7 @@ app.post("/api/payment/razorpay/order", async (req, res) => {
   }
 });
 
-app.post("/api/payment/razorpay/verify", async (req, res) => {
+app.post("/api/payment/razorpay/verify", requireSupabaseAuth, async (req, res) => {
   if(!isContestRazorpayConfigured()){
     return res.status(503).json({
       ok: false,
@@ -5154,15 +5345,68 @@ app.post("/api/payment/razorpay/verify", async (req, res) => {
       });
     }
 
+    const authUserId = sanitizeUserId(req.auth?.user_id);
     const paymentNotes = sanitizePaymentNotes(paymentSnapshot?.notes || {});
     const noteUserId = sanitizeUserId(
       paymentNotes.app_user_id ||
       paymentNotes.user_id ||
-      req.body?.user_id
+      authUserId
     );
+    if(!noteUserId || noteUserId !== authUserId){
+      return res.status(403).json({ ok:false, error:"payment_user_mismatch" });
+    }
     const notePlan = resolveSubscriptionPlanFromNotes(paymentNotes);
     const shouldHandleSubscription = isSubscriptionPaymentContext(paymentNotes) && notePlan !== "free" && noteUserId;
     let subscription = null;
+    const noteOrderId = sanitizeToken(paymentNotes.app_order_id || req.body?.order_id, 120);
+    let order_payment = null;
+    let settlement = null;
+
+    if(noteOrderId){
+      const orderRows = await localServicesSupabaseRequest("orders", "GET", {
+        query: {
+          select: "id,user_id,total,amount,currency,status,payment_status,payment_method,payment_id",
+          id: `eq.${noteOrderId}`,
+          limit: "1"
+        }
+      });
+      const order = Array.isArray(orderRows) ? orderRows[0] || null : null;
+      if(!order){
+        return res.status(404).json({ ok:false, error:"order_not_found" });
+      }
+      if(sanitizeUserId(order?.user_id) !== noteUserId){
+        return res.status(403).json({ ok:false, error:"order_payment_forbidden" });
+      }
+      const expectedCurrency = sanitizeCurrencyCode(order?.currency) || "USD";
+      const expectedAmount = Math.max(0, safeNumber(order?.total || order?.amount));
+      const expectedInrPaise = await convertBaseAmountToInrPaise(expectedAmount, expectedCurrency);
+      if(expectedInrPaise > 0 && paymentAmountPaise !== expectedInrPaise){
+        return res.status(409).json({
+          ok:false,
+          error:"payment_amount_mismatch",
+          payment_amount_paise: paymentAmountPaise,
+          expected_amount_paise: expectedInrPaise
+        });
+      }
+      const patchedRows = await localServicesSupabaseRequest("orders", "PATCH", {
+        query: { id: `eq.${noteOrderId}`, user_id: `eq.${noteUserId}` },
+        body: {
+          payment_status: "paid",
+          payment_method: "Online Payment",
+          payment_id: paymentId,
+          status: String(order?.status || "").trim().toLowerCase() === "pending" ? "pending" : "approved",
+          updated_at: new Date().toISOString()
+        },
+        prefer: "return=representation"
+      });
+      order_payment = Array.isArray(patchedRows) ? patchedRows[0] || null : null;
+      const usdInrRate = safeNumber(await getUsdInrRateSafe().catch(() => 0));
+      settlement = await enqueueOrderSettlementBuffer(noteOrderId, {
+        payment_id: paymentId,
+        payment_method: "Online Payment",
+        usd_inr_rate: usdInrRate
+      });
+    }
 
     if(shouldHandleSubscription){
       const activation = await mutateSystemState(state => {
@@ -5213,7 +5457,9 @@ app.post("/api/payment/razorpay/verify", async (req, res) => {
       payment_status: paymentStatus || "verified",
       payment_currency: paymentCurrency || "INR",
       payment_amount_paise: paymentAmountPaise,
-      subscription
+      subscription,
+      order_payment,
+      settlement
     });
   }catch(err){
     console.error("shop_order_verify_error:", err?.stack || err);
@@ -5222,6 +5468,532 @@ app.post("/api/payment/razorpay/verify", async (req, res) => {
       error: "shop_order_verify_failed",
       message: String(err?.message || "Unable to verify payment.")
     });
+  }
+});
+
+function isUuidLike(value){
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
+}
+
+function normalizeSecureOrderItems(rawItems){
+  const items = Array.isArray(rawItems) ? rawItems : [];
+  const normalized = [];
+  for(const raw of items){
+    const productId = String(raw?.id || raw?.product_id || "").trim().toLowerCase();
+    const qty = Math.max(1, Math.floor(safeNumber(raw?.qty || raw?.quantity || 1)));
+    if(!productId || !isUuidLike(productId)) continue;
+    normalized.push({ product_id: productId, qty });
+  }
+  const merged = new Map();
+  normalized.forEach((item) => {
+    const prev = merged.get(item.product_id) || 0;
+    merged.set(item.product_id, prev + item.qty);
+  });
+  return Array.from(merged.entries()).map(([product_id, qty]) => ({ product_id, qty })).slice(0, 120);
+}
+
+function normalizeSecureBuyerAddress(input){
+  const source = input && typeof input === "object" ? input : {};
+  return {
+    address: String(source.address || "").trim().slice(0, 200),
+    city: String(source.city || "").trim().slice(0, 80),
+    state: String(source.state || "").trim().slice(0, 80),
+    country: String(source.country || "").trim().slice(0, 80),
+    pincode: String(source.pincode || "").trim().slice(0, 30),
+    phone: String(source.phone || "").trim().slice(0, 30),
+    name: sanitizeDisplayName(source.name || "").slice(0, 80)
+  };
+}
+
+function buildSupabaseInClause(ids){
+  const clean = (Array.isArray(ids) ? ids : [])
+    .map(id => String(id || "").trim().toLowerCase())
+    .filter(id => isUuidLike(id));
+  if(!clean.length) return "";
+  return `in.(${clean.join(",")})`;
+}
+
+async function insertOrderNotifications({ orderId, buyerUserId, sellerUserId, buyerName, buyerAddress, items, total, currency, paymentMethod }){
+  const notifRows = [];
+  if(sellerUserId){
+    const first = Array.isArray(items) ? items[0] || null : null;
+    const qty = (Array.isArray(items) ? items : []).reduce((sum, item) => sum + Math.max(0, Math.floor(safeNumber(item?.qty || 0))), 0);
+    notifRows.push({
+      receiver_user_id: sellerUserId,
+      seller_id: sellerUserId,
+      type: "new_order",
+      title: "New Order Received",
+      message: `Buyer: ${buyerName || "Buyer"} | Address: ${buyerAddress || "-"} | Qty: ${qty} | Payment: ${paymentMethod || "Pending Payment"}`,
+      order_id: orderId,
+      product_id: String(first?.id || first?.product_id || "").trim() || null,
+      product_name: String(first?.name || "").trim(),
+      qty,
+      buyer_name: buyerName || "",
+      buyer_address: buyerAddress || "",
+      payment_method: paymentMethod || "Pending Payment",
+      total: roundMoney(total || 0),
+      currency: String(currency || "USD").trim().toUpperCase() || "USD",
+      is_read: false,
+      is_deleted: false
+    });
+  }
+  if(buyerUserId){
+    notifRows.push({
+      receiver_user_id: buyerUserId,
+      seller_id: sellerUserId || null,
+      type: "order_update",
+      title: "Order Created",
+      message: `Your order is pending seller approval.`,
+      order_id: orderId,
+      product_id: null,
+      product_name: "",
+      qty: (Array.isArray(items) ? items : []).reduce((sum, item) => sum + Math.max(0, Math.floor(safeNumber(item?.qty || 0))), 0),
+      buyer_name: buyerName || "",
+      buyer_address: buyerAddress || "",
+      payment_method: paymentMethod || "Pending Payment",
+      total: roundMoney(total || 0),
+      currency: String(currency || "USD").trim().toUpperCase() || "USD",
+      is_read: false,
+      is_deleted: false
+    });
+  }
+  if(!notifRows.length) return;
+  await localServicesSupabaseRequest("notifications", "POST", {
+    body: notifRows,
+    prefer: "return=minimal"
+  }).catch(() => {});
+}
+
+async function pushOrderUpdateToUsers(userIds, title, body, data){
+  const state = await readSystemState().catch(() => null);
+  if(!state) return;
+  const uniqueUserIds = Array.from(new Set((Array.isArray(userIds) ? userIds : []).map(sanitizeUserId).filter(Boolean)));
+  for(const uid of uniqueUserIds){
+    const tokens = getPushTokensForUser(state, uid);
+    if(!Array.isArray(tokens) || !tokens.length) continue;
+    await sendFcmNotificationToTokens(tokens, {
+      title: String(title || "Order update").slice(0, 120),
+      body: String(body || "").slice(0, 280),
+      data: data && typeof data === "object" ? data : {}
+    }).catch(() => {});
+  }
+}
+
+app.post("/api/orders/create", requireSupabaseAuth, async (req, res) => {
+  const buyerUserId = sanitizeUserId(req.auth?.user_id);
+  const buyerEmail = String(req.auth?.email || "").trim().slice(0, 190);
+  const buyerName = sanitizeDisplayName(req.body?.buyer_name || req.auth?.user?.user_metadata?.full_name || req.auth?.user?.user_metadata?.name || "").slice(0, 80);
+  const buyerAddressObj = normalizeSecureBuyerAddress(req.body?.buyer_address || req.body?.address || {});
+  const buyerAddressText = [buyerAddressObj.address, buyerAddressObj.city, buyerAddressObj.state, buyerAddressObj.pincode, buyerAddressObj.country].filter(Boolean).join(", ").slice(0, 300);
+  const paymentMethod = "Pending Payment";
+  const paymentStatus = "pending";
+  const idempotencyKey = sanitizeToken(
+    req.headers["idempotency-key"] ||
+    req.body?.idempotency_key ||
+    "",
+    120
+  );
+  const items = normalizeSecureOrderItems(req.body?.items || []);
+  if(!buyerUserId || !items.length){
+    return res.status(400).json({ ok:false, error:"invalid_order_payload" });
+  }
+  if(!buyerAddressObj.address || !buyerAddressObj.city || !buyerAddressObj.pincode || !buyerAddressObj.country){
+    return res.status(400).json({ ok:false, error:"buyer_address_required" });
+  }
+  try{
+    const rpcPayload = {
+      p_user_id: buyerUserId,
+      p_email: buyerEmail || null,
+      p_buyer_name: buyerName || null,
+      p_buyer_phone: buyerAddressObj.phone || null,
+      p_buyer_address: buyerAddressObj,
+      p_items: items,
+      p_payment_method: paymentMethod,
+      p_payment_status: paymentStatus,
+      p_idempotency_key: idempotencyKey || null
+    };
+    const created = await localServicesSupabaseRpc("create_pending_order_secure", rpcPayload);
+    const order = created?.order && typeof created.order === "object"
+      ? created.order
+      : (created && typeof created === "object" ? created : null);
+    if(!order || !order.id){
+      return res.status(500).json({ ok:false, error:"order_create_failed" });
+    }
+    const sellerUserId = sanitizeUserId(order?.seller_id);
+    await insertOrderNotifications({
+      orderId: String(order.id || ""),
+      buyerUserId,
+      sellerUserId,
+      buyerName: buyerName || String(order?.buyer_name || "").trim(),
+      buyerAddress: buyerAddressText,
+      items: Array.isArray(order?.items) ? order.items : [],
+      total: order?.total || order?.amount || 0,
+      currency: order?.currency || "USD",
+      paymentMethod
+    });
+    await pushOrderUpdateToUsers(
+      [sellerUserId],
+      "New order pending approval",
+      `${buyerName || "Buyer"} placed an order.`,
+      { type: "seller_new_order", order_id: String(order.id || "") }
+    );
+    return res.json({ ok:true, order });
+  }catch(err){
+    const message = String(err?.message || "");
+    if(/insufficient_stock/i.test(message)){
+      return res.status(409).json({ ok:false, error:"insufficient_stock", message });
+    }
+    if(/multi_seller_checkout_not_allowed/i.test(message)){
+      return res.status(409).json({ ok:false, error:"multi_seller_checkout_not_allowed", message });
+    }
+    if(/product_not_found/i.test(message)){
+      return res.status(404).json({ ok:false, error:"product_not_found", message });
+    }
+    if(/actor_user_mismatch|order_access_forbidden/i.test(message)){
+      return res.status(403).json({ ok:false, error:"order_create_forbidden", message });
+    }
+    if(/order_items_required|invalid_item_payload|items_must_be_array|user_id_required|buyer_address_required/i.test(message)){
+      return res.status(400).json({ ok:false, error:"invalid_order_payload", message });
+    }
+    return res.status(500).json({
+      ok:false,
+      error:"secure_order_create_failed",
+      message
+    });
+  }
+});
+
+app.get("/api/orders/for-buyer", requireSupabaseAuth, async (req, res) => {
+  const userId = sanitizeUserId(req.auth?.user_id);
+  try{
+    const rows = await localServicesSupabaseRequest("orders", "GET", {
+      query: {
+        select: "id,user_id,seller_id,buyer_name,buyer_address,address,items,total,amount,currency,status,payment_method,payment_status,payment_id,courier_name,tracking_number,reject_reason,created_at,updated_at,approved_at,shipped_at,delivered_at,completed_at",
+        user_id: `eq.${userId}`,
+        order: "created_at.desc",
+        limit: "500"
+      }
+    });
+    return res.json({ ok:true, orders: Array.isArray(rows) ? rows : [] });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"buyer_orders_fetch_failed", message:String(err?.message || "") });
+  }
+});
+
+app.get("/api/orders/for-seller", requireSupabaseAuth, async (req, res) => {
+  const userId = sanitizeUserId(req.auth?.user_id);
+  try{
+    const rows = await localServicesSupabaseRequest("orders", "GET", {
+      query: {
+        select: "id,user_id,seller_id,buyer_name,buyer_address,address,items,total,amount,currency,status,payment_method,payment_status,payment_id,courier_name,tracking_number,reject_reason,created_at,updated_at,approved_at,shipped_at,delivered_at,completed_at",
+        seller_id: `eq.${userId}`,
+        order: "created_at.desc",
+        limit: "500"
+      }
+    });
+    return res.json({ ok:true, orders: Array.isArray(rows) ? rows : [] });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"seller_orders_fetch_failed", message:String(err?.message || "") });
+  }
+});
+
+app.post("/api/orders/status", requireSupabaseAuth, async (req, res) => {
+  const actorUserId = sanitizeUserId(req.auth?.user_id);
+  const orderId = sanitizeToken(req.body?.order_id, 120);
+  const action = String(req.body?.action || req.body?.status || "").trim().toLowerCase();
+  const courierName = String(req.body?.courier_name || "").trim().slice(0, 80);
+  const trackingNumber = String(req.body?.tracking_number || "").trim().slice(0, 120);
+  const rejectReason = String(req.body?.reject_reason || "").trim().slice(0, 300);
+  const map = {
+    approve: "approved",
+    approved: "approved",
+    reject: "rejected",
+    rejected: "rejected",
+    ship: "shipped",
+    shipped: "shipped",
+    deliver: "delivered",
+    delivered: "delivered",
+    complete: "completed",
+    completed: "completed",
+    cancel: "cancelled",
+    cancelled: "cancelled"
+  };
+  const nextStatus = map[action] || "";
+  if(!actorUserId || !orderId || !nextStatus){
+    return res.status(400).json({ ok:false, error:"invalid_order_status_payload" });
+  }
+  try{
+    const orderRows = await localServicesSupabaseRequest("orders", "GET", {
+      query: {
+        select: "id,user_id,seller_id,status",
+        id: `eq.${orderId}`,
+        limit: "1"
+      }
+    });
+    const order = Array.isArray(orderRows) ? orderRows[0] || null : null;
+    if(!order){
+      return res.status(404).json({ ok:false, error:"order_not_found" });
+    }
+    const isSeller = sanitizeUserId(order?.seller_id) === actorUserId;
+    const isBuyer = sanitizeUserId(order?.user_id) === actorUserId;
+    const currentStatus = String(order?.status || "").trim().toLowerCase();
+    if(currentStatus === nextStatus){
+      return res.json({ ok:true, order, idempotent:true });
+    }
+    if(["approved", "rejected", "shipped", "delivered"].includes(nextStatus) && !isSeller){
+      return res.status(403).json({ ok:false, error:"seller_action_required" });
+    }
+    if(["completed", "cancelled"].includes(nextStatus) && !isBuyer){
+      return res.status(403).json({ ok:false, error:"buyer_action_required" });
+    }
+    if(nextStatus === "shipped" && (!courierName || !trackingNumber)){
+      return res.status(400).json({ ok:false, error:"courier_and_tracking_required" });
+    }
+    let actorRole = "";
+    if(isSeller) actorRole = "seller";
+    if(isBuyer && !actorRole) actorRole = "buyer";
+    if(!actorRole){
+      return res.status(403).json({ ok:false, error:"order_update_forbidden" });
+    }
+    const transition = await localServicesSupabaseRpc("transition_order_status_secure", {
+      p_order_id: orderId,
+      p_actor_user_id: actorUserId,
+      p_actor_role: actorRole,
+      p_next_status: nextStatus,
+      p_courier_name: courierName || null,
+      p_tracking_number: trackingNumber || null,
+      p_reject_reason: rejectReason || null
+    });
+    const nextOrder = transition?.order && typeof transition.order === "object"
+      ? transition.order
+      : (transition && typeof transition === "object" ? transition : null);
+    if(!nextOrder || !nextOrder.id){
+      return res.status(500).json({ ok:false, error:"order_status_update_failed" });
+    }
+    const buyerUserId = sanitizeUserId(nextOrder?.user_id || order?.user_id);
+    const sellerUserId = sanitizeUserId(nextOrder?.seller_id || order?.seller_id);
+    const title = "Order update";
+    const body = `Order ${String(nextOrder?.id || orderId).slice(0, 8).toUpperCase()} is now ${nextStatus.replace(/_/g, " ")}.`;
+    await insertOrderNotifications({
+      orderId: String(nextOrder?.id || orderId),
+      buyerUserId,
+      sellerUserId,
+      buyerName: String(nextOrder?.buyer_name || "").trim(),
+      buyerAddress: String(nextOrder?.buyer_address?.address || nextOrder?.address?.address || "").trim(),
+      items: Array.isArray(nextOrder?.items) ? nextOrder.items : [],
+      total: nextOrder?.total || nextOrder?.amount || 0,
+      currency: nextOrder?.currency || "USD",
+      paymentMethod: nextOrder?.payment_method || "Pending Payment"
+    });
+    await pushOrderUpdateToUsers([buyerUserId, sellerUserId], title, body, {
+      type: "order_status",
+      order_id: String(nextOrder?.id || orderId),
+      status: nextStatus
+    });
+    return res.json({ ok:true, order: nextOrder, transition });
+  }catch(err){
+    const message = String(err?.message || "");
+    if(/order_not_found/i.test(message)){
+      return res.status(404).json({ ok:false, error:"order_not_found", message });
+    }
+    if(/seller_role_required|buyer_role_required|order_access_forbidden|actor_mismatch/i.test(message)){
+      return res.status(403).json({ ok:false, error:"order_update_forbidden", message });
+    }
+    if(/invalid_order_transition|courier_and_tracking_required|next_status_required/i.test(message)){
+      return res.status(409).json({ ok:false, error:"invalid_order_status_transition", message });
+    }
+    if(/insufficient_stock/i.test(message)){
+      return res.status(409).json({ ok:false, error:"insufficient_stock", message });
+    }
+    return res.status(500).json({ ok:false, error:"order_status_transition_failed", message });
+  }
+});
+
+app.get("/api/orders/history", requireSupabaseAuth, async (req, res) => {
+  const actorUserId = sanitizeUserId(req.auth?.user_id);
+  const orderId = sanitizeToken(req.query?.order_id, 120);
+  if(!actorUserId || !orderId){
+    return res.status(400).json({ ok:false, error:"order_id_required" });
+  }
+  try{
+    const orderRows = await localServicesSupabaseRequest("orders", "GET", {
+      query: {
+        select: "id,user_id,seller_id",
+        id: `eq.${orderId}`,
+        limit: "1"
+      }
+    });
+    const order = Array.isArray(orderRows) ? orderRows[0] || null : null;
+    if(!order){
+      return res.status(404).json({ ok:false, error:"order_not_found" });
+    }
+    if(actorUserId !== sanitizeUserId(order?.user_id) && actorUserId !== sanitizeUserId(order?.seller_id)){
+      return res.status(403).json({ ok:false, error:"order_access_forbidden" });
+    }
+    const rows = await localServicesSupabaseRequest("order_status_history", "GET", {
+      query: {
+        select: "id,order_id,from_status,to_status,actor_user_id,actor_role,note,metadata,created_at",
+        order_id: `eq.${orderId}`,
+        order: "created_at.asc",
+        limit: "500"
+      }
+    });
+    return res.json({ ok:true, history: Array.isArray(rows) ? rows : [] });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"order_history_fetch_failed", message:String(err?.message || "") });
+  }
+});
+
+app.get("/api/orders/detail", requireSupabaseAuth, async (req, res) => {
+  const actorUserId = sanitizeUserId(req.auth?.user_id);
+  const orderId = sanitizeToken(req.query?.order_id, 120);
+  if(!actorUserId || !orderId){
+    return res.status(400).json({ ok:false, error:"order_id_required" });
+  }
+  try{
+    const rows = await localServicesSupabaseRequest("orders", "GET", {
+      query: {
+        select: "id,user_id,seller_id,buyer_name,buyer_address,address,items,total,amount,currency,status,payment_method,payment_status,payment_id,courier_name,tracking_number,reject_reason,created_at,updated_at,approved_at,shipped_at,delivered_at,completed_at",
+        id: `eq.${orderId}`,
+        limit: "1"
+      }
+    });
+    const order = Array.isArray(rows) ? rows[0] || null : null;
+    if(!order){
+      return res.status(404).json({ ok:false, error:"order_not_found" });
+    }
+    if(actorUserId !== sanitizeUserId(order?.user_id) && actorUserId !== sanitizeUserId(order?.seller_id)){
+      return res.status(403).json({ ok:false, error:"order_access_forbidden" });
+    }
+    return res.json({ ok:true, order });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"order_fetch_failed", message:String(err?.message || "") });
+  }
+});
+
+app.post("/api/orders/payment/cod", requireSupabaseAuth, async (req, res) => {
+  const buyerUserId = sanitizeUserId(req.auth?.user_id);
+  const orderId = sanitizeToken(req.body?.order_id, 120);
+  if(!buyerUserId || !orderId){
+    return res.status(400).json({ ok:false, error:"order_id_required" });
+  }
+  try{
+    const existingRows = await localServicesSupabaseRequest("orders", "GET", {
+      query: {
+        select: "id,user_id,seller_id,status,payment_method,payment_status,buyer_name,buyer_address,address,items,total,amount,currency",
+        id: `eq.${orderId}`,
+        user_id: `eq.${buyerUserId}`,
+        limit: "1"
+      }
+    });
+    const existing = Array.isArray(existingRows) ? existingRows[0] || null : null;
+    if(!existing){
+      return res.status(404).json({ ok:false, error:"order_not_found" });
+    }
+    const status = String(existing?.status || "").trim().toLowerCase();
+    const paymentState = String(existing?.payment_status || "").trim().toLowerCase();
+    if(!["pending", "approved"].includes(status)){
+      return res.status(409).json({ ok:false, error:"cod_not_allowed_for_current_status", status });
+    }
+    if(["paid", "captured"].includes(paymentState)){
+      return res.status(409).json({ ok:false, error:"order_already_paid" });
+    }
+    const rows = await localServicesSupabaseRequest("orders", "PATCH", {
+      query: { id: `eq.${orderId}`, user_id: `eq.${buyerUserId}` },
+      body: {
+        payment_method: "Cash on Delivery",
+        payment_status: "cod",
+        updated_at: new Date().toISOString()
+      },
+      prefer: "return=representation"
+    });
+    const order = Array.isArray(rows) ? rows[0] || null : null;
+    if(!order){
+      return res.status(404).json({ ok:false, error:"order_not_found" });
+    }
+    await insertOrderNotifications({
+      orderId: String(order.id || ""),
+      buyerUserId,
+      sellerUserId: sanitizeUserId(order?.seller_id),
+      buyerName: String(order?.buyer_name || "").trim(),
+      buyerAddress: String(order?.buyer_address?.address || order?.address?.address || "").trim(),
+      items: Array.isArray(order?.items) ? order.items : [],
+      total: order?.total || order?.amount || 0,
+      currency: order?.currency || "USD",
+      paymentMethod: "Cash on Delivery"
+    });
+    await pushOrderUpdateToUsers(
+      [sanitizeUserId(order?.seller_id)],
+      "COD order pending",
+      `Order ${String(order.id || "").slice(0, 8).toUpperCase()} is placed with Cash on Delivery.`,
+      { type: "order_payment_cod", order_id: String(order.id || "") }
+    );
+    return res.json({ ok:true, order });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"order_payment_cod_failed", message:String(err?.message || "") });
+  }
+});
+
+app.post("/api/orders/settlement/process", (req, res, next) => {
+  if(!isAdminAutomationRequest(req)){
+    return res.status(403).json({ ok:false, error:"forbidden" });
+  }
+  return next();
+}, async (req, res) => {
+  const limit = Math.max(1, Math.min(50, Math.floor(safeNumber(req.body?.limit || req.query?.limit || 10) || 10)));
+  try{
+    const nowIso = new Date().toISOString();
+    const rows = await localServicesSupabaseRequest("order_settlement_queue", "GET", {
+      query: {
+        select: "id,order_id,payment_id,payment_method,usd_inr_rate,status,available_at,attempt_count",
+        status: "eq.pending",
+        available_at: `lte.${nowIso}`,
+        order: "available_at.asc",
+        limit: String(limit)
+      }
+    });
+    const queue = Array.isArray(rows) ? rows : [];
+    const processed = [];
+    for(const row of queue){
+      const qid = String(row?.id || "").trim();
+      const orderId = String(row?.order_id || "").trim();
+      if(!qid || !orderId){
+        continue;
+      }
+      try{
+        await localServicesSupabaseRpc("settle_paid_order_rpc", {
+          p_order_id: orderId,
+          p_payment_id: String(row?.payment_id || "").trim() || null,
+          p_payment_method: String(row?.payment_method || "Online Payment").trim() || "Online Payment",
+          p_usd_inr_rate: Math.max(0, safeNumber(row?.usd_inr_rate || 0))
+        });
+        await localServicesSupabaseRequest("order_settlement_queue", "PATCH", {
+          query: { id: `eq.${qid}` },
+          body: {
+            status: "processed",
+            processed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          },
+          prefer: "return=minimal"
+        }).catch(() => {});
+        processed.push({ queue_id: qid, order_id: orderId, ok: true });
+      }catch(err){
+        await localServicesSupabaseRequest("order_settlement_queue", "PATCH", {
+          query: { id: `eq.${qid}` },
+          body: {
+            status: "failed",
+            last_error: String(err?.message || "").slice(0, 300),
+            attempt_count: Math.max(0, Math.floor(safeNumber(row?.attempt_count || 0))) + 1,
+            updated_at: new Date().toISOString()
+          },
+          prefer: "return=minimal"
+        }).catch(() => {});
+        processed.push({ queue_id: qid, order_id: orderId, ok: false, error: String(err?.message || "") });
+      }
+    }
+    return res.json({ ok:true, processed_count: processed.length, processed });
+  }catch(err){
+    return res.status(500).json({ ok:false, error:"settlement_process_failed", message:String(err?.message || "") });
   }
 });
 
@@ -7604,11 +8376,10 @@ app.get("/api/local/nearby", async (req, res) => {
   }
 });
 
-app.post("/api/local/orders/create", async (req, res) => {
-  const userId = sanitizeUserId(req.body?.user_id);
+app.post("/api/local/orders/create", requireSupabaseAuth, async (req, res) => {
+  const userId = sanitizeUserId(req.auth?.user_id);
   const listingId = String(req.body?.listing_id || "").trim();
   const serviceTypeInput = sanitizeListingType(req.body?.service_type) || "food";
-  const amountInrInput = Math.max(0, safeNumber(req.body?.amount_inr));
   const deliveryAddress = String(req.body?.delivery_address || "").trim().slice(0, 240);
   const note = String(req.body?.note || "").trim().slice(0, 300);
   const paymentMethod = sanitizePaymentMethod(req.body?.payment_method || "cash");
@@ -7617,22 +8388,17 @@ app.post("/api/local/orders/create", async (req, res) => {
   const paymentOrderId = String(req.body?.payment_order_id || "").trim().slice(0, 120);
   const paymentRef = String(req.body?.payment_ref || "").trim().slice(0, 120);
   const itemsRaw = Array.isArray(req.body?.items) ? req.body.items.slice(0, 80) : [];
-  const itemSnapshot = itemsRaw
+  const requestItems = itemsRaw
     .map((item) => ({
       item_id: String(item?.item_id || "").trim().slice(0, 120),
-      name: String(item?.name || "").trim().slice(0, 120),
-      qty: Math.max(1, Math.floor(safeNumber(item?.qty || 1))),
-      price_inr: roundMoney(Math.max(0, safeNumber(item?.price_inr || 0))),
-      image_url: String(item?.image_url || "").trim().slice(0, 3000)
+      qty: Math.max(1, Math.floor(safeNumber(item?.qty || 1)))
     }))
-    .filter((item) => item.name && item.price_inr >= 0);
-  const itemTotal = roundMoney(itemSnapshot.reduce((sum, item) => sum + (item.price_inr * item.qty), 0));
-  const amountInr = amountInrInput > 0 ? roundMoney(amountInrInput) : itemTotal;
+    .filter((item) => item.item_id && item.qty > 0);
   if(!userId || !listingId || !deliveryAddress){
     return res.status(400).json({ ok:false, error:"invalid_order_payload" });
   }
-  if(amountInr <= 0){
-    return res.status(400).json({ ok:false, error:"amount_required" });
+  if(requestItems.length === 0){
+    return res.status(400).json({ ok:false, error:"items_required" });
   }
   if(localRateLimitHit(`local_order_create:${userId}`, 40, 10 * 60 * 1000)){
     return res.status(429).json({ ok:false, error:"rate_limited" });
@@ -7644,7 +8410,7 @@ app.post("/api/local/orders/create", async (req, res) => {
     }
     const listingRows = await localServicesSupabaseRequest("local_listings", "GET", {
       query: {
-        select: "id,user_id,store_name,listing_type,status",
+        select: "id,user_id,store_name,listing_type,status,delivery_charge_inr",
         id: `eq.${listingId}`,
         limit: "1"
       }
@@ -7664,6 +8430,48 @@ app.post("/api/local/orders/create", async (req, res) => {
         error:"payment_not_verified",
         message:"Online orders require verified captured payment before create."
       });
+    }
+    const itemIds = Array.from(new Set(requestItems.map((item) => item.item_id))).slice(0, 120);
+    const inClause = `in.(${itemIds.map((id) => id.replace(/[^a-zA-Z0-9_-]/g, "")).filter(Boolean).join(",")})`;
+    if(inClause === "in.()"){
+      return res.status(400).json({ ok:false, error:"items_invalid" });
+    }
+    const itemRows = await localServicesSupabaseRequest("local_listing_items", "GET", {
+      query: {
+        select: "id,listing_id,seller_user_id,name,price_inr,stock_qty,image_url,is_active",
+        listing_id: `eq.${listingId}`,
+        id: inClause,
+        limit: "500"
+      }
+    });
+    const byId = new Map();
+    (Array.isArray(itemRows) ? itemRows : []).forEach((row) => {
+      const id = String(row?.id || "").trim();
+      if(id) byId.set(id, row);
+    });
+    const itemSnapshot = [];
+    for(const reqItem of requestItems){
+      const row = byId.get(reqItem.item_id);
+      if(!row || !Boolean(row?.is_active)){
+        return res.status(409).json({ ok:false, error:"item_not_available", item_id: reqItem.item_id });
+      }
+      const stock = Math.max(0, Math.floor(safeNumber(row?.stock_qty)));
+      if(stock < reqItem.qty){
+        return res.status(409).json({ ok:false, error:"insufficient_stock", item_id: reqItem.item_id, available_qty: stock });
+      }
+      itemSnapshot.push({
+        item_id: String(row?.id || "").trim().slice(0, 120),
+        name: String(row?.name || "").trim().slice(0, 120),
+        qty: reqItem.qty,
+        price_inr: roundMoney(Math.max(0, safeNumber(row?.price_inr || 0))),
+        image_url: String(row?.image_url || "").trim().slice(0, 3000)
+      });
+    }
+    const itemTotal = roundMoney(itemSnapshot.reduce((sum, item) => sum + (item.price_inr * item.qty), 0));
+    const deliveryCharge = roundMoney(Math.max(0, safeNumber(listing?.delivery_charge_inr || 0)));
+    const amountInr = roundMoney(itemTotal + deliveryCharge);
+    if(amountInr <= 0){
+      return res.status(400).json({ ok:false, error:"amount_required" });
     }
     const createdRows = await localServicesSupabaseRequest("local_orders", "POST", {
       body: [{
@@ -7704,9 +8512,9 @@ app.post("/api/local/orders/create", async (req, res) => {
   }
 });
 
-app.post("/api/local/orders/status", async (req, res) => {
+app.post("/api/local/orders/status", requireSupabaseAuth, async (req, res) => {
   const orderId = String(req.body?.order_id || "").trim();
-  const actorUserId = sanitizeUserId(req.body?.user_id);
+  const actorUserId = sanitizeUserId(req.auth?.user_id);
   const status = String(req.body?.status || "").trim().toLowerCase();
   const allowed = new Set(["accepted", "preparing", "rejected", "out_for_delivery", "delivered", "completed", "cancelled"]);
   if(!orderId || !allowed.has(status)){
@@ -7725,7 +8533,7 @@ app.post("/api/local/orders/status", async (req, res) => {
       return res.status(404).json({ ok:false, error:"order_not_found" });
     }
     const isAdmin = isAdminAutomationRequest(req);
-    if(!isAdmin && actorUserId && actorUserId !== sanitizeUserId(order.seller_user_id) && actorUserId !== sanitizeUserId(order.buyer_user_id)){
+    if(!isAdmin && actorUserId !== sanitizeUserId(order.seller_user_id) && actorUserId !== sanitizeUserId(order.buyer_user_id)){
       return res.status(403).json({ ok:false, error:"order_update_forbidden" });
     }
     const orderFlow = {
@@ -8838,11 +9646,8 @@ app.get("/api/local/admin/listings/pending", async (req, res) => {
   }
 });
 
-app.get("/api/local/orders/for-seller", async (req, res) => {
-  const userId = sanitizeUserId(req.query?.user_id);
-  if(!userId){
-    return res.status(400).json({ ok:false, error:"user_id_required" });
-  }
+app.get("/api/local/orders/for-seller", requireSupabaseAuth, async (req, res) => {
+  const userId = sanitizeUserId(req.auth?.user_id);
   try{
     const sellerAllowed = await hasActiveLocalRole(userId, "seller");
     if(!sellerAllowed) return res.json({ ok:true, orders: [], requires_role: "seller" });
@@ -8860,11 +9665,8 @@ app.get("/api/local/orders/for-seller", async (req, res) => {
   }
 });
 
-app.get("/api/local/orders/for-buyer", async (req, res) => {
-  const userId = sanitizeUserId(req.query?.user_id);
-  if(!userId){
-    return res.status(400).json({ ok:false, error:"user_id_required" });
-  }
+app.get("/api/local/orders/for-buyer", requireSupabaseAuth, async (req, res) => {
+  const userId = sanitizeUserId(req.auth?.user_id);
   try{
     const consumerAllowed = await hasActiveLocalRole(userId, "consumer");
     if(!consumerAllowed) return res.json({ ok:true, orders: [], requires_role: "consumer" });
@@ -9642,8 +10444,8 @@ app.get("/api/local/roles", async (req, res) => {
   }
 });
 
-app.post("/api/local/payments/order", async (req, res) => {
-  const userId = sanitizeUserId(req.body?.user_id);
+app.post("/api/local/payments/order", requireSupabaseAuth, async (req, res) => {
+  const userId = sanitizeUserId(req.auth?.user_id);
   const module = sanitizeLocalModule(req.body?.module);
   const amountInr = Math.max(0, roundMoney(req.body?.amount_inr || 0));
   const referenceType = String(req.body?.reference_type || "").trim().toLowerCase().slice(0, 40);
@@ -9723,8 +10525,8 @@ app.post("/api/local/payments/order", async (req, res) => {
   }
 });
 
-app.post("/api/local/payments/verify", async (req, res) => {
-  const userId = sanitizeUserId(req.body?.user_id);
+app.post("/api/local/payments/verify", requireSupabaseAuth, async (req, res) => {
+  const userId = sanitizeUserId(req.auth?.user_id);
   const orderId = String(req.body?.razorpay_order_id || "").trim();
   const paymentId = String(req.body?.razorpay_payment_id || "").trim();
   const signature = String(req.body?.razorpay_signature || "").trim();
@@ -9796,6 +10598,21 @@ app.post("/api/local/payments/verify", async (req, res) => {
     });
 
     if(refType === "order"){
+      try{
+        const orderRows = await localServicesSupabaseRequest("local_orders", "GET", {
+          query: {
+            select: "id,buyer_user_id",
+            id: `eq.${refId}`,
+            limit: "1"
+          }
+        });
+        const target = Array.isArray(orderRows) ? orderRows[0] || null : null;
+        if(!target || sanitizeUserId(target?.buyer_user_id) !== userId){
+          return res.status(403).json({ ok:false, error:"order_payment_forbidden" });
+        }
+      }catch(_){
+        return res.status(403).json({ ok:false, error:"order_payment_forbidden" });
+      }
       await localServicesSupabaseRequest("local_orders", "PATCH", {
         query: { id: `eq.${refId}` },
         body: {

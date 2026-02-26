@@ -222,12 +222,54 @@ if(!supa){
   throw new Error("supabase_client_unavailable");
 }
 let CURRENT_USER=null, CURRENT_SELLER=null, isSellerPaid=false, showBadge=false;
+let ACCESS_TOKEN = "";
+
+function buildApiBases(){
+  const out = [""];
+  const push = (raw) => {
+    const value = String(raw || "").trim().replace(/\/+$/g, "");
+    if(!value) return;
+    if(!/^https?:\/\//i.test(value)) return;
+    if(!out.includes(value)) out.push(value);
+  };
+  push(window.CONTEST_API_BASE || window.API_BASE || "");
+  try{
+    push(localStorage.getItem("contest_api_base"));
+    push(localStorage.getItem("api_base"));
+  }catch(_){ }
+  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+  push("https://novagapp-mart.onrender.com");
+  return out;
+}
+
+async function authApi(path, options){
+  if(!ACCESS_TOKEN){
+    throw new Error("auth_token_missing");
+  }
+  const opts = options && typeof options === "object" ? { ...options } : {};
+  const headers = { ...(opts.headers || {}) };
+  headers.Authorization = `Bearer ${ACCESS_TOKEN}`;
+  opts.headers = headers;
+  let lastErr = "";
+  for(const base of buildApiBases()){
+    try{
+      const res = await fetch(`${base}${path}`, opts);
+      const payload = await res.json().catch(()=>null);
+      if(res.ok && payload?.ok) return payload;
+      lastErr = String(payload?.message || payload?.error || `Request failed (${res.status})`);
+    }catch(err){
+      lastErr = String(err?.message || "api_unreachable");
+    }
+  }
+  throw new Error(lastErr || "api_request_failed");
+}
 
 (async function init(){
   const { data } = await supa.auth.getSession();
   if(!data.session){ location.href="login.html"; return; }
 
   CURRENT_USER=data.session.user;
+  ACCESS_TOKEN=String(data.session.access_token || "").trim();
   sellerName.innerText=CURRENT_USER.email.split("@")[0];
 
   let { data:seller } = await supa
@@ -296,45 +338,38 @@ async function fetchSellerProductCount(){
 /* SAFE LOADERS */
 async function loadOrders(){
   if(!CURRENT_USER) return;
-
-  const { data, error } = await supa
-    .from("orders")
-    .select("*")
-    .eq("seller_id", CURRENT_USER.id)
-    .order("created_at", { ascending: false });
-
-  if(error){
-    console.error(error);
+  let rows = [];
+  try{
+    const payload = await authApi("/api/orders/for-seller", { method: "GET" });
+    rows = Array.isArray(payload?.orders) ? payload.orders : [];
+  }catch(err){
+    console.error(err);
     orderHistory.innerText = "No orders yet";
     return;
   }
 
-  const sellerRows = [];
-  (data || []).forEach(o=>{
-    (o.items || []).forEach(i=>{
-      if(i.owner_id !== CURRENT_USER.id) return;
-      sellerRows.push({
-        id: o.id,
-        product: i.name || "Product",
-        qty: Number(i.qty || 0),
-        buyer: o.address?.name || "",
-        status: o.status || "pending"
-      });
-    });
-  });
-
-  if(sellerRows.length === 0){
+  if(rows.length === 0){
     orderHistory.innerText = "No orders yet";
     return;
   }
 
   orderHistory.innerHTML = "";
-  sellerRows.forEach(o=>{
+  rows.forEach((o)=>{
+    const items = Array.isArray(o.items) ? o.items : [];
+    const qty = items.reduce((sum, item)=>sum + Number(item?.qty || 0), 0);
+    const firstItem = items[0] || {};
+    const buyerAddress = o.buyer_address || o.address || {};
+    const buyerName = String(o.buyer_name || buyerAddress?.name || "").trim() || "Buyer";
+    const buyerPhone = String(buyerAddress?.phone || "").trim() || "-";
+    const buyerAddrText = [buyerAddress?.address, buyerAddress?.city, buyerAddress?.pincode, buyerAddress?.country].filter(Boolean).join(", ");
     orderHistory.innerHTML += `
       <div class="history-item" onclick="openOrderDetails('${o.id}')">
         Order ${o.id}<br>
-        <small>${translateProductName(o.product)} • Qty ${o.qty} • ${o.buyer || "Buyer"}</small><br>
-        <small>Status: ${o.status}</small>
+        <small>${translateProductName(firstItem?.name || "Product")} • Qty ${qty} • ${buyerName}</small><br>
+        <small>Phone: ${buyerPhone}</small><br>
+        <small>Address: ${buyerAddrText || "-"}</small><br>
+        <small>Total: ${money(Number(o.total || o.amount || 0), o.currency || "USD")} • Payment: ${o.payment_method || "Pending Payment"}</small><br>
+        <small>Status: ${o.status || "pending"}</small>
       </div>
     `;
   });

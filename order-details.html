@@ -192,11 +192,11 @@ if(!supa){
 }
 
 const STAGES = [
-  { key: "approved", label: "Seller Approval", sub: "Seller confirms your order" },
+  { key: "pending", label: "Pending", sub: "Waiting for seller action" },
+  { key: "approved", label: "Approved", sub: "Seller approved your order" },
   { key: "shipped", label: "Shipped", sub: "Package left seller facility" },
-  { key: "hub_reached", label: "Package Reached Hub", sub: "Package reached nearest hub" },
-  { key: "out_for_delivery", label: "Out for Delivery", sub: "Rider is delivering your package" },
-  { key: "delivered", label: "Delivered", sub: "Order delivered successfully" }
+  { key: "delivered", label: "Delivered", sub: "Order delivered successfully" },
+  { key: "completed", label: "Completed", sub: "Order closed successfully" }
 ];
 
 const params = new URLSearchParams(location.search);
@@ -215,6 +215,7 @@ const NOTIF_ID =
 
 let CURRENT_USER = null;
 let ORDER = null;
+let ACCESS_TOKEN = "";
 let deliveryCountdownTimer = null;
 
 const metaCard = document.getElementById("metaCard");
@@ -225,6 +226,44 @@ const buyerActions = document.getElementById("buyerActions");
 const sellerActions = document.getElementById("sellerActions");
 const itemsBox = document.getElementById("itemsBox");
 const orderIdText = document.getElementById("orderIdText");
+
+function buildApiBases(){
+  const out = [""];
+  const push = (raw) => {
+    const value = String(raw || "").trim().replace(/\/+$/g, "");
+    if(!value) return;
+    if(!/^https?:\/\//i.test(value)) return;
+    if(!out.includes(value)) out.push(value);
+  };
+  push(window.CONTEST_API_BASE || window.API_BASE || "");
+  try{
+    push(localStorage.getItem("contest_api_base"));
+    push(localStorage.getItem("api_base"));
+  }catch(_){ }
+  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+  push("https://novagapp-mart.onrender.com");
+  return out;
+}
+
+async function authApi(path, options){
+  if(!ACCESS_TOKEN) throw new Error("auth_token_missing");
+  const req = options && typeof options === "object" ? { ...options } : {};
+  const headers = { ...(req.headers || {}) };
+  headers.Authorization = `Bearer ${ACCESS_TOKEN}`;
+  req.headers = headers;
+  let lastErr = "";
+  for(const base of buildApiBases()){
+    try{
+      const res = await fetch(`${base}${path}`, req);
+      const payload = await res.json().catch(()=>null);
+      if(res.ok && payload?.ok) return payload;
+      lastErr = String(payload?.message || payload?.error || `Request failed (${res.status})`);
+    }catch(err){
+      lastErr = String(err?.message || "api_unreachable");
+    }
+  }
+  throw new Error(lastErr || "api_request_failed");
+}
 
 const CITY_COORDS = {
   bangalore:[12.9716,77.5946],
@@ -436,6 +475,7 @@ function renderDeliveryCard(){
     return;
   }
   CURRENT_USER = data.session.user;
+  ACCESS_TOKEN = String(data.session.access_token || "").trim();
 
   if(!ORDER_ID){
     metaCard.innerText = "Order not found";
@@ -457,18 +497,19 @@ async function markNotifRead(){
 }
 
 async function loadOrder(){
-  const { data, error } = await supa
-    .from("orders")
-    .select("*")
-    .eq("id", ORDER_ID)
-    .single();
+  try{
+    const payload = await authApi(`/api/orders/detail?order_id=${encodeURIComponent(ORDER_ID)}`, {
+      method: "GET"
+    });
+    ORDER = payload?.order || null;
+  }catch(_){
+    ORDER = null;
+  }
 
-  if(error || !data){
+  if(!ORDER){
     metaCard.innerText = "Order not found";
     return;
   }
-
-  ORDER = data;
 }
 
 function isBuyer(){
@@ -499,9 +540,11 @@ function renderPage(){
   const buyerEmail = typeof buyerAddr === "object" ? (buyerAddr.email || ORDER.email || "") : (ORDER.email || "");
 
   metaCard.innerHTML = `
-    <div><b>Status:</b> ${ORDER.status || "placed"}</div>
+    <div><b>Status:</b> ${ORDER.status || "pending"}</div>
     <div><b>Total:</b> ${window.moneyTag ? moneyTag(ORDER.total || ORDER.amount || 0, ORDER.currency || "USD") : (ORDER.total || ORDER.amount || 0)}</div>
     <div><b>Payment:</b> ${ORDER.payment_status || "pending"} (${ORDER.payment_method || "Pending Payment"})</div>
+    <div><b>Courier:</b> ${ORDER.courier_name || "-"}</div>
+    <div><b>Tracking:</b> ${ORDER.tracking_number || "-"}</div>
     <div><b>Buyer:</b> ${ORDER.buyer_name || ORDER.email || ""}</div>
     <div><b>Phone:</b> ${buyerPhone || "-"}</div>
     <div><b>Email:</b> ${buyerEmail || "-"}</div>
@@ -517,7 +560,7 @@ function renderPage(){
 
 function renderTimeline(){
   timelineBox.innerHTML = "";
-  const status = String(ORDER.status || "placed").toLowerCase();
+  const status = String(ORDER.status || "pending").toLowerCase();
   const stageKeys = STAGES.map(s=>s.key);
   const currentIndex = stageKeys.indexOf(status);
 
@@ -558,24 +601,47 @@ function renderItems(){
 function renderActions(){
   buyerActions.innerHTML = "";
   sellerActions.innerHTML = "";
-  const status = String(ORDER.status || "placed").toLowerCase();
+  const status = String(ORDER.status || "pending").toLowerCase();
 
-  if(isBuyer() && !["cancelled", "delivered"].includes(status)){
+  if(isBuyer() && ["pending"].includes(status)){
     const btn = document.createElement("button");
     btn.className = "action-btn danger";
-    btn.innerText = "Cancel Order";
+    btn.innerText = "Cancel Request";
     btn.onclick = ()=>updateStatus("cancelled");
     buyerActions.appendChild(btn);
   }
 
-  if(isSeller() && status !== "cancelled"){
-    const next = getNextStatus(status);
-    if(next){
-      const btn = document.createElement("button");
-      btn.className = "action-btn";
-      btn.innerText = `Mark as ${labelForStatus(next)}`;
-      btn.onclick = ()=>updateStatus(next);
-      sellerActions.appendChild(btn);
+  if(isSeller()){
+    if(status === "pending"){
+      const approveBtn = document.createElement("button");
+      approveBtn.className = "action-btn";
+      approveBtn.innerText = "Approve";
+      approveBtn.onclick = ()=>updateStatus("approved");
+      sellerActions.appendChild(approveBtn);
+
+      const rejectBtn = document.createElement("button");
+      rejectBtn.className = "action-btn danger";
+      rejectBtn.innerText = "Reject";
+      rejectBtn.onclick = ()=>updateStatus("rejected");
+      sellerActions.appendChild(rejectBtn);
+    }else if(status === "approved"){
+      const shipBtn = document.createElement("button");
+      shipBtn.className = "action-btn";
+      shipBtn.innerText = "Mark Shipped";
+      shipBtn.onclick = ()=>updateStatus("shipped");
+      sellerActions.appendChild(shipBtn);
+    }else if(status === "shipped"){
+      const deliveredBtn = document.createElement("button");
+      deliveredBtn.className = "action-btn";
+      deliveredBtn.innerText = "Mark Delivered";
+      deliveredBtn.onclick = ()=>updateStatus("delivered");
+      sellerActions.appendChild(deliveredBtn);
+    }else if(status === "delivered"){
+      const completeBtn = document.createElement("button");
+      completeBtn.className = "action-btn";
+      completeBtn.innerText = "Mark Completed";
+      completeBtn.onclick = ()=>updateStatus("completed");
+      sellerActions.appendChild(completeBtn);
     }
   }
 }
@@ -586,7 +652,7 @@ function labelForStatus(key){
 }
 
 function getNextStatus(status){
-  if(status === "placed") return "approved";
+  if(status === "pending") return "approved";
   const keys = STAGES.map(s=>s.key);
   const idx = keys.indexOf(status);
   if(idx === -1) return null;
@@ -595,20 +661,50 @@ function getNextStatus(status){
 
 async function updateStatus(nextStatus){
   if(!ORDER?.id) return;
-  const { error, data } = await supa
-    .from("orders")
-    .update({ status: nextStatus })
-    .eq("id", ORDER.id)
-    .select("*")
-    .single();
-
-  if(error){
-    alert("Failed to update order");
-    console.error(error);
+  const actionMap = {
+    approved: "approve",
+    rejected: "reject",
+    shipped: "ship",
+    delivered: "deliver",
+    completed: "complete",
+    cancelled: "reject"
+  };
+  const action = actionMap[String(nextStatus || "").toLowerCase()] || "";
+  if(!action){
     return;
   }
-
-  ORDER = data;
+  let courierName = "";
+  let trackingNumber = "";
+  let rejectReason = "";
+  if(nextStatus === "shipped"){
+    courierName = String(prompt("Courier name") || "").trim();
+    trackingNumber = String(prompt("Tracking number") || "").trim();
+    if(!courierName || !trackingNumber){
+      alert("Courier name and tracking number are required.");
+      return;
+    }
+  }
+  if(nextStatus === "rejected" || nextStatus === "cancelled"){
+    rejectReason = String(prompt("Rejection reason") || "").trim();
+  }
+  let payload = null;
+  try{
+    payload = await authApi("/api/orders/status", {
+      method: "POST",
+      headers: { "Content-Type":"application/json" },
+      body: JSON.stringify({
+        order_id: ORDER.id,
+        action,
+        courier_name: courierName,
+        tracking_number: trackingNumber,
+        reject_reason: rejectReason
+      })
+    });
+  }catch(err){
+    alert(String(err?.message || "Failed to update order"));
+    return;
+  }
+  ORDER = payload?.order || ORDER;
   renderPage();
 }
 

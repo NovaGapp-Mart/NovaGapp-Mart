@@ -1,0 +1,321 @@
+   940:   }
+   941:   if(!state.push.token_index || typeof state.push.token_index !== "object"){
+   942:     state.push.token_index = {};
+   943:   }
+   944: 
+   945:   const previousOwner = String(state.push.token_index[token] || "").trim();
+   946:   if(previousOwner && previousOwner !== userId){
+   947:     const prevMap = state.push.tokens_by_user[previousOwner];
+   948:     if(prevMap && typeof prevMap === "object"){
+   949:       delete prevMap[token];
+   950:       if(Object.keys(prevMap).length === 0){
+   951:         delete state.push.tokens_by_user[previousOwner];
+   952:       }
+   953:     }
+   954:   }
+   955: 
+   956:   if(!state.push.tokens_by_user[userId] || typeof state.push.tokens_by_user[userId] !== "object"){
+   957:     state.push.tokens_by_user[userId] = {};
+   958:   }
+   959:   state.push.tokens_by_user[userId][token] = {
+   960:     token,
+   961:     platform: String(meta?.platform || "").trim().slice(0, 40),
+   962:     user_agent: String(meta?.user_agent || "").trim().slice(0, 240),
+   963:     updated_at: new Date().toISOString()
+   964:   };
+   965:   state.push.token_index[token] = userId;
+   966:   return true;
+   967: }
+   968: 
+   969: function getPushTokensForUser(state, userIdInput){
+   970:   const userId = sanitizePushUserId(userIdInput);
+   971:   if(!userId) return [];
+   972:   const map = state?.push?.tokens_by_user?.[userId];
+   973:   if(!map || typeof map !== "object") return [];
+   974:   return Object.keys(map).map(sanitizePushToken).filter(Boolean).slice(0, 100);
+   975: }
+   976: 
+   977: async function sendFcmNotificationToTokens(tokens, payload){
+   978:   const unique = Array.from(new Set((tokens || []).map(sanitizePushToken).filter(Boolean))).slice(0, 100);
+   979:   if(!unique.length){
+   980:     return { ok:true, sent:0, failed:0 };
+   981:   }
+   982:   if(!FIREBASE_SERVER_KEY){
+   983:     return { ok:false, sent:0, failed:unique.length, error:"firebase_server_key_missing" };
+   984:   }
+   985:   const body = {
+   986:     registration_ids: unique,
+   987:     priority: "high",
+   988:     notification: {
+   989:       title: String(payload?.title || "NOVAGAPP").slice(0, 120),
+   990:       body: String(payload?.body || "").slice(0, 300)
+   991:     },
+   992:     data: sanitizePushData(payload?.data || {})
+   993:   };
+   994:   const response = await fetch("https://fcm.googleapis.com/fcm/send", {
+   995:     method: "POST",
+   996:     headers: {
+   997:       Authorization: `key=${FIREBASE_SERVER_KEY}`,
+   998:       "Content-Type": "application/json"
+   999:     },
+  1000:     body: JSON.stringify(body)
+  1001:   });
+  1002:   const raw = await response.text().catch(() => "");
+  1003:   let parsed = null;
+  1004:   try{
+  1005:     parsed = raw ? JSON.parse(raw) : null;
+  1006:   }catch(_){
+  1007:     parsed = null;
+  1008:   }
+  1009:   if(!response.ok){
+  1010:     return {
+  1011:       ok:false,
+  1012:       sent:0,
+  1013:       failed:unique.length,
+  1014:       error: `firebase_send_failed_${response.status}`,
+  1015:       details: String(raw || "").slice(0, 280)
+  1016:     };
+  1017:   }
+  1018:   return {
+  1019:     ok:true,
+  1020:     sent: Math.max(0, Number(parsed?.success || 0)),
+  1021:     failed: Math.max(0, Number(parsed?.failure || 0))
+  1022:   };
+  1023: }
+  1024: 
+  1025: function isLocalServicesSupabaseConfigured(){
+  1026:   return Boolean(getSocialSupabaseBase() && getSocialSupabaseServiceRoleKey());
+  1027: }
+  1028: 
+  1029: async function localServicesSupabaseRequest(tableName, method, options){
+  1030:   if(!isLocalServicesSupabaseConfigured()){
+  1031:     throw new Error("local_services_supabase_unconfigured");
+  1032:   }
+  1033:   const table = String(tableName || "").trim();
+  1034:   if(!table){
+  1035:     throw new Error("local_services_table_required");
+  1036:   }
+  1037:   const base = getSocialSupabaseBase();
+  1038:   const key = getSocialSupabaseServiceRoleKey();
+  1039:   const reqMethod = String(method || "GET").trim().toUpperCase();
+  1040:   const query = options?.query && typeof options.query === "object" ? options.query : {};
+  1041:   const url = new URL(`/rest/v1/${table}`, base + "/");
+  1042:   Object.keys(query).forEach((k) => {
+  1043:     const val = query[k];
+  1044:     if(val === undefined || val === null || val === "") return;
+  1045:     url.searchParams.set(k, String(val));
+  1046:   });
+  1047:   const headers = {
+  1048:     apikey: key,
+  1049:     Authorization: `Bearer ${key}`
+  1050:   };
+  1051:   let body = null;
+  1052:   if(reqMethod === "POST" || reqMethod === "PATCH"){
+  1053:     headers["Content-Type"] = "application/json";
+  1054:     headers.Prefer = options?.prefer || (reqMethod === "POST" ? "return=representation" : "return=representation");
+  1055:     body = JSON.stringify(options?.body ?? {});
+  1056:   }
+  1057:   const response = await fetch(url.toString(), {
+  1058:     method: reqMethod,
+  1059:     headers,
+  1060:     body
+  1061:   });
+  1062:   if(!response.ok){
+  1063:     const text = await response.text().catch(() => "");
+  1064:     throw new Error(`local_services_supabase_failed_${table}_${response.status}:${text.slice(0, 220)}`);
+  1065:   }
+  1066:   if(reqMethod === "DELETE"){
+  1067:     return [];
+  1068:   }
+  1069:   return await response.json().catch(() => []);
+  1070: }
+  1071: 
+  1072: function sanitizeListingType(value){
+  1073:   const raw = String(value || "").trim().toLowerCase();
+  1074:   if(raw === "food" || raw === "grocery" || raw === "ride") return raw;
+  1075:   return "";
+  1076: }
+  1077: 
+  1078: function localDistanceKm(lat1, lng1, lat2, lng2){
+  1079:   const toRad = deg => (deg * Math.PI) / 180;
+  1080:   const dLat = toRad(lat2 - lat1);
+  1081:   const dLng = toRad(lng2 - lng1);
+  1082:   const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+  1083:     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+  1084:     Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  1085:   return 6371 * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+  1086: }
+  1087: 
+  1088: function sanitizeGeoNumber(value){
+  1089:   const n = Number(value);
+  1090:   if(!Number.isFinite(n)) return null;
+  1091:   return n;
+  1092: }
+  1093: 
+  1094: function parseMonthRange(monthInput){
+  1095:   const now = new Date();
+  1096:   const fallback = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+  1097:   const month = String(monthInput || fallback).trim();
+  1098:   if(!/^\d{4}-\d{2}$/.test(month)){
+  1099:     return { month: fallback, fromIso: `${fallback}-01T00:00:00.000Z`, toIso: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString() };
+  1100:   }
+  1101:   const year = Number(month.slice(0, 4));
+  1102:   const mon = Number(month.slice(5, 7));
+  1103:   const from = new Date(Date.UTC(year, mon - 1, 1));
+  1104:   const to = new Date(Date.UTC(year, mon, 1));
+  1105:   return { month, fromIso: from.toISOString(), toIso: to.toISOString() };
+  1106: }
+  1107: 
+  1108: function sanitizeLocalRole(value){
+  1109:   const raw = String(value || "").trim().toLowerCase();
+  1110:   if(raw === "consumer" || raw === "seller" || raw === "rider" || raw === "agent") return raw;
+  1111:   return "";
+  1112: }
+  1113: 
+  1114: const localRateLimitStore = new Map();
+  1115: function localRateLimitHit(key, max, windowMs){
+  1116:   const now = Date.now();
+  1117:   const safeMax = Math.max(1, Math.floor(safeNumber(max) || 1));
+  1118:   const safeWindow = Math.max(1000, Math.floor(safeNumber(windowMs) || 60000));
+  1119:   const raw = localRateLimitStore.get(key);
+  1120:   const stamps = Array.isArray(raw) ? raw.filter(ts => now - ts < safeWindow) : [];
+  1121:   stamps.push(now);
+  1122:   localRateLimitStore.set(key, stamps);
+  1123:   return stamps.length > safeMax;
+  1124: }
+  1125: 
+  1126: function canTransitionStatus(current, next, flowMap){
+  1127:   const from = String(current || "").trim().toLowerCase();
+  1128:   const to = String(next || "").trim().toLowerCase();
+  1129:   const allowed = flowMap[from];
+  1130:   if(!Array.isArray(allowed)) return false;
+  1131:   return allowed.includes(to);
+  1132: }
+  1133: 
+  1134: async function hasActiveLocalRole(userIdInput, roleInput){
+  1135:   const userId = sanitizeUserId(userIdInput);
+  1136:   const role = sanitizeLocalRole(roleInput);
+  1137:   if(!userId || !role) return false;
+  1138:   try{
+  1139:     const rows = await localServicesSupabaseRequest("local_roles", "GET", {
+  1140:       query: {
+  1141:         select: "id",
+  1142:         user_id: `eq.${userId}`,
+  1143:         role: `eq.${role}`,
+  1144:         status: "eq.active",
+  1145:         fee_paid: "eq.true",
+  1146:         limit: "1"
+  1147:       }
+  1148:     });
+  1149:     return Array.isArray(rows) && !!rows[0];
+  1150:   }catch(_){
+  1151:     return false;
+  1152:   }
+  1153: }
+  1154: 
+  1155: async function readSystemState(){
+  1156:   try{
+  1157:     const raw = await fs.readFile(SYSTEM_STATE_PATH, "utf8");
+  1158:     const parsed = raw ? JSON.parse(raw) : null;
+  1159:     return normalizeSystemState(parsed);
+  1160:   }catch(_){
+  1161:     return createDefaultSystemState();
+  1162:   }
+  1163: }
+  1164: 
+  1165: async function writeSystemState(state){
+  1166:   await ensureDir(SYSTEM_DIR);
+  1167:   await fs.writeFile(SYSTEM_STATE_PATH, JSON.stringify(state, null, 2), "utf8");
+  1168: }
+  1169: 
+  1170: async function mutateSystemState(mutator){
+  1171:   const run = systemStateQueue.then(async () => {
+  1172:     const state = await readSystemState();
+  1173:     const result = await mutator(state);
+  1174:     state.updated_at = new Date().toISOString();
+  1175:     await writeSystemState(state);
+  1176:     return result;
+  1177:   });
+  1178:   systemStateQueue = run.catch(() => {});
+  1179:   return run;
+  1180: }
+  1181: 
+  1182: function pushBounded(list, item, max){
+  1183:   if(!Array.isArray(list)) return;
+  1184:   list.push(item);
+  1185:   const cap = Math.max(1, Math.floor(safeNumber(max) || 1000));
+  1186:   while(list.length > cap){
+  1187:     list.shift();
+  1188:   }
+  1189: }
+  1190: 
+  1191: function titleCaseWords(text){
+  1192:   return String(text || "")
+  1193:     .split(/\s+/)
+  1194:     .map(part => {
+  1195:       const token = String(part || "").trim();
+  1196:       if(!token) return "";
+  1197:       return token.slice(0, 1).toUpperCase() + token.slice(1).toLowerCase();
+  1198:     })
+  1199:     .filter(Boolean)
+  1200:     .join(" ")
+  1201:     .slice(0, 64);
+  1202: }
+  1203: 
+  1204: const IDENTITY_PLACEHOLDER_NAMES = new Set([
+  1205:   "user",
+  1206:   "u",
+  1207:   "guest",
+  1208:   "unknown",
+  1209:   "member",
+  1210:   "unique",
+  1211:   "new",
+  1212:   "newuser",
+  1213:   "test",
+  1214:   "undefined",
+  1215:   "null"
+  1216: ]);
+  1217: 
+  1218: function isIdentityPlaceholderName(value){
+  1219:   const normalized = sanitizeDisplayName(value).toLowerCase();
+  1220:   if(!normalized) return true;
+  1221:   if(IDENTITY_PLACEHOLDER_NAMES.has(normalized)) return true;
+  1222:   if(
+  1223:     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)
+  1224:   ){
+  1225:     return true;
+  1226:   }
+  1227:   if(/^member[\s._-]*[a-z0-9]{4,}$/i.test(normalized)) return true;
+  1228:   if(/^user[\s._-]*[a-z0-9]{4,}$/i.test(normalized)) return true;
+  1229:   return false;
+  1230: }
+  1231: 
+  1232: function isLikelyGeneratedIdentityHandle(value){
+  1233:   const raw = sanitizeDisplayName(value).toLowerCase();
+  1234:   if(!raw) return false;
+  1235:   if(raw.startsWith("@")) return true;
+  1236:   if(/^memer[\s._-]*[a-z0-9]{1,}$/i.test(raw)) return true;
+  1237:   if(/^member[\s._-]*[a-z0-9]{1,}$/i.test(raw)) return true;
+  1238:   if(/^user[\s._-]*[a-z0-9]{1,}$/i.test(raw)) return true;
+  1239:   if(/^unique[\s._-]*[a-z0-9]{0,}$/i.test(raw)) return true;
+  1240:   const hasSpace = /\s/.test(raw);
+  1241:   const hasDigits = /\d/.test(raw);
+  1242:   const hasSeparators = /[._-]/.test(raw);
+  1243:   if(!hasSpace && (hasDigits || hasSeparators)){
+  1244:     return true;
+  1245:   }
+  1246:   return false;
+  1247: }
+  1248: 
+  1249: function splitCompactIdentityToken(token){
+  1250:   const clean = String(token || "").toLowerCase().replace(/[^a-z]+/g, "");
+  1251:   if(clean.length < 9){
+  1252:     return clean ? [clean] : [];
+  1253:   }
+  1254:   const mid = Math.floor(clean.length / 2);
+  1255:   const minSide = 3;
+  1256:   let bestIdx = -1;
+  1257:   let bestWeight = -Infinity;
+  1258:   for(let i = minSide; i <= clean.length - minSide; i += 1){
+  1259:     const prev = clean[i - 1];
+  1260:     const next = clean[i];

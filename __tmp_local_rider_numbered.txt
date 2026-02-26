@@ -1,0 +1,742 @@
+     1: <!DOCTYPE html>
+     2: <html lang="en">
+     3: <head>
+     4: <meta charset="UTF-8">
+     5: <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, viewport-fit=cover">
+     6: <title>Driver Dashboard - NovaGapp Ride</title>
+     7: <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+     8: <script src="global.js"></script>
+     9: <script src="public-config.js"></script>
+    10: <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    11: <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    12: <style>
+    13: :root{--brand:#ff6a00;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--bg:#f1f5f9;--ok:#0f9f50;--bad:#c62828}
+    14: *{box-sizing:border-box}
+    15: body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif;padding-bottom:20px}
+    16: .top{position:sticky;top:0;z-index:50;background:#111;color:#fff;padding:12px;display:flex;justify-content:space-between;align-items:center;font-weight:700}
+    17: .wrap{padding:10px}
+    18: .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
+    19: .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    20: .btn{border:none;border-radius:10px;padding:10px 12px;font-weight:700;cursor:pointer}
+    21: .btn.brand{background:var(--brand);color:#fff}
+    22: .btn.gray{background:#334155;color:#fff}
+    23: .btn.ok{background:var(--ok);color:#fff}
+    24: .btn.bad{background:var(--bad);color:#fff}
+    25: .btn.full{width:100%}
+    26: .muted{font-size:12px;color:var(--muted)}
+    27: .kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+    28: .kpi{border:1px solid #e8edf5;border-radius:10px;padding:10px;background:#fff}
+    29: .req{border:1px solid #e8edf5;border-radius:10px;padding:10px;margin-top:8px}
+    30: .req-title{font-size:14px;font-weight:700}
+    31: .timer{font-size:12px;color:#b91c1c;font-weight:700;margin-top:6px}
+    32: #driverMap{height:280px;border-radius:12px;border:1px solid #dbe2ef;margin-top:8px}
+    33: .badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;background:#e8f1ff;color:#1d4ed8}
+    34: .actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
+    35: .hide{display:none!important}
+    36: .nav-meta{margin-top:6px;font-size:12px;color:#334155}
+    37: .small-note{font-size:11px;color:#64748b;margin-top:6px}
+    38: </style>
+    39: </head>
+    40: <body>
+    41: <div class="top">
+    42:   <span>Driver Dashboard</span>
+    43:   <a href="food-auto.html" style="color:#fff;text-decoration:none;font-size:12px">Open Rider App</a>
+    44: </div>
+    45: <div class="wrap">
+    46:   <div class="card">
+    47:     <div class="row" style="justify-content:space-between">
+    48:       <div>
+    49:         <div><b>Go Online</b></div>
+    50:         <div class="muted" id="onlineText">Offline</div>
+    51:       </div>
+    52:       <div class="row">
+    53:         <button class="btn brand" id="onlineBtn">Go Online</button>
+    54:         <button class="btn gray" id="refreshBtn">Refresh</button>
+    55:       </div>
+    56:     </div>
+    57:   </div>
+    58: 
+    59:   <div class="card">
+    60:     <div class="kpis">
+    61:       <div class="kpi">
+    62:         <div class="muted">Today earnings</div>
+    63:         <div><b id="earningsText">INR 0.00</b></div>
+    64:       </div>
+    65:       <div class="kpi">
+    66:         <div class="muted">Completed rides</div>
+    67:         <div><b id="ridesCompletedText">0</b></div>
+    68:       </div>
+    69:     </div>
+    70:   </div>
+    71: 
+    72:   <div class="card">
+    73:     <div class="row" style="justify-content:space-between">
+    74:       <b>Incoming Ride Requests</b>
+    75:       <span class="badge" id="queueBadge">0 waiting</span>
+    76:     </div>
+    77:     <div class="muted" style="margin-top:6px">Each request has a 10 second response window.</div>
+    78:     <div id="queueList"></div>
+    79:   </div>
+    80: 
+    81:   <div class="card">
+    82:     <div class="row" style="justify-content:space-between">
+    83:       <b>Active Ride</b>
+    84:       <span class="badge" id="activeStatusBadge">idle</span>
+    85:     </div>
+    86:     <div id="activeRideBox" class="muted" style="margin-top:8px">No active ride</div>
+    87:     <div id="driverMap"></div>
+    88:     <div id="navMeta" class="nav-meta">Navigation details will appear here.</div>
+    89:     <div class="small-note">Small city/village tip: use landmark text from pickup/drop while navigating.</div>
+    90:     <div class="actions" id="rideActions"></div>
+    91:   </div>
+    92: </div>
+    93: 
+    94: <script>
+    95: const supa = window.supa || window.novaCreateSupabaseClient();
+    96: const DRIVER_STATE_KEY = "nova_driver_state_v1";
+    97: const state = {
+    98:   me: null,
+    99:   online: false,
+   100:   watchId: null,
+   101:   pollTimer: null,
+   102:   heartbeatTimer: null,
+   103:   lastLocationPushAt: 0,
+   104:   gpsAccuracy: null,
+   105:   gpsLastFixAt: 0,
+   106:   lat: null,
+   107:   lng: null,
+   108:   queueTimers: new Map(),
+   109:   rides: [],
+   110:   activeRideId: ""
+   111: };
+   112: let map = null;
+   113: let driverMarker = null;
+   114: let pickupMarker = null;
+   115: let dropMarker = null;
+   116: let guideLine = null;
+   117: let routeDrawSeq = 0;
+   118: 
+   119: function money(v){ return "INR " + Number(v || 0).toFixed(2); }
+   120: function nowMs(){ return Date.now(); }
+   121: 
+   122: function apiBases(){
+   123:   const out = [];
+   124:   const push = (value) => {
+   125:     const clean = String(value || "").trim().replace(/\/+$/g, "");
+   126:     if(!clean) return;
+   127:     if(!/^https?:\/\//i.test(clean)) return;
+   128:     if(!out.includes(clean)) out.push(clean);
+   129:   };
+   130:   push(window.CONTEST_API_BASE || window.API_BASE || "");
+   131:   try{
+   132:     push(localStorage.getItem("contest_api_base"));
+   133:     push(localStorage.getItem("api_base"));
+   134:   }catch(_){ }
+   135:   if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+   136:   push("https://novagapp-mart.onrender.com");
+   137:   return out;
+   138: }
+   139: 
+   140: async function apiGet(path){
+   141:   for(const base of apiBases()){
+   142:     try{
+   143:       const res = await fetch(base + path, { cache: "no-store" });
+   144:       const json = await res.json().catch(() => null);
+   145:       if(res.ok && json?.ok) return json;
+   146:     }catch(_){ }
+   147:   }
+   148:   return null;
+   149: }
+   150: 
+   151: async function apiPost(path, body){
+   152:   for(const base of apiBases()){
+   153:     try{
+   154:       const res = await fetch(base + path, {
+   155:         method: "POST",
+   156:         headers: { "Content-Type": "application/json" },
+   157:         body: JSON.stringify(body)
+   158:       });
+   159:       const json = await res.json().catch(() => null);
+   160:       if(res.ok && json?.ok) return json;
+   161:     }catch(_){ }
+   162:   }
+   163:   return null;
+   164: }
+   165: 
+   166: async function ensureMe(){
+   167:   if(state.me) return state.me;
+   168:   const { data } = await supa.auth.getSession();
+   169:   state.me = data?.session?.user || null;
+   170:   if(!state.me){
+   171:     location.href = "login.html";
+   172:     return null;
+   173:   }
+   174:   return state.me;
+   175: }
+   176: 
+   177: function saveDriverState(){
+   178:   try{
+   179:     localStorage.setItem(DRIVER_STATE_KEY, JSON.stringify({
+   180:       online: state.online,
+   181:       activeRideId: state.activeRideId || "",
+   182:       savedAt: Date.now()
+   183:     }));
+   184:   }catch(_){ }
+   185: }
+   186: 
+   187: function loadDriverState(){
+   188:   try{
+   189:     const raw = localStorage.getItem(DRIVER_STATE_KEY);
+   190:     if(!raw) return null;
+   191:     const json = JSON.parse(raw);
+   192:     if(!json || typeof json !== "object") return null;
+   193:     return json;
+   194:   }catch(_){
+   195:     return null;
+   196:   }
+   197: }
+   198: 
+   199: function haversineKm(lat1, lon1, lat2, lon2){
+   200:   const toRad = d => d * Math.PI / 180;
+   201:   const R = 6371;
+   202:   const dLat = toRad(lat2 - lat1);
+   203:   const dLon = toRad(lon2 - lon1);
+   204:   const a = Math.sin(dLat / 2) ** 2 +
+   205:     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+   206:   return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+   207: }
+   208: 
+   209: function estimateAutoFare(ride){
+   210:   const pLat = Number(ride?.pickup_lat || 0);
+   211:   const pLng = Number(ride?.pickup_lng || 0);
+   212:   const dLat = Number(ride?.drop_lat || 0);
+   213:   const dLng = Number(ride?.drop_lng || 0);
+   214:   const dist = haversineKm(pLat, pLng, dLat, dLng);
+   215:   const durationMin = Math.max((dist / 24) * 60, 3);
+   216:   const fare = 45 + (dist * 11) + (durationMin * 2);
+   217:   const earning = fare * 0.90;
+   218:   return { fare, earning, dist };
+   219: }
+   220: 
+   221: function rideStatusPublic(statusRaw){
+   222:   const s = String(statusRaw || "").trim().toLowerCase();
+   223:   if(s === "arriving") return "arrived";
+   224:   if(s === "on_trip") return "started";
+   225:   return s;
+   226: }
+   227: 
+   228: function isRideSearching(statusRaw){
+   229:   return rideStatusPublic(statusRaw) === "searching";
+   230: }
+   231: 
+   232: function isRideArrived(statusRaw){
+   233:   return rideStatusPublic(statusRaw) === "arrived";
+   234: }
+   235: 
+   236: function isRideStarted(statusRaw){
+   237:   return rideStatusPublic(statusRaw) === "started";
+   238: }
+   239: 
+   240: function initMap(){
+   241:   if(map) return;
+   242:   map = L.map("driverMap", { zoomControl: true }).setView([18.5204, 73.8567], 13);
+   243:   const primaryTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+   244:     subdomains: "abcd",
+   245:     maxZoom: 19,
+   246:     attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
+   247:   });
+   248:   const fallbackTiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+   249:     maxZoom: 19,
+   250:     attribution: "&copy; OpenStreetMap contributors"
+   251:   });
+   252:   let fallbackAdded = false;
+   253:   primaryTiles.on("tileerror", () => {
+   254:     if(fallbackAdded) return;
+   255:     fallbackAdded = true;
+   256:     fallbackTiles.addTo(map);
+   257:   });
+   258:   primaryTiles.addTo(map);
+   259: }
+   260: 
+   261: function buildExternalNavUrl(lat, lng){
+   262:   const la = Number(lat);
+   263:   const ln = Number(lng);
+   264:   if(!Number.isFinite(la) || !Number.isFinite(ln)) return "";
+   265:   if(Number.isFinite(state.lat) && Number.isFinite(state.lng)){
+   266:     return `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${encodeURIComponent(String(state.lat))}%2C${encodeURIComponent(String(state.lng))}%3B${encodeURIComponent(String(la))}%2C${encodeURIComponent(String(ln))}`;
+   267:   }
+   268:   return `https://www.openstreetmap.org/?mlat=${encodeURIComponent(String(la))}&mlon=${encodeURIComponent(String(ln))}#map=16/${encodeURIComponent(String(la))}/${encodeURIComponent(String(ln))}`;
+   269: }
+   270: 
+   271: function openExternalNavigation(lat, lng){
+   272:   const url = buildExternalNavUrl(lat, lng);
+   273:   if(!url) return;
+   274:   window.open(url, "_blank", "noopener,noreferrer");
+   275: }
+   276: 
+   277: async function fetchDriverRoute(fromLat, fromLng, toLat, toLng){
+   278:   const la1 = Number(fromLat), ln1 = Number(fromLng), la2 = Number(toLat), ln2 = Number(toLng);
+   279:   if(!Number.isFinite(la1) || !Number.isFinite(ln1) || !Number.isFinite(la2) || !Number.isFinite(ln2)){
+   280:     return null;
+   281:   }
+   282:   try{
+   283:     const url = `https://router.project-osrm.org/route/v1/driving/${ln1},${la1};${ln2},${la2}?overview=full&geometries=geojson&steps=true`;
+   284:     const res = await fetch(url, { cache: "no-store" });
+   285:     const json = await res.json().catch(() => null);
+   286:     const route = json?.routes?.[0];
+   287:     if(!route) return null;
+   288:     const coords = Array.isArray(route?.geometry?.coordinates)
+   289:       ? route.geometry.coordinates.map((c) => [Number(c?.[1]), Number(c?.[0])]).filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]))
+   290:       : [];
+   291:     const distanceKm = Number(route?.distance || 0) / 1000;
+   292:     const durationMin = Number(route?.duration || 0) / 60;
+   293:     return {
+   294:       path: coords.length >= 2 ? coords : [[la1, ln1], [la2, ln2]],
+   295:       distanceKm: Number.isFinite(distanceKm) ? distanceKm : haversineKm(la1, ln1, la2, ln2),
+   296:       durationMin: Number.isFinite(durationMin) ? durationMin : Math.max((haversineKm(la1, ln1, la2, ln2) / 24) * 60, 1)
+   297:     };
+   298:   }catch(_){
+   299:     const distanceKm = haversineKm(la1, ln1, la2, ln2);
+   300:     return {
+   301:       path: [[la1, ln1], [la2, ln2]],
+   302:       distanceKm,
+   303:       durationMin: Math.max((distanceKm / 24) * 60, 1)
+   304:     };
+   305:   }
+   306: }
+   307: 
+   308: async function drawGuideRoute(targetLat, targetLng, mode){
+   309:   if(!map || state.lat == null || state.lng == null) return;
+   310:   const seq = ++routeDrawSeq;
+   311:   const route = await fetchDriverRoute(state.lat, state.lng, targetLat, targetLng);
+   312:   if(seq !== routeDrawSeq) return;
+   313:   if(!route) return;
+   314: 
+   315:   if(guideLine){ map.removeLayer(guideLine); guideLine = null; }
+   316:   const isTrip = isRideStarted(mode);
+   317:   guideLine = L.polyline(route.path, {
+   318:     color: isTrip ? "#16a34a" : "#dc2626",
+   319:     weight: 4,
+   320:     dashArray: isTrip ? undefined : "6,6"
+   321:   }).addTo(map);
+   322: 
+   323:   const navMeta = document.getElementById("navMeta");
+   324:   if(navMeta){
+   325:     const targetLabel = isTrip ? "drop" : "pickup";
+   326:     navMeta.textContent = `Route to ${targetLabel}: ${route.distanceKm.toFixed(1)} km | ETA ${Math.max(1, Math.round(route.durationMin))} min`;
+   327:   }
+   328: }
+   329: 
+   330: async function updateMapForRide(activeRide){
+   331:   initMap();
+   332:   if(state.lat != null && state.lng != null){
+   333:     const mePoint = [state.lat, state.lng];
+   334:     if(!driverMarker){
+   335:       driverMarker = L.circleMarker(mePoint, { radius: 7, color: "#dc2626", fillOpacity: 1 }).addTo(map).bindPopup("You");
+   336:     }else{
+   337:       driverMarker.setLatLng(mePoint);
+   338:     }
+   339:   }
+   340:   if(!activeRide){
+   341:     if(pickupMarker){ map.removeLayer(pickupMarker); pickupMarker = null; }
+   342:     if(dropMarker){ map.removeLayer(dropMarker); dropMarker = null; }
+   343:     if(guideLine){ map.removeLayer(guideLine); guideLine = null; }
+   344:     const navMeta = document.getElementById("navMeta");
+   345:     if(navMeta) navMeta.textContent = "Navigation details will appear here.";
+   346:     if(driverMarker && state.lat != null && state.lng != null){
+   347:       map.setView([state.lat, state.lng], Math.max(map.getZoom(), 14));
+   348:     }
+   349:     return;
+   350:   }
+   351:   const pLat = Number(activeRide.pickup_lat);
+   352:   const pLng = Number(activeRide.pickup_lng);
+   353:   const dLat = Number(activeRide.drop_lat);
+   354:   const dLng = Number(activeRide.drop_lng);
+   355:   if(Number.isFinite(pLat) && Number.isFinite(pLng)){
+   356:     if(!pickupMarker){
+   357:       pickupMarker = L.marker([pLat, pLng]).addTo(map).bindPopup("Pickup");
+   358:     }else{
+   359:       pickupMarker.setLatLng([pLat, pLng]);
+   360:     }
+   361:   }
+   362:   if(Number.isFinite(dLat) && Number.isFinite(dLng)){
+   363:     if(!dropMarker){
+   364:       dropMarker = L.marker([dLat, dLng]).addTo(map).bindPopup("Drop");
+   365:     }else{
+   366:       dropMarker.setLatLng([dLat, dLng]);
+   367:     }
+   368:   }
+   369:   const status = rideStatusPublic(activeRide.status);
+   370:   if(state.lat != null && state.lng != null){
+   371:     if(status === "accepted" || status === "arrived"){
+   372:       await drawGuideRoute(pLat, pLng, status);
+   373:     }else if(status === "started"){
+   374:       await drawGuideRoute(dLat, dLng, status);
+   375:     }else{
+   376:       if(guideLine){ map.removeLayer(guideLine); guideLine = null; }
+   377:       const navMeta = document.getElementById("navMeta");
+   378:       if(navMeta) navMeta.textContent = "Waiting for next ride state update.";
+   379:     }
+   380:   }
+   381:   const boundsPoints = [];
+   382:   if(state.lat != null && state.lng != null) boundsPoints.push([state.lat, state.lng]);
+   383:   if(Number.isFinite(pLat) && Number.isFinite(pLng)) boundsPoints.push([pLat, pLng]);
+   384:   if(Number.isFinite(dLat) && Number.isFinite(dLng)) boundsPoints.push([dLat, dLng]);
+   385:   if(boundsPoints.length >= 2){
+   386:     map.fitBounds(boundsPoints, { padding: [25, 25] });
+   387:   }else if(boundsPoints.length === 1){
+   388:     map.setView(boundsPoints[0], Math.max(map.getZoom(), 14));
+   389:   }
+   390: }
+   391: 
+   392: async function pushLocation(isOnline){
+   393:   const me = await ensureMe();
+   394:   if(!me) return;
+   395:   if(state.lat == null || state.lng == null) return;
+   396:   await apiPost("/api/local/riders/location", {
+   397:     user_id: me.id,
+   398:     lat: state.lat,
+   399:     lng: state.lng,
+   400:     is_online: Boolean(isOnline)
+   401:   });
+   402: }
+   403: 
+   404: function setOnlineUi(flag){
+   405:   state.online = Boolean(flag);
+   406:   document.getElementById("onlineText").textContent = state.online ? "Online and receiving requests" : "Offline";
+   407:   const btn = document.getElementById("onlineBtn");
+   408:   btn.textContent = state.online ? "Go Offline" : "Go Online";
+   409:   btn.className = state.online ? "btn bad" : "btn brand";
+   410:   saveDriverState();
+   411: }
+   412: 
+   413: function gpsQualityText(acc){
+   414:   const a = Number(acc);
+   415:   if(!Number.isFinite(a)) return "GPS live";
+   416:   if(a <= 40) return `GPS accurate (${Math.round(a)}m)`;
+   417:   if(a <= 120) return `GPS okay (${Math.round(a)}m)`;
+   418:   return `GPS weak (${Math.round(a)}m) - move to open sky`;
+   419: }
+   420: 
+   421: async function enableOnline(){
+   422:   const me = await ensureMe();
+   423:   if(!me) return;
+   424:   if(!navigator.geolocation){
+   425:     alert("GPS unavailable on this device.");
+   426:     return;
+   427:   }
+   428:   if(state.watchId != null){
+   429:     try{ navigator.geolocation.clearWatch(state.watchId); }catch(_){ }
+   430:     state.watchId = null;
+   431:   }
+   432:   state.watchId = navigator.geolocation.watchPosition(async (pos) => {
+   433:     const lat = Number(pos.coords.latitude);
+   434:     const lng = Number(pos.coords.longitude);
+   435:     const acc = Number(pos.coords.accuracy);
+   436:     if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+   437:     state.lat = lat;
+   438:     state.lng = lng;
+   439:     state.gpsAccuracy = Number.isFinite(acc) ? acc : null;
+   440:     state.gpsLastFixAt = nowMs();
+   441:     if(state.online){
+   442:       document.getElementById("onlineText").textContent = gpsQualityText(acc);
+   443:     }
+   444:     const now = nowMs();
+   445:     if(now - state.lastLocationPushAt >= 3000){
+   446:       state.lastLocationPushAt = now;
+   447:       pushLocation(true).catch(() => {});
+   448:     }
+   449:     updateMapForRide(getActiveRide(state.rides)).catch(() => {});
+   450:   }, () => {
+   451:     document.getElementById("onlineText").textContent = "Location permission denied";
+   452:   }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+   453: 
+   454:   if(state.pollTimer) clearInterval(state.pollTimer);
+   455:   state.pollTimer = setInterval(() => loadData().catch(() => {}), 3000);
+   456:   if(state.heartbeatTimer) clearInterval(state.heartbeatTimer);
+   457:   state.heartbeatTimer = setInterval(() => {
+   458:     const stale = !state.gpsLastFixAt || (nowMs() - state.gpsLastFixAt) > 15000;
+   459:     if(stale && navigator.geolocation){
+   460:       navigator.geolocation.getCurrentPosition((pos) => {
+   461:         const lat = Number(pos?.coords?.latitude);
+   462:         const lng = Number(pos?.coords?.longitude);
+   463:         if(Number.isFinite(lat) && Number.isFinite(lng)){
+   464:           state.lat = lat;
+   465:           state.lng = lng;
+   466:           state.gpsLastFixAt = nowMs();
+   467:           state.gpsAccuracy = Number(pos?.coords?.accuracy);
+   468:           document.getElementById("onlineText").textContent = gpsQualityText(state.gpsAccuracy);
+   469:           updateMapForRide(getActiveRide(state.rides)).catch(() => {});
+   470:         }
+   471:       }, () => {}, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+   472:     }
+   473:     pushLocation(true).catch(() => {});
+   474:   }, 10000);
+   475:   setOnlineUi(true);
+   476:   await loadData();
+   477: }
+   478: 
+   479: async function disableOnline(){
+   480:   if(state.watchId != null){
+   481:     try{ navigator.geolocation.clearWatch(state.watchId); }catch(_){ }
+   482:     state.watchId = null;
+   483:   }
+   484:   if(state.pollTimer){ clearInterval(state.pollTimer); state.pollTimer = null; }
+   485:   if(state.heartbeatTimer){ clearInterval(state.heartbeatTimer); state.heartbeatTimer = null; }
+   486:   await pushLocation(false).catch(() => {});
+   487:   setOnlineUi(false);
+   488: }
+   489: 
+   490: function clearQueueTimer(rideId){
+   491:   const id = String(rideId || "");
+   492:   if(!id) return;
+   493:   const val = state.queueTimers.get(id);
+   494:   if(val){
+   495:     clearInterval(val.interval);
+   496:     state.queueTimers.delete(id);
+   497:   }
+   498: }
+   499: 
+   500: async function rejectRide(rideId, silent){
+   501:   const me = await ensureMe();
+   502:   if(!me) return;
+   503:   clearQueueTimer(rideId);
+   504:   const res = await apiPost("/api/local/rides/reject", {
+   505:     request_id: String(rideId || ""),
+   506:     driver_user_id: me.id
+   507:   });
+   508:   if(!res && !silent){
+   509:     alert("Reject failed. Try again.");
+   510:   }
+   511:   await loadData();
+   512: }
+   513: 
+   514: function ensureQueueTimer(ride){
+   515:   const id = String(ride?.id || "");
+   516:   if(!id || state.queueTimers.has(id)) return;
+   517:   let remain = 10;
+   518:   const interval = setInterval(() => {
+   519:     remain -= 1;
+   520:     const el = document.getElementById("tm_" + id);
+   521:     if(el){
+   522:       el.textContent = "Auto reject in " + Math.max(0, remain) + "s";
+   523:     }
+   524:     if(remain <= 0){
+   525:       clearQueueTimer(id);
+   526:       rejectRide(id, true).catch(() => {});
+   527:     }
+   528:   }, 1000);
+   529:   state.queueTimers.set(id, { interval });
+   530: }
+   531: 
+   532: function renderQueue(rides){
+   533:   const queue = document.getElementById("queueList");
+   534:   queue.innerHTML = "";
+   535:   const waiting = rides.filter((r) => isRideSearching(r?.status));
+   536:   document.getElementById("queueBadge").textContent = waiting.length + " waiting";
+   537:   if(!waiting.length){
+   538:     queue.innerHTML = '<div class="muted" style="margin-top:8px">No pending requests</div>';
+   539:   }
+   540:   waiting.forEach((ride) => {
+   541:     const estimate = estimateAutoFare(ride);
+   542:     const pickupKm = (state.lat != null && state.lng != null)
+   543:       ? haversineKm(state.lat, state.lng, Number(ride.pickup_lat || 0), Number(ride.pickup_lng || 0))
+   544:       : estimate.dist;
+   545:     const div = document.createElement("div");
+   546:     div.className = "req";
+   547:     div.innerHTML = `
+   548:       <div class="req-title">${String(ride.pickup_text || "Pickup")}</div>
+   549:       <div class="muted">to ${String(ride.drop_text || "Drop")}</div>
+   550:       <div class="muted" style="margin-top:6px">Pickup distance: ${Number(pickupKm || 0).toFixed(1)} km | Est. earning: ${money(estimate.earning)}</div>
+   551:       <div class="timer" id="tm_${String(ride.id)}">Auto reject in 10s</div>
+   552:       <div class="row" style="margin-top:8px">
+   553:         <button class="btn ok" data-act="accept" data-id="${String(ride.id)}">Accept</button>
+   554:         <button class="btn gray" data-act="reject" data-id="${String(ride.id)}">Reject</button>
+   555:       </div>
+   556:     `;
+   557:     queue.appendChild(div);
+   558:     ensureQueueTimer(ride);
+   559:   });
+   560:   const visibleIds = new Set(waiting.map((r) => String(r?.id || "")));
+   561:   Array.from(state.queueTimers.keys()).forEach((id) => {
+   562:     if(!visibleIds.has(id)) clearQueueTimer(id);
+   563:   });
+   564: }
+   565: 
+   566: function getActiveRide(rides){
+   567:   const all = Array.isArray(rides) ? rides : [];
+   568:   if(state.activeRideId){
+   569:     const found = all.find((r) => String(r?.id || "") === state.activeRideId);
+   570:     if(found) return found;
+   571:   }
+   572:   return all.find((r) => {
+   573:     const s = rideStatusPublic(r?.status);
+   574:     return s === "accepted" || s === "arrived" || s === "started";
+   575:   }) || null;
+   576: }
+   577: 
+   578: function renderActiveRide(rides){
+   579:   const active = getActiveRide(rides);
+   580:   const box = document.getElementById("activeRideBox");
+   581:   const badge = document.getElementById("activeStatusBadge");
+   582:   const actions = document.getElementById("rideActions");
+   583:   actions.innerHTML = "";
+   584: 
+   585:   if(!active){
+   586:     state.activeRideId = "";
+   587:     box.textContent = "No active ride";
+   588:     badge.textContent = "idle";
+   589:     updateMapForRide(null).catch(() => {});
+   590:     saveDriverState();
+   591:     return;
+   592:   }
+   593: 
+   594:   state.activeRideId = String(active.id || "");
+   595:   saveDriverState();
+   596: 
+   597:   const s = rideStatusPublic(active.status);
+   598:   badge.textContent = s || "active";
+   599:   const estimate = estimateAutoFare(active);
+   600:   const toPickup = (state.lat != null && state.lng != null)
+   601:     ? haversineKm(state.lat, state.lng, Number(active.pickup_lat || 0), Number(active.pickup_lng || 0))
+   602:     : 0;
+   603:   const toDrop = (state.lat != null && state.lng != null)
+   604:     ? haversineKm(state.lat, state.lng, Number(active.drop_lat || 0), Number(active.drop_lng || 0))
+   605:     : 0;
+   606:   box.innerHTML = `
+   607:     <div><b>${String(active.pickup_text || "Pickup")}</b> -> <b>${String(active.drop_text || "Drop")}</b></div>
+   608:     <div class="muted" style="margin-top:6px">Status: ${s}</div>
+   609:     <div class="muted" style="margin-top:6px">Fare est.: ${money(estimate.fare)} | Driver est.: ${money(estimate.earning)}</div>
+   610:     <div class="muted" style="margin-top:6px">To pickup: ${Number(toPickup || 0).toFixed(1)} km | To drop: ${Number(toDrop || 0).toFixed(1)} km</div>
+   611:   `;
+   612: 
+   613:   const addAction = (label, status, cls) => {
+   614:     const b = document.createElement("button");
+   615:     b.className = "btn " + (cls || "brand");
+   616:     b.textContent = label;
+   617:     b.onclick = () => setRideStatus(active.id, status);
+   618:     actions.appendChild(b);
+   619:   };
+   620: 
+   621:   const addNav = (label, lat, lng) => {
+   622:     const la = Number(lat), ln = Number(lng);
+   623:     if(!Number.isFinite(la) || !Number.isFinite(ln)) return;
+   624:     const b = document.createElement("button");
+   625:     b.className = "btn gray";
+   626:     b.textContent = label;
+   627:     b.onclick = () => openExternalNavigation(la, ln);
+   628:     actions.appendChild(b);
+   629:   };
+   630: 
+   631:   if(s === "accepted") addAction("Mark Arrived", "arrived", "brand");
+   632:   if(s === "accepted" || s === "arrived") addAction("Start Ride", "started", "ok");
+   633:   if(s === "started") addAction("End Ride", "completed", "ok");
+   634:   if(s === "accepted" || s === "arrived" || s === "started") addAction("Cancel", "cancelled", "bad");
+   635:   if(s === "accepted" || s === "arrived") addNav("Navigate Pickup", active.pickup_lat, active.pickup_lng);
+   636:   if(s === "started") addNav("Navigate Drop", active.drop_lat, active.drop_lng);
+   637: 
+   638:   updateMapForRide(active).catch(() => {});
+   639: }
+   640: 
+   641: async function acceptRide(rideId){
+   642:   const me = await ensureMe();
+   643:   if(!me) return;
+   644:   clearQueueTimer(rideId);
+   645:   const res = await apiPost("/api/local/rides/accept", {
+   646:     request_id: String(rideId || ""),
+   647:     driver_user_id: me.id
+   648:   });
+   649:   if(!res){
+   650:     alert("Accept failed. Ride may already be taken.");
+   651:     await loadData();
+   652:     return;
+   653:   }
+   654:   state.activeRideId = String(res?.ride_request?.id || rideId || "");
+   655:   saveDriverState();
+   656:   await loadData();
+   657: }
+   658: 
+   659: async function setRideStatus(rideId, status){
+   660:   const me = await ensureMe();
+   661:   if(!me) return;
+   662:   const res = await apiPost("/api/local/rides/status", {
+   663:     request_id: String(rideId || ""),
+   664:     user_id: me.id,
+   665:     status: String(status || "")
+   666:   });
+   667:   if(!res){
+   668:     alert("Status update failed.");
+   669:   }
+   670:   await loadData();
+   671: }
+   672: 
+   673: async function loadEarnings(){
+   674:   const me = await ensureMe();
+   675:   if(!me) return;
+   676:   const r = await apiGet("/api/local/rides/driver/earnings?user_id=" + encodeURIComponent(me.id));
+   677:   if(!r){
+   678:     document.getElementById("earningsText").textContent = money(0);
+   679:     document.getElementById("ridesCompletedText").textContent = "0";
+   680:     return;
+   681:   }
+   682:   document.getElementById("earningsText").textContent = money(r.driver_earning_inr || 0);
+   683:   document.getElementById("ridesCompletedText").textContent = String(Number(r.rides_completed || 0));
+   684: }
+   685: 
+   686: async function loadData(){
+   687:   const me = await ensureMe();
+   688:   if(!me) return;
+   689:   const rideRes = await apiGet("/api/local/rides/for-rider?user_id=" + encodeURIComponent(me.id));
+   690:   state.rides = Array.isArray(rideRes?.rides) ? rideRes.rides : [];
+   691:   renderQueue(state.rides);
+   692:   renderActiveRide(state.rides);
+   693:   await loadEarnings();
+   694: }
+   695: 
+   696: function bindEvents(){
+   697:   document.getElementById("onlineBtn").addEventListener("click", async () => {
+   698:     if(state.online) await disableOnline();
+   699:     else await enableOnline();
+   700:   });
+   701:   document.getElementById("refreshBtn").addEventListener("click", () => loadData().catch(() => {}));
+   702: 
+   703:   document.getElementById("queueList").addEventListener("click", (event) => {
+   704:     const btn = event.target.closest("button[data-act]");
+   705:     if(!btn) return;
+   706:     const act = String(btn.dataset.act || "");
+   707:     const id = String(btn.dataset.id || "");
+   708:     if(!id) return;
+   709:     if(act === "accept") acceptRide(id).catch(() => {});
+   710:     if(act === "reject") rejectRide(id, false).catch(() => {});
+   711:   });
+   712: }
+   713: 
+   714: function cleanupDriverRuntime(){
+   715:   if(state.watchId != null && navigator.geolocation){
+   716:     try{ navigator.geolocation.clearWatch(state.watchId); }catch(_){ }
+   717:   }
+   718:   state.watchId = null;
+   719:   if(state.pollTimer){ clearInterval(state.pollTimer); state.pollTimer = null; }
+   720:   if(state.heartbeatTimer){ clearInterval(state.heartbeatTimer); state.heartbeatTimer = null; }
+   721: }
+   722: 
+   723: (async function init(){
+   724:   await ensureMe();
+   725:   initMap();
+   726:   bindEvents();
+   727:   const stored = loadDriverState();
+   728:   if(stored?.activeRideId) state.activeRideId = String(stored.activeRideId || "");
+   729:   if(stored?.online){
+   730:     await enableOnline();
+   731:   }else{
+   732:     setOnlineUi(false);
+   733:     await loadData();
+   734:   }
+   735: })();
+   736: 
+   737: window.addEventListener("beforeunload", () => {
+   738:   cleanupDriverRuntime();
+   739: });
+   740: </script>
+   741: </body>
+   742: </html>

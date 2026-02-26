@@ -855,7 +855,8 @@ const foodState = {
   selectedListing: null,
   menuItems: [],
   cart: [],
-  orders: []
+  orders: [],
+  ordersChannel: null
 };
 
 const agentState = {
@@ -1291,9 +1292,18 @@ function apiBases(){
 }
 
 async function apiGet(path){
+  const authHeaders = await (async () => {
+    try{
+      const { data } = await supa.auth.getSession();
+      const token = String(data?.session?.access_token || "").trim();
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    }catch(_){
+      return {};
+    }
+  })();
   for(const base of apiBases()){
     try{
-      const res = await fetch(base + path, { cache: "no-store" });
+      const res = await fetch(base + path, { cache: "no-store", headers: authHeaders });
       const json = await res.json().catch(() => null);
       if(res.ok && json?.ok) return json;
     }catch(_){ }
@@ -1302,11 +1312,20 @@ async function apiGet(path){
 }
 
 async function apiPost(path, body){
+  const authHeaders = await (async () => {
+    try{
+      const { data } = await supa.auth.getSession();
+      const token = String(data?.session?.access_token || "").trim();
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    }catch(_){
+      return {};
+    }
+  })();
   for(const base of apiBases()){
     try{
       const res = await fetch(base + path, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: Object.assign({ "Content-Type": "application/json" }, authHeaders),
         body: JSON.stringify(body)
       });
       const json = await res.json().catch(() => null);
@@ -2993,6 +3012,23 @@ async function loadFoodOrders(){
   renderFoodOrders();
 }
 
+async function subscribeFoodOrdersRealtime(){
+  const me = await ensureMe();
+  if(!me) return;
+  if(foodState.ordersChannel){
+    supa.removeChannel(foodState.ordersChannel);
+    foodState.ordersChannel = null;
+  }
+  foodState.ordersChannel = supa
+    .channel("food-orders-" + me.id)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "local_orders", filter: `buyer_user_id=eq.${me.id}` },
+      () => { loadFoodOrders().catch(() => {}); }
+    )
+    .subscribe();
+}
+
 async function checkoutFoodOrder(){
   const me = await ensureMe();
   if(!me) return;
@@ -3373,6 +3409,7 @@ async function bootFoodModule(){
   updateFoodAddressPrefill();
   await loadFoodListings();
   await loadFoodOrders();
+  await subscribeFoodOrdersRealtime();
 }
 
 async function bootAgentModule(){
@@ -3403,17 +3440,17 @@ async function bootAgentModule(){
 }
 
 function startFoodTimer(){
-  if(foodOrderTimer) clearInterval(foodOrderTimer);
-  foodOrderTimer = setInterval(() => {
-    if(activeView !== "food") return;
-    loadFoodOrders().catch(() => {});
-  }, 12000);
+  // Replaced by Supabase realtime subscription.
 }
 
 function stopFoodTimer(){
   if(foodOrderTimer){
     clearInterval(foodOrderTimer);
     foodOrderTimer = null;
+  }
+  if(foodState.ordersChannel){
+    supa.removeChannel(foodState.ordersChannel);
+    foodState.ordersChannel = null;
   }
 }
 

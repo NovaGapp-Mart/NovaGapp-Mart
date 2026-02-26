@@ -166,7 +166,13 @@ function apiUrl(path){
 }
 
 async function apiJson(path, options){
-  const response = await fetch(apiUrl(path), options || {});
+  const req = options && typeof options === "object" ? { ...options } : {};
+  const headers = { ...(req.headers || {}) };
+  if(ACCESS_TOKEN && !headers.Authorization){
+    headers.Authorization = `Bearer ${ACCESS_TOKEN}`;
+  }
+  req.headers = headers;
+  const response = await fetch(apiUrl(path), req);
   const payload = await response.json().catch(() => ({}));
   if(!response.ok || !payload?.ok){
     throw new Error(payload?.message || payload?.error || `Request failed (${response.status})`);
@@ -178,6 +184,7 @@ const params = new URLSearchParams(location.search);
 const ORDER_ID = params.get("order_id") || localStorage.getItem("lastOrderId") || "";
 let ORDER = null;
 let CURRENT_USER = null;
+let ACCESS_TOKEN = "";
 let PAYMENT_CONFIG = { ready: false, key_id: "" };
 
 const ORDER_STATUS_CANDIDATES = [
@@ -203,6 +210,7 @@ const ORDER_STATUS_CANDIDATES = [
     return;
   }
   CURRENT_USER = data.session.user;
+  ACCESS_TOKEN = String(data.session.access_token || "").trim();
   await loadPaymentConfig();
 
   if(!ORDER_ID){
@@ -457,7 +465,6 @@ async function continuePayment(){
       try{
         const verifyResult = await verifyRazorpayPayment({
           order_id: ORDER.id,
-          user_id: CURRENT_USER?.id || "",
           razorpay_order_id: orderId,
           razorpay_payment_id: paymentId,
           razorpay_signature: signature
@@ -466,25 +473,14 @@ async function continuePayment(){
           alert("Payment verification failed.");
           return;
         }
+        if(verifyResult?.order_payment?.id){
+          ORDER = verifyResult.order_payment;
+        }
       }catch(err){
         console.error(err);
         alert("Payment verification failed.");
         return;
       }
-
-      await setOrderPayment({
-        payment_id: paymentId,
-        payment_method: "Online Payment",
-        payment_status: "pending"
-      });
-
-      const settled = await settlePaidOrderWithStatusFix(paymentId);
-      if(!settled){
-        alert("Payment captured but verification failed. Please contact support.");
-        return;
-      }
-
-      await setOrderPayment({ payment_status: "paid" });
       location.href = "orders.html";
     },
     modal: {
@@ -503,36 +499,18 @@ async function continuePayment(){
 }
 
 async function payCOD(){
-  const ok = await setOrderPayment({
-    payment_method: "Cash on Delivery",
-    payment_status: "pending"
-  });
-
-  if(ok){
+  try{
+    await apiJson("/api/orders/payment/cod", {
+      method: "POST",
+      headers: { "Content-Type":"application/json" },
+      body: JSON.stringify({ order_id: ORDER?.id || "" })
+    });
     alert("Order placed with Cash on Delivery.");
     location.href = "orders.html";
+  }catch(err){
+    console.error(err);
+    alert("Unable to place COD order right now.");
   }
-}
-
-async function settlePaidOrderWithStatusFix(paymentId){
-  if(!ORDER?.id) return false;
-  const usdToInr = getUsdToInrRate() || 1;
-
-  const fixed = await ensureValidOrderStatus("pending");
-  if(!fixed) return false;
-
-  const { error } = await supa.rpc("settle_paid_order", {
-    p_order_id: ORDER.id,
-    p_payment_id: paymentId || null,
-    p_payment_method: "Online Payment",
-    p_usd_inr_rate: usdToInr
-  });
-
-  if(error){
-    console.error(error);
-    return false;
-  }
-  return true;
 }
 </script>
 

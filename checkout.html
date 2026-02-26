@@ -814,78 +814,78 @@ async function placeOrder(){
     seller_state: sellerLocation.state || "",
     delivery_estimate: deliveryEstimate
   };
+  const authSession = await supa.auth.getSession();
+  const accessToken = String(authSession?.data?.session?.access_token || "").trim();
+  if(!accessToken){
+    isPlacingOrder = false;
+    alert("Login expired. Please login again.");
+    location.href = "login.html";
+    return;
+  }
 
-  const order = {
-    user_id: user.id,
-    seller_id: sellerId,
-    email: user.email || "",
+  const requestItems = orderItems.map((item)=>({
+    product_id: item.id,
+    qty: Math.max(1, Number(item.qty || 1))
+  }));
+
+  const idempotencyKey = `${user.id}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+  const payload = {
     buyer_name: name,
     buyer_address: buyerAddressPayload,
     address: buyerAddressPayload,
-    items: orderItems,
-    amount: Number(total || 0),
-    total: Number(total || 0),
-    currency: localStorage.getItem("currency") || "USD",
-    status: "placed",
+    items: requestItems,
     payment_method: "Pending Payment",
-    payment_status: "pending"
+    payment_status: "pending",
+    idempotency_key: idempotencyKey
   };
 
-  const { data, error } = await supa
-    .from("orders")
-    .insert(order)
-    .select("*")
-    .single();
+  const bases = buildAutomationApiBases();
+  let orderRes = null;
+  let lastError = "";
+  for(const base of bases){
+    try{
+      const res = await fetch(`${base}/api/orders/create`, {
+        method: "POST",
+        headers: {
+          "Content-Type":"application/json",
+          "Authorization": `Bearer ${accessToken}`,
+          "Idempotency-Key": idempotencyKey
+        },
+        body: JSON.stringify(payload)
+      });
+      const json = await res.json().catch(()=>null);
+      if(res.ok && json?.ok && json?.order?.id){
+        orderRes = json;
+        break;
+      }
+      lastError = String(json?.message || json?.error || `Request failed (${res.status})`);
+    }catch(err){
+      lastError = String(err?.message || "api_unreachable");
+    }
+  }
 
-  if(error || !data?.id){
+  if(!orderRes?.order?.id){
     isPlacingOrder = false;
-    alert("Order failed. Please try again.");
-    if(error) console.error(error);
+    alert(lastError || "Order failed. Please try again.");
     return;
   }
 
-  const stockResult = await reserveStockForOrderItems(orderItems);
-  if(!stockResult.ok){
-    await supa.from("orders").delete().eq("id", data.id);
-    isPlacingOrder = false;
-    alert(stockResult.message || "Not enough stock for one or more products.");
-    return;
-  }
-
-  localStorage.setItem("lastOrderId", data.id);
-  localStorage.setItem("lastOrder", JSON.stringify(data));
-
-  await createSellerNotifications({
-    orderId: data.id,
-    buyer: {
-      name,
-      phone,
-      email: user.email || "",
-      country,
-      address,
-      city,
-      pincode
-    },
-    items: orderItems,
-    total,
-    currency: order.currency,
-    payment_method: order.payment_method,
-    sellerLocation,
-    deliveryEstimate
-  });
+  const createdOrder = orderRes.order;
+  localStorage.setItem("lastOrderId", createdOrder.id);
+  localStorage.setItem("lastOrder", JSON.stringify(createdOrder));
 
   trackAutomationStep("checkout", user.id, {
-    order_id: data.id,
+    order_id: createdOrder.id,
     seller_id: sellerId,
     item_count: orderItems.length,
-    total_amount: Number(total || 0),
-    currency: order.currency
+    total_amount: Number(createdOrder.total || createdOrder.amount || total || 0),
+    currency: createdOrder.currency || "USD"
   }).catch(()=>{});
 
   /* OPTIONAL: clear cart after order */
   localStorage.removeItem("cart");
 
-  location.href = "payment.html";
+  location.href = "payment.html?order_id=" + encodeURIComponent(createdOrder.id);
 }
 
 async function reserveStockForOrderItems(orderItems){

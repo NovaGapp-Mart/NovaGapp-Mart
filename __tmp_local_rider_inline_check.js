@@ -1,0 +1,826 @@
+
+const supa = window.supa || window.novaCreateSupabaseClient();
+const DRIVER_STATE_KEY = "nova_driver_state_v1";
+const state = {
+  me: null,
+  online: false,
+  watchId: null,
+  pollTimer: null,
+  heartbeatTimer: null,
+  lastLocationPushAt: 0,
+  gpsAccuracy: null,
+  gpsLastFixAt: 0,
+  lat: null,
+  lng: null,
+  headingDeg: null,
+  speedKmph: null,
+  driverListingId: "",
+  queueTimers: new Map(),
+  rides: [],
+  activeRideId: ""
+};
+
+let map = null;
+let driverMarker = null;
+let pickupMarker = null;
+let dropMarker = null;
+let guideLine = null;
+let routeDrawSeq = 0;
+let turnInstructionCache = [];
+
+function money(v){ return "INR " + Number(v || 0).toFixed(2); }
+function nowMs(){ return Date.now(); }
+function prettyLabel(text){
+  return String(text || "").replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function apiBases(){
+  const out = [];
+  const push = (value) => {
+    const clean = String(value || "").trim().replace(/\/+$/g, "");
+    if(!clean) return;
+    if(!/^https?:\/\//i.test(clean)) return;
+    if(!out.includes(clean)) out.push(clean);
+  };
+  push(window.CONTEST_API_BASE || window.API_BASE || "");
+  try{
+    push(localStorage.getItem("contest_api_base"));
+    push(localStorage.getItem("api_base"));
+  }catch(_){ }
+  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+  push("https://novagapp-mart.onrender.com");
+  return out;
+}
+
+async function apiGet(path){
+  for(const base of apiBases()){
+    try{
+      const res = await fetch(base + path, { cache: "no-store" });
+      const json = await res.json().catch(() => null);
+      if(res.ok && json?.ok) return json;
+    }catch(_){ }
+  }
+  return null;
+}
+
+async function apiPost(path, body){
+  for(const base of apiBases()){
+    try{
+      const res = await fetch(base + path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const json = await res.json().catch(() => null);
+      if(res.ok && json?.ok) return json;
+    }catch(_){ }
+  }
+  return null;
+}
+
+async function ensureMe(){
+  if(state.me) return state.me;
+  const { data } = await supa.auth.getSession();
+  state.me = data?.session?.user || null;
+  if(!state.me){
+    location.href = "login.html";
+    return null;
+  }
+  return state.me;
+}
+
+function setDriverProfileStatus(text, active){
+  const badge = document.getElementById("driverProfileStatus");
+  if(!badge) return;
+  badge.textContent = String(text || "Not saved");
+  badge.style.background = active ? "#dcfce7" : "#e8f1ff";
+  badge.style.color = active ? "#166534" : "#1d4ed8";
+}
+
+function getDriverFormPayload(){
+  return {
+    store_name: String(document.getElementById("driverNameInput")?.value || "").trim().slice(0, 120),
+    phone: String(document.getElementById("driverPhoneInput")?.value || "").trim().slice(0, 30),
+    ride_vehicle_type: String(document.getElementById("driverVehicleTypeInput")?.value || "auto").trim().toLowerCase(),
+    vehicle_number: String(document.getElementById("driverVehicleNumberInput")?.value || "").trim().slice(0, 40),
+    base_fare_inr: Math.max(0, Number(document.getElementById("driverBaseFareInput")?.value || 0)),
+    per_km_rate_inr: Math.max(0, Number(document.getElementById("driverPerKmInput")?.value || 0)),
+    per_min_rate_inr: Math.max(0, Number(document.getElementById("driverPerMinInput")?.value || 0)),
+    service_radius_km: Math.max(1, Math.min(50, Math.round(Number(document.getElementById("driverRadiusInput")?.value || 5)))),
+    documents_url: String(document.getElementById("driverDocsInput")?.value || "").trim().slice(0, 3000)
+  };
+}
+
+async function ensureDriverGpsForProfile(){
+  if(Number.isFinite(state.lat) && Number.isFinite(state.lng)){
+    return { lat: state.lat, lng: state.lng };
+  }
+  if(!navigator.geolocation){
+    throw new Error("gps_unavailable");
+  }
+  return await new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const lat = Number(pos?.coords?.latitude);
+      const lng = Number(pos?.coords?.longitude);
+      if(!Number.isFinite(lat) || !Number.isFinite(lng)){
+        reject(new Error("gps_not_ready"));
+        return;
+      }
+      state.lat = lat;
+      state.lng = lng;
+      state.gpsLastFixAt = nowMs();
+      resolve({ lat, lng });
+    }, () => reject(new Error("gps_permission_required")), {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0
+    });
+  });
+}
+
+async function loadDriverProfile(){
+  const me = await ensureMe();
+  if(!me) return;
+  const out = await apiGet(`/api/local/listings/for-owner?user_id=${encodeURIComponent(me.id)}&listing_type=ride`);
+  const rows = Array.isArray(out?.listings) ? out.listings : [];
+  const listing = rows[0] || null;
+  state.driverListingId = String(listing?.id || "");
+  if(!listing){
+    setDriverProfileStatus("Not saved", false);
+    return;
+  }
+  document.getElementById("driverNameInput").value = String(listing.store_name || "");
+  document.getElementById("driverPhoneInput").value = String(listing.phone || "");
+  document.getElementById("driverVehicleTypeInput").value = String(listing.ride_vehicle_type || "auto");
+  document.getElementById("driverVehicleNumberInput").value = String(listing.vehicle_number || "");
+  document.getElementById("driverBaseFareInput").value = String(Number(listing.base_fare_inr || 0));
+  document.getElementById("driverPerKmInput").value = String(Number(listing.per_km_rate_inr || 0));
+  document.getElementById("driverPerMinInput").value = String(Number(listing.per_min_rate_inr || 0));
+  document.getElementById("driverRadiusInput").value = String(Number(listing.service_radius_km || 5));
+  document.getElementById("driverDocsInput").value = String(listing.documents_url || "");
+  const status = String(listing.status || "pending_approval");
+  setDriverProfileStatus(prettyLabel(status), status === "approved");
+}
+
+async function saveDriverProfile(){
+  const me = await ensureMe();
+  if(!me) return;
+  const payload = getDriverFormPayload();
+  if(!payload.store_name || !payload.phone || !payload.vehicle_number){
+    alert("Name, phone and vehicle number are required.");
+    return;
+  }
+  const loc = await ensureDriverGpsForProfile();
+  const body = {
+    user_id: me.id,
+    store_name: payload.store_name,
+    phone: payload.phone,
+    ride_vehicle_type: payload.ride_vehicle_type,
+    vehicle_number: payload.vehicle_number,
+    base_fare_inr: payload.base_fare_inr,
+    per_km_rate_inr: payload.per_km_rate_inr,
+    per_min_rate_inr: payload.per_min_rate_inr,
+    service_radius_km: payload.service_radius_km,
+    documents_url: payload.documents_url,
+    lat: loc.lat,
+    lng: loc.lng,
+    listing_type: "ride",
+    open_now: true
+  };
+  let out = null;
+  if(state.driverListingId){
+    out = await apiPost("/api/local/listings/update", {
+      listing_id: state.driverListingId,
+      ...body
+    });
+  }else{
+    out = await apiPost("/api/local/listings/create", body);
+  }
+  if(!out?.ok){
+    alert(String(out?.message || out?.error || "Unable to save driver profile."));
+    return;
+  }
+  document.getElementById("driverProfileHint").textContent = "Profile saved. Wait for admin approval before receiving rides.";
+  await loadDriverProfile();
+}
+
+function saveDriverState(){
+  try{
+    localStorage.setItem(DRIVER_STATE_KEY, JSON.stringify({
+      online: state.online,
+      activeRideId: state.activeRideId || "",
+      savedAt: Date.now()
+    }));
+  }catch(_){ }
+}
+
+function loadDriverState(){
+  try{
+    const raw = localStorage.getItem(DRIVER_STATE_KEY);
+    if(!raw) return null;
+    const json = JSON.parse(raw);
+    if(!json || typeof json !== "object") return null;
+    return json;
+  }catch(_){
+    return null;
+  }
+}
+
+function haversineKm(lat1, lon1, lat2, lon2){
+  const toRad = d => d * Math.PI / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
+function estimateAutoFare(ride){
+  const pLat = Number(ride?.pickup_lat || 0);
+  const pLng = Number(ride?.pickup_lng || 0);
+  const dLat = Number(ride?.drop_lat || 0);
+  const dLng = Number(ride?.drop_lng || 0);
+  const dist = haversineKm(pLat, pLng, dLat, dLng);
+  const durationMin = Math.max((dist / 24) * 60, 3);
+  const fare = 45 + (dist * 11) + (durationMin * 2);
+  const earning = fare * 0.90;
+  return { fare, earning, dist };
+}
+
+function rideStatusPublic(statusRaw){
+  const s = String(statusRaw || "").trim().toLowerCase();
+  if(s === "arriving") return "arrived";
+  if(s === "on_trip") return "started";
+  return s;
+}
+
+function isRideSearching(statusRaw){
+  return rideStatusPublic(statusRaw) === "searching";
+}
+
+function isRideArrived(statusRaw){
+  return rideStatusPublic(statusRaw) === "arrived";
+}
+
+function isRideStarted(statusRaw){
+  return rideStatusPublic(statusRaw) === "started";
+}
+
+function initMap(){
+  if(map) return;
+  map = L.map("driverMap", { zoomControl: true }).setView([18.5204, 73.8567], 13);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(map);
+}
+
+function buildExternalNavUrl(lat, lng){
+  const la = Number(lat);
+  const ln = Number(lng);
+  if(!Number.isFinite(la) || !Number.isFinite(ln)) return "";
+  if(Number.isFinite(state.lat) && Number.isFinite(state.lng)){
+    return `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${encodeURIComponent(String(state.lat))}%2C${encodeURIComponent(String(state.lng))}%3B${encodeURIComponent(String(la))}%2C${encodeURIComponent(String(ln))}`;
+  }
+  return `https://www.openstreetmap.org/?mlat=${encodeURIComponent(String(la))}&mlon=${encodeURIComponent(String(ln))}#map=16/${encodeURIComponent(String(la))}/${encodeURIComponent(String(ln))}`;
+}
+
+function openExternalNavigation(lat, lng){
+  const url = buildExternalNavUrl(lat, lng);
+  if(!url) return;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+async function fetchDriverRoute(fromLat, fromLng, toLat, toLng){
+  const la1 = Number(fromLat), ln1 = Number(fromLng), la2 = Number(toLat), ln2 = Number(toLng);
+  if(!Number.isFinite(la1) || !Number.isFinite(ln1) || !Number.isFinite(la2) || !Number.isFinite(ln2)){
+    return null;
+  }
+  try{
+    const url = `https://router.project-osrm.org/route/v1/driving/${ln1},${la1};${ln2},${la2}?overview=full&geometries=geojson&steps=true`;
+    const res = await fetch(url, { cache: "no-store" });
+    const json = await res.json().catch(() => null);
+    const route = json?.routes?.[0];
+    if(!route) return null;
+    const coords = Array.isArray(route?.geometry?.coordinates)
+      ? route.geometry.coordinates.map((c) => [Number(c?.[1]), Number(c?.[0])]).filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]))
+      : [];
+    const distanceKm = Number(route?.distance || 0) / 1000;
+    const durationMin = Number(route?.duration || 0) / 60;
+    const steps = [];
+    const legs = Array.isArray(route?.legs) ? route.legs : [];
+    legs.forEach((leg) => {
+      const list = Array.isArray(leg?.steps) ? leg.steps : [];
+      list.forEach((step) => {
+        const maneuver = String(step?.maneuver?.modifier || step?.maneuver?.type || "").trim().toLowerCase();
+        const instruction = String(step?.maneuver?.instruction || "").trim();
+        const name = String(step?.name || "").trim();
+        const distance = Number(step?.distance || 0);
+        const icon = maneuver.includes("left") ? "LEFT" : maneuver.includes("right") ? "RIGHT" : "STRAIGHT";
+        steps.push({
+          icon,
+          instruction: instruction || (name ? `Go via ${name}` : "Continue"),
+          distance_m: Number.isFinite(distance) ? Math.round(distance) : 0
+        });
+      });
+    });
+    return {
+      path: coords.length >= 2 ? coords : [[la1, ln1], [la2, ln2]],
+      distanceKm: Number.isFinite(distanceKm) ? distanceKm : haversineKm(la1, ln1, la2, ln2),
+      durationMin: Number.isFinite(durationMin) ? durationMin : Math.max((haversineKm(la1, ln1, la2, ln2) / 24) * 60, 1),
+      steps
+    };
+  }catch(_){
+    const distanceKm = haversineKm(la1, ln1, la2, ln2);
+    return {
+      path: [[la1, ln1], [la2, ln2]],
+      distanceKm,
+      durationMin: Math.max((distanceKm / 24) * 60, 1),
+      steps: []
+    };
+  }
+}
+
+function renderTurnSteps(steps){
+  const box = document.getElementById("turnSteps");
+  if(!box) return;
+  const list = Array.isArray(steps) ? steps.slice(0, 5) : [];
+  if(!list.length){
+    box.textContent = "Turn-by-turn steps will appear here.";
+    return;
+  }
+  box.innerHTML = list.map((step, idx) => {
+    const icon = String(step?.icon || "STRAIGHT");
+    const marker = icon === "LEFT" ? "⬅" : icon === "RIGHT" ? "➡" : "⬆";
+    const dist = Number(step?.distance_m || 0);
+    return `${idx + 1}. ${marker} ${String(step?.instruction || "Continue")} ${dist > 0 ? `(${dist}m)` : ""}`;
+  }).join("<br>");
+}
+
+async function drawGuideRoute(targetLat, targetLng, mode){
+  if(!map || state.lat == null || state.lng == null) return;
+  const seq = ++routeDrawSeq;
+  const route = await fetchDriverRoute(state.lat, state.lng, targetLat, targetLng);
+  if(seq !== routeDrawSeq) return;
+  if(!route) return;
+
+  if(guideLine){ map.removeLayer(guideLine); guideLine = null; }
+  const isTrip = isRideStarted(mode);
+  guideLine = L.polyline(route.path, {
+    color: isTrip ? "#16a34a" : "#dc2626",
+    weight: 4,
+    dashArray: isTrip ? undefined : "6,6"
+  }).addTo(map);
+
+  const navMeta = document.getElementById("navMeta");
+  if(navMeta){
+    const targetLabel = isTrip ? "drop" : "pickup";
+    navMeta.textContent = `Route to ${targetLabel}: ${route.distanceKm.toFixed(1)} km | ETA ${Math.max(1, Math.round(route.durationMin))} min`;
+  }
+  turnInstructionCache = Array.isArray(route.steps) ? route.steps : [];
+  renderTurnSteps(turnInstructionCache);
+}
+
+async function updateMapForRide(activeRide){
+  initMap();
+  if(state.lat != null && state.lng != null){
+    const mePoint = [state.lat, state.lng];
+    if(!driverMarker){
+      driverMarker = L.circleMarker(mePoint, { radius: 7, color: "#dc2626", fillOpacity: 1 }).addTo(map).bindPopup("You");
+    }else{
+      driverMarker.setLatLng(mePoint);
+    }
+  }
+  if(!activeRide){
+    if(pickupMarker){ map.removeLayer(pickupMarker); pickupMarker = null; }
+    if(dropMarker){ map.removeLayer(dropMarker); dropMarker = null; }
+    if(guideLine){ map.removeLayer(guideLine); guideLine = null; }
+    const navMeta = document.getElementById("navMeta");
+    if(navMeta) navMeta.textContent = "Navigation details will appear here.";
+    turnInstructionCache = [];
+    renderTurnSteps([]);
+    if(driverMarker && state.lat != null && state.lng != null){
+      map.setView([state.lat, state.lng], Math.max(map.getZoom(), 14));
+    }
+    return;
+  }
+  const pLat = Number(activeRide.pickup_lat);
+  const pLng = Number(activeRide.pickup_lng);
+  const dLat = Number(activeRide.drop_lat);
+  const dLng = Number(activeRide.drop_lng);
+  if(Number.isFinite(pLat) && Number.isFinite(pLng)){
+    if(!pickupMarker){
+      pickupMarker = L.marker([pLat, pLng]).addTo(map).bindPopup("Pickup");
+    }else{
+      pickupMarker.setLatLng([pLat, pLng]);
+    }
+  }
+  if(Number.isFinite(dLat) && Number.isFinite(dLng)){
+    if(!dropMarker){
+      dropMarker = L.marker([dLat, dLng]).addTo(map).bindPopup("Drop");
+    }else{
+      dropMarker.setLatLng([dLat, dLng]);
+    }
+  }
+  const status = rideStatusPublic(activeRide.status);
+  if(state.lat != null && state.lng != null){
+    if(status === "accepted" || status === "arrived"){
+      await drawGuideRoute(pLat, pLng, status);
+    }else if(status === "started"){
+      await drawGuideRoute(dLat, dLng, status);
+    }else{
+      if(guideLine){ map.removeLayer(guideLine); guideLine = null; }
+      const navMeta = document.getElementById("navMeta");
+      if(navMeta) navMeta.textContent = "Waiting for next ride state update.";
+      turnInstructionCache = [];
+      renderTurnSteps([]);
+    }
+  }
+  const boundsPoints = [];
+  if(state.lat != null && state.lng != null) boundsPoints.push([state.lat, state.lng]);
+  if(Number.isFinite(pLat) && Number.isFinite(pLng)) boundsPoints.push([pLat, pLng]);
+  if(Number.isFinite(dLat) && Number.isFinite(dLng)) boundsPoints.push([dLat, dLng]);
+  if(boundsPoints.length >= 2){
+    map.fitBounds(boundsPoints, { padding: [25, 25] });
+  }else if(boundsPoints.length === 1){
+    map.setView(boundsPoints[0], Math.max(map.getZoom(), 14));
+  }
+}
+
+async function pushLocation(isOnline){
+  const me = await ensureMe();
+  if(!me) return;
+  if(state.lat == null || state.lng == null) return;
+  await apiPost("/api/local/riders/location", {
+    user_id: me.id,
+    lat: state.lat,
+    lng: state.lng,
+    accuracy_m: state.gpsAccuracy,
+    heading_deg: state.headingDeg,
+    speed_kmph: state.speedKmph,
+    is_online: Boolean(isOnline)
+  });
+}
+
+function setOnlineUi(flag){
+  state.online = Boolean(flag);
+  document.getElementById("onlineText").textContent = state.online ? "Online and receiving requests" : "Offline";
+  const btn = document.getElementById("onlineBtn");
+  btn.textContent = state.online ? "Go Offline" : "Go Online";
+  btn.className = state.online ? "btn bad" : "btn brand";
+  saveDriverState();
+}
+
+function gpsQualityText(acc){
+  const a = Number(acc);
+  if(!Number.isFinite(a)) return "GPS live";
+  if(a <= 40) return `GPS accurate (${Math.round(a)}m)`;
+  if(a <= 120) return `GPS okay (${Math.round(a)}m)`;
+  return `GPS weak (${Math.round(a)}m) - move to open sky`;
+}
+
+async function enableOnline(){
+  const me = await ensureMe();
+  if(!me) return;
+  const profile = await apiGet(`/api/local/listings/for-owner?user_id=${encodeURIComponent(me.id)}&listing_type=ride`);
+  const listing = Array.isArray(profile?.listings) ? profile.listings[0] || null : null;
+  if(!listing){
+    alert("Save driver profile first.");
+    return;
+  }
+  state.driverListingId = String(listing.id || "");
+  const status = String(listing.status || "");
+  setDriverProfileStatus(prettyLabel(status || "pending_approval"), status === "approved");
+  if(status !== "approved"){
+    alert("Driver profile is pending approval. You can go online after approval.");
+    return;
+  }
+  if(!navigator.geolocation){
+    alert("GPS unavailable on this device.");
+    return;
+  }
+  if(state.watchId != null){
+    try{ navigator.geolocation.clearWatch(state.watchId); }catch(_){ }
+    state.watchId = null;
+  }
+  state.watchId = navigator.geolocation.watchPosition(async (pos) => {
+    const lat = Number(pos.coords.latitude);
+    const lng = Number(pos.coords.longitude);
+    const acc = Number(pos.coords.accuracy);
+    const heading = Number(pos.coords.heading);
+    const speedMps = Number(pos.coords.speed);
+    if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    state.lat = lat;
+    state.lng = lng;
+    state.gpsAccuracy = Number.isFinite(acc) ? acc : null;
+    state.headingDeg = Number.isFinite(heading) ? heading : null;
+    state.speedKmph = Number.isFinite(speedMps) ? (speedMps * 3.6) : null;
+    state.gpsLastFixAt = nowMs();
+    if(state.online){
+      document.getElementById("onlineText").textContent = gpsQualityText(acc);
+    }
+    const now = nowMs();
+    if(now - state.lastLocationPushAt >= 3000){
+      state.lastLocationPushAt = now;
+      pushLocation(true).catch(() => {});
+    }
+    updateMapForRide(getActiveRide(state.rides)).catch(() => {});
+  }, () => {
+    document.getElementById("onlineText").textContent = "Location permission denied";
+  }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+
+  if(state.pollTimer) clearInterval(state.pollTimer);
+  state.pollTimer = setInterval(() => loadData().catch(() => {}), 3000);
+  if(state.heartbeatTimer) clearInterval(state.heartbeatTimer);
+  state.heartbeatTimer = setInterval(() => {
+    const stale = !state.gpsLastFixAt || (nowMs() - state.gpsLastFixAt) > 15000;
+    if(stale && navigator.geolocation){
+      navigator.geolocation.getCurrentPosition((pos) => {
+        const lat = Number(pos?.coords?.latitude);
+        const lng = Number(pos?.coords?.longitude);
+        if(Number.isFinite(lat) && Number.isFinite(lng)){
+          state.lat = lat;
+          state.lng = lng;
+          state.gpsLastFixAt = nowMs();
+          state.gpsAccuracy = Number(pos?.coords?.accuracy);
+          state.headingDeg = Number.isFinite(Number(pos?.coords?.heading)) ? Number(pos?.coords?.heading) : null;
+          state.speedKmph = Number.isFinite(Number(pos?.coords?.speed)) ? Number(pos?.coords?.speed) * 3.6 : null;
+          document.getElementById("onlineText").textContent = gpsQualityText(state.gpsAccuracy);
+          updateMapForRide(getActiveRide(state.rides)).catch(() => {});
+        }
+      }, () => {}, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+    }
+    pushLocation(true).catch(() => {});
+  }, 10000);
+  setOnlineUi(true);
+  await loadData();
+}
+
+async function disableOnline(){
+  if(state.watchId != null){
+    try{ navigator.geolocation.clearWatch(state.watchId); }catch(_){ }
+    state.watchId = null;
+  }
+  if(state.pollTimer){ clearInterval(state.pollTimer); state.pollTimer = null; }
+  if(state.heartbeatTimer){ clearInterval(state.heartbeatTimer); state.heartbeatTimer = null; }
+  await pushLocation(false).catch(() => {});
+  setOnlineUi(false);
+}
+
+function clearQueueTimer(rideId){
+  const id = String(rideId || "");
+  if(!id) return;
+  const val = state.queueTimers.get(id);
+  if(val){
+    clearInterval(val.interval);
+    state.queueTimers.delete(id);
+  }
+}
+
+async function rejectRide(rideId, silent){
+  const me = await ensureMe();
+  if(!me) return;
+  clearQueueTimer(rideId);
+  const res = await apiPost("/api/local/rides/reject", {
+    request_id: String(rideId || ""),
+    driver_user_id: me.id
+  });
+  if(!res && !silent){
+    alert("Reject failed. Try again.");
+  }
+  await loadData();
+}
+
+function ensureQueueTimer(ride){
+  const id = String(ride?.id || "");
+  if(!id || state.queueTimers.has(id)) return;
+  let remain = 10;
+  const interval = setInterval(() => {
+    remain -= 1;
+    const el = document.getElementById("tm_" + id);
+    if(el){
+      el.textContent = "Auto reject in " + Math.max(0, remain) + "s";
+    }
+    if(remain <= 0){
+      clearQueueTimer(id);
+      rejectRide(id, true).catch(() => {});
+    }
+  }, 1000);
+  state.queueTimers.set(id, { interval });
+}
+
+function renderQueue(rides){
+  const queue = document.getElementById("queueList");
+  queue.innerHTML = "";
+  const waiting = rides.filter((r) => isRideSearching(r?.status));
+  document.getElementById("queueBadge").textContent = waiting.length + " waiting";
+  if(!waiting.length){
+    queue.innerHTML = '<div class="muted" style="margin-top:8px">No pending requests</div>';
+  }
+  waiting.forEach((ride) => {
+    const estimate = estimateAutoFare(ride);
+    const pickupKm = (state.lat != null && state.lng != null)
+      ? haversineKm(state.lat, state.lng, Number(ride.pickup_lat || 0), Number(ride.pickup_lng || 0))
+      : estimate.dist;
+    const div = document.createElement("div");
+    div.className = "req";
+    div.innerHTML = `
+      <div class="req-title">${String(ride.pickup_text || "Pickup")}</div>
+      <div class="muted">to ${String(ride.drop_text || "Drop")}</div>
+      <div class="muted" style="margin-top:6px">Pickup distance: ${Number(pickupKm || 0).toFixed(1)} km | Est. earning: ${money(estimate.earning)}</div>
+      <div class="timer" id="tm_${String(ride.id)}">Auto reject in 10s</div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn ok" data-act="accept" data-id="${String(ride.id)}">Accept</button>
+        <button class="btn gray" data-act="reject" data-id="${String(ride.id)}">Reject</button>
+      </div>
+    `;
+    queue.appendChild(div);
+    ensureQueueTimer(ride);
+  });
+  const visibleIds = new Set(waiting.map((r) => String(r?.id || "")));
+  Array.from(state.queueTimers.keys()).forEach((id) => {
+    if(!visibleIds.has(id)) clearQueueTimer(id);
+  });
+}
+
+function getActiveRide(rides){
+  const all = Array.isArray(rides) ? rides : [];
+  if(state.activeRideId){
+    const found = all.find((r) => String(r?.id || "") === state.activeRideId);
+    if(found) return found;
+  }
+  return all.find((r) => {
+    const s = rideStatusPublic(r?.status);
+    return s === "accepted" || s === "arrived" || s === "started";
+  }) || null;
+}
+
+function renderActiveRide(rides){
+  const active = getActiveRide(rides);
+  const box = document.getElementById("activeRideBox");
+  const badge = document.getElementById("activeStatusBadge");
+  const actions = document.getElementById("rideActions");
+  actions.innerHTML = "";
+
+  if(!active){
+    state.activeRideId = "";
+    box.textContent = "No active ride";
+    badge.textContent = "idle";
+    updateMapForRide(null).catch(() => {});
+    saveDriverState();
+    return;
+  }
+
+  state.activeRideId = String(active.id || "");
+  saveDriverState();
+
+  const s = rideStatusPublic(active.status);
+  badge.textContent = s || "active";
+  const estimate = estimateAutoFare(active);
+  const toPickup = (state.lat != null && state.lng != null)
+    ? haversineKm(state.lat, state.lng, Number(active.pickup_lat || 0), Number(active.pickup_lng || 0))
+    : 0;
+  const toDrop = (state.lat != null && state.lng != null)
+    ? haversineKm(state.lat, state.lng, Number(active.drop_lat || 0), Number(active.drop_lng || 0))
+    : 0;
+  box.innerHTML = `
+    <div><b>${String(active.pickup_text || "Pickup")}</b> -> <b>${String(active.drop_text || "Drop")}</b></div>
+    <div class="muted" style="margin-top:6px">Status: ${s}</div>
+    <div class="muted" style="margin-top:6px">Fare est.: ${money(estimate.fare)} | Driver est.: ${money(estimate.earning)}</div>
+    <div class="muted" style="margin-top:6px">To pickup: ${Number(toPickup || 0).toFixed(1)} km | To drop: ${Number(toDrop || 0).toFixed(1)} km</div>
+  `;
+
+  const addAction = (label, status, cls) => {
+    const b = document.createElement("button");
+    b.className = "btn " + (cls || "brand");
+    b.textContent = label;
+    b.onclick = () => setRideStatus(active.id, status);
+    actions.appendChild(b);
+  };
+
+  const addNav = (label, lat, lng) => {
+    const la = Number(lat), ln = Number(lng);
+    if(!Number.isFinite(la) || !Number.isFinite(ln)) return;
+    const b = document.createElement("button");
+    b.className = "btn gray";
+    b.textContent = label;
+    b.onclick = () => openExternalNavigation(la, ln);
+    actions.appendChild(b);
+  };
+
+  if(s === "accepted") addAction("Mark Arrived", "arrived", "brand");
+  if(s === "accepted" || s === "arrived") addAction("Start Ride", "started", "ok");
+  if(s === "started") addAction("End Ride", "completed", "ok");
+  if(s === "accepted" || s === "arrived" || s === "started") addAction("Cancel", "cancelled", "bad");
+  if(s === "accepted" || s === "arrived") addNav("Navigate Pickup", active.pickup_lat, active.pickup_lng);
+  if(s === "started") addNav("Navigate Drop", active.drop_lat, active.drop_lng);
+
+  updateMapForRide(active).catch(() => {});
+}
+
+async function acceptRide(rideId){
+  const me = await ensureMe();
+  if(!me) return;
+  clearQueueTimer(rideId);
+  const res = await apiPost("/api/local/rides/accept", {
+    request_id: String(rideId || ""),
+    driver_user_id: me.id
+  });
+  if(!res){
+    alert("Accept failed. Ride may already be taken.");
+    await loadData();
+    return;
+  }
+  state.activeRideId = String(res?.ride_request?.id || rideId || "");
+  saveDriverState();
+  await loadData();
+}
+
+async function setRideStatus(rideId, status){
+  const me = await ensureMe();
+  if(!me) return;
+  const res = await apiPost("/api/local/rides/status", {
+    request_id: String(rideId || ""),
+    user_id: me.id,
+    status: String(status || "")
+  });
+  if(!res){
+    alert("Status update failed.");
+  }
+  await loadData();
+}
+
+async function loadEarnings(){
+  const me = await ensureMe();
+  if(!me) return;
+  const r = await apiGet("/api/local/rides/driver/earnings?user_id=" + encodeURIComponent(me.id));
+  if(!r){
+    document.getElementById("earningsText").textContent = money(0);
+    document.getElementById("ridesCompletedText").textContent = "0";
+    return;
+  }
+  document.getElementById("earningsText").textContent = money(r.driver_earning_inr || 0);
+  document.getElementById("ridesCompletedText").textContent = String(Number(r.rides_completed || 0));
+}
+
+async function loadData(){
+  const me = await ensureMe();
+  if(!me) return;
+  const rideRes = await apiGet("/api/local/rides/for-rider?user_id=" + encodeURIComponent(me.id));
+  state.rides = Array.isArray(rideRes?.rides) ? rideRes.rides : [];
+  renderQueue(state.rides);
+  renderActiveRide(state.rides);
+  await loadEarnings();
+}
+
+function bindEvents(){
+  document.getElementById("driverSaveBtn").addEventListener("click", () => {
+    saveDriverProfile().catch((err) => {
+      alert(String(err?.message || "Unable to save driver profile."));
+    });
+  });
+  document.getElementById("onlineBtn").addEventListener("click", async () => {
+    if(state.online) await disableOnline();
+    else await enableOnline();
+  });
+  document.getElementById("refreshBtn").addEventListener("click", () => loadData().catch(() => {}));
+
+  document.getElementById("queueList").addEventListener("click", (event) => {
+    const btn = event.target.closest("button[data-act]");
+    if(!btn) return;
+    const act = String(btn.dataset.act || "");
+    const id = String(btn.dataset.id || "");
+    if(!id) return;
+    if(act === "accept") acceptRide(id).catch(() => {});
+    if(act === "reject") rejectRide(id, false).catch(() => {});
+  });
+}
+
+function cleanupDriverRuntime(){
+  if(state.watchId != null && navigator.geolocation){
+    try{ navigator.geolocation.clearWatch(state.watchId); }catch(_){ }
+  }
+  state.watchId = null;
+  if(state.pollTimer){ clearInterval(state.pollTimer); state.pollTimer = null; }
+  if(state.heartbeatTimer){ clearInterval(state.heartbeatTimer); state.heartbeatTimer = null; }
+}
+
+(async function init(){
+  await ensureMe();
+  initMap();
+  bindEvents();
+  await loadDriverProfile();
+  const stored = loadDriverState();
+  if(stored?.activeRideId) state.activeRideId = String(stored.activeRideId || "");
+  if(stored?.online){
+    await enableOnline();
+  }else{
+    setOnlineUi(false);
+    await loadData();
+  }
+})();
+
+window.addEventListener("beforeunload", () => {
+  cleanupDriverRuntime();
+});

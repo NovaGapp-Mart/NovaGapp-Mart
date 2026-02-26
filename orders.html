@@ -46,6 +46,45 @@ if(!supa){
   location.href = "login.html";
   throw new Error("supabase_client_unavailable");
 }
+let ACCESS_TOKEN = "";
+
+function buildApiBases(){
+  const out = [""];
+  const push = (raw) => {
+    const value = String(raw || "").trim().replace(/\/+$/g, "");
+    if(!value) return;
+    if(!/^https?:\/\//i.test(value)) return;
+    if(!out.includes(value)) out.push(value);
+  };
+  push(window.CONTEST_API_BASE || window.API_BASE || "");
+  try{
+    push(localStorage.getItem("contest_api_base"));
+    push(localStorage.getItem("api_base"));
+  }catch(_){ }
+  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+  push("https://novagapp-mart.onrender.com");
+  return out;
+}
+
+async function authApi(path, options){
+  if(!ACCESS_TOKEN) throw new Error("auth_token_missing");
+  const req = options && typeof options === "object" ? { ...options } : {};
+  const headers = { ...(req.headers || {}) };
+  headers.Authorization = `Bearer ${ACCESS_TOKEN}`;
+  req.headers = headers;
+  let lastErr = "";
+  for(const base of buildApiBases()){
+    try{
+      const res = await fetch(`${base}${path}`, req);
+      const payload = await res.json().catch(()=>null);
+      if(res.ok && payload?.ok) return payload;
+      lastErr = String(payload?.message || payload?.error || `Request failed (${res.status})`);
+    }catch(err){
+      lastErr = String(err?.message || "api_unreachable");
+    }
+  }
+  throw new Error(lastErr || "api_request_failed");
+}
 
 const box = document.getElementById("ordersBox");
 let HIDDEN_IDS = new Set();
@@ -166,18 +205,16 @@ function renderOrders(orders){
   }
 
   const user = data.session.user;
+  ACCESS_TOKEN = String(data.session.access_token || "").trim();
   HIDDEN_KEY = "hiddenCancelledOrders_" + user.id;
   loadHiddenIds();
 
-  /* ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â¥ REAL ORDERS FROM SUPABASE */
-  const { data: orders, error } = await supa
-    .from("orders")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending:false });
-
-  if(error){
-    console.error(error);
+  let orders = [];
+  try{
+    const payload = await authApi("/api/orders/for-buyer", { method: "GET" });
+    orders = Array.isArray(payload?.orders) ? payload.orders : [];
+  }catch(err){
+    console.error(err);
     box.innerHTML = `
       <div class="empty">
         <h3>Failed to load orders</h3>
@@ -202,16 +239,14 @@ function subscribeOrderChanges(userId){
       "postgres_changes",
       { event: "*", schema: "public", table: "orders", filter: `user_id=eq.${userId}` },
       async ()=>{
-        const { data: latest, error } = await supa
-          .from("orders")
-          .select("*")
-          .eq("user_id", userId)
-          .order("created_at", { ascending:false });
-        if(error){
-          console.error(error);
+        try{
+          const payload = await authApi("/api/orders/for-buyer", { method: "GET" });
+          const latest = Array.isArray(payload?.orders) ? payload.orders : [];
+          renderOrders(latest || []);
+        }catch(err){
+          console.error(err);
           return;
         }
-        renderOrders(latest || []);
       }
     )
     .subscribe();

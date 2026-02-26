@@ -1,0 +1,229 @@
+     1: <!DOCTYPE html>
+     2: <html lang="en">
+     3: <head>
+     4: <meta charset="UTF-8">
+     5: <meta name="viewport" content="width=device-width, initial-scale=1">
+     6: <title>F-Account - NovaGapp Local</title>
+     7: <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+     8: <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+     9: <script src="global.js"></script>
+    10: <script src="public-config.js"></script>
+    11: <style>
+    12: body{margin:0;font-family:Arial,sans-serif;background:#f5f5f5;padding-bottom:90px}
+    13: .top{background:#111;color:#fff;padding:12px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+    14: .section{background:#fff;margin:10px;border-radius:12px;padding:12px;box-shadow:0 4px 12px rgba(0,0,0,.06)}
+    15: .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+    16: .card{border:1px solid #ececec;border-radius:10px;padding:10px}
+    17: .btn{border:none;border-radius:8px;padding:9px 12px;background:#ff6a00;color:#fff;cursor:pointer}
+    18: .btn.dark{background:#111}
+    19: .muted{font-size:12px;color:#666}
+    20: .input{width:100%;box-sizing:border-box;padding:9px;border:1px solid #ddd;border-radius:8px;margin-top:8px}
+    21: .roles{display:flex;gap:8px;flex-wrap:wrap}
+    22: .pill{padding:6px 10px;border-radius:999px;background:#eef3ff;color:#1a3ea6;font-size:12px;font-weight:700}
+    23: </style>
+    24: </head>
+    25: <body>
+    26: <div class="top">
+    27:   <span>F-Account (Local Services)</span>
+    28:   <button class="btn dark" onclick="location.href='food-auto.html'">Services</button>
+    29: </div>
+    30: 
+    31: <div class="section">
+    32:   <strong>Profile</strong>
+    33:   <div id="userText" class="muted" style="margin-top:8px">Checking login...</div>
+    34:   <input id="displayName" class="input" placeholder="Display name">
+    35:   <input id="phone" class="input" placeholder="Phone number">
+    36: </div>
+    37: 
+    38: <div class="section">
+    39:   <strong>Select Role</strong>
+    40:   <div class="muted" style="margin-top:6px">Consumer free. Seller and Rider require INR 500 onboarding fee.</div>
+    41:   <div class="grid" style="margin-top:8px">
+    42:     <div class="card">
+    43:       <b>Consumer</b>
+    44:       <div class="muted">Order rides, food, grocery, agents.</div>
+    45:       <button class="btn" style="margin-top:8px" onclick="enroll('consumer', false)">Activate Free</button>
+    46:     </div>
+    47:     <div class="card">
+    48:       <b>Seller</b>
+    49:       <div class="muted">List food/grocery store and receive orders.</div>
+    50:       <button class="btn" style="margin-top:8px" onclick="enroll('seller', true)">Activate INR 500</button>
+    51:     </div>
+    52:     <div class="card">
+    53:       <b>Rider</b>
+    54:       <div class="muted">Receive ride requests near your location.</div>
+    55:       <button class="btn" style="margin-top:8px" onclick="enroll('rider', true)">Activate INR 500</button>
+    56:     </div>
+    57:     <div class="card">
+    58:       <b>Agent</b>
+    59:       <div class="muted">List services (plumber, electrician, etc).</div>
+    60:       <button class="btn" style="margin-top:8px" onclick="enroll('agent', false)">Activate Free</button>
+    61:     </div>
+    62:   </div>
+    63: </div>
+    64: 
+    65: <div class="section">
+    66:   <strong>Active Roles</strong>
+    67:   <div id="roleBox" class="roles" style="margin-top:8px"></div>
+    68:   <div class="roles" style="margin-top:10px">
+    69:     <button class="btn" onclick="location.href='local-seller.html'">Seller Panel</button>
+    70:     <button class="btn" onclick="location.href='local-rider.html'">Rider Panel</button>
+    71:     <button class="btn" onclick="location.href='local-agent.html'">Agent Panel</button>
+    72:     <button class="btn dark" onclick="location.href='local-admin.html'">Admin Panel</button>
+    73:   </div>
+    74: </div>
+    75: 
+    76: <script>
+    77: const supa = window.supa || window.novaCreateSupabaseClient();
+    78: let me = null;
+    79: 
+    80: function apiBases(){
+    81:   const out = [];
+    82:   const push = (v) => {
+    83:     const clean = String(v || "").trim().replace(/\/+$/g, "");
+    84:     if(!clean || !/^https?:\/\//i.test(clean) || out.includes(clean)) return;
+    85:     out.push(clean);
+    86:   };
+    87:   push(window.CONTEST_API_BASE || window.API_BASE || "");
+    88:   try{ push(localStorage.getItem("contest_api_base")); push(localStorage.getItem("api_base")); }catch(_){}
+    89:   if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+    90:   push("https://novagapp-mart.onrender.com");
+    91:   return out;
+    92: }
+    93: 
+    94: async function apiPost(path, payload){
+    95:   for(const base of apiBases()){
+    96:     try{
+    97:       const res = await fetch(base + path, {
+    98:         method:"POST",
+    99:         headers:{ "Content-Type":"application/json" },
+   100:         body: JSON.stringify(payload || {})
+   101:       });
+   102:       const json = await res.json().catch(()=>null);
+   103:       if(res.ok && json?.ok) return json;
+   104:     }catch(_){}
+   105:   }
+   106:   return null;
+   107: }
+   108: 
+   109: async function apiGet(path){
+   110:   for(const base of apiBases()){
+   111:     try{
+   112:       const res = await fetch(base + path, { cache:"no-store" });
+   113:       const json = await res.json().catch(()=>null);
+   114:       if(res.ok && json?.ok) return json;
+   115:     }catch(_){}
+   116:   }
+   117:   return null;
+   118: }
+   119: 
+   120: async function loadUser(){
+   121:   if(!supa?.auth){
+   122:     location.href = "login.html";
+   123:     return;
+   124:   }
+   125:   const { data } = await supa.auth.getSession();
+   126:   me = data?.session?.user || null;
+   127:   if(!me){
+   128:     location.href = "login.html";
+   129:     return;
+   130:   }
+   131:   document.getElementById("userText").textContent = `${me.email || "Logged in"} (${me.id})`;
+   132:   document.getElementById("displayName").value = (me.user_metadata?.full_name || me.user_metadata?.name || "").slice(0, 48);
+   133: }
+   134: 
+   135: async function loadRoles(){
+   136:   if(!me) return;
+   137:   const out = await apiGet(`/api/local/roles?user_id=${encodeURIComponent(me.id)}`);
+   138:   const roleBox = document.getElementById("roleBox");
+   139:   roleBox.innerHTML = "";
+   140:   const roles = Array.isArray(out?.roles) ? out.roles : [];
+   141:   if(!roles.length){
+   142:     roleBox.innerHTML = `<span class="muted">No active role yet.</span>`;
+   143:     return;
+   144:   }
+   145:   roles.forEach(r => {
+   146:     const el = document.createElement("span");
+   147:     el.className = "pill";
+   148:     el.textContent = `${String(r.role || "").toUpperCase()}${r.fee_required_inr > 0 ? " (Paid)" : ""}`;
+   149:     roleBox.appendChild(el);
+   150:   });
+   151: }
+   152: 
+   153: async function enroll(role, paidRequired){
+   154:   if(!me) return;
+   155:   const displayName = document.getElementById("displayName").value.trim();
+   156:   const phone = document.getElementById("phone").value.trim();
+   157:   if(!displayName || !phone){
+   158:     alert("Display name and phone are required.");
+   159:     return;
+   160:   }
+   161:   let paymentRef = "";
+   162:   if(paidRequired){
+   163:     const feeOrder = await apiPost("/api/local/role/fee/order", {
+   164:       user_id: me.id,
+   165:       role
+   166:     });
+   167:     if(!feeOrder?.order?.razorpay_order_id){
+   168:       alert("Unable to create fee order.");
+   169:       return;
+   170:     }
+   171:     if(typeof window.Razorpay !== "function"){
+   172:       alert("Razorpay SDK not loaded.");
+   173:       return;
+   174:     }
+   175:     const paid = await new Promise((resolve) => {
+   176:       const rz = new window.Razorpay({
+   177:         key: feeOrder.order.key_id,
+   178:         amount: feeOrder.order.amount_paise,
+   179:         currency: "INR",
+   180:         name: "NovaGapp Local",
+   181:         description: `${role.toUpperCase()} onboarding fee`,
+   182:         order_id: feeOrder.order.razorpay_order_id,
+   183:         handler: async (resp) => {
+   184:           const verify = await apiPost("/api/local/role/fee/verify", {
+   185:             user_id: me.id,
+   186:             role,
+   187:             razorpay_order_id: resp.razorpay_order_id,
+   188:             razorpay_payment_id: resp.razorpay_payment_id,
+   189:             razorpay_signature: resp.razorpay_signature
+   190:           });
+   191:           resolve(!!verify?.ok);
+   192:         },
+   193:         modal: {
+   194:           ondismiss: () => resolve(false)
+   195:         },
+   196:         prefill: {
+   197:           name: displayName,
+   198:           email: me.email || "",
+   199:           contact: phone
+   200:         }
+   201:       });
+   202:       rz.open();
+   203:     });
+   204:     if(!paid){
+   205:       alert("Fee payment not completed.");
+   206:       return;
+   207:     }
+   208:     paymentRef = `rzp_${Date.now()}`;
+   209:   }
+   210:   const out = await apiPost("/api/local/role/enroll", {
+   211:     user_id: me.id,
+   212:     role,
+   213:     display_name: displayName,
+   214:     phone,
+   215:     fee_paid: true,
+   216:     payment_ref: paymentRef
+   217:   });
+   218:   if(!out){
+   219:     alert("Role activation failed.");
+   220:     return;
+   221:   }
+   222:   alert(`${role.toUpperCase()} role activated.`);
+   223:   loadRoles();
+   224: }
+   225: 
+   226: loadUser().then(loadRoles);
+   227: </script>
+   228: </body>
+   229: </html>

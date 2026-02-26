@@ -1,0 +1,338 @@
+     1: (function(){
+     2:   const RENDER_ORIGIN = "https://novagapp-mart.onrender.com";
+     3:   try{
+     4:     const host = String(location.hostname || "").toLowerCase();
+     5:     const isFile = String(location.protocol || "") === "file:";
+     6:     const isRenderHost = host === "novagapp-mart.onrender.com";
+     7:     if(host && !isFile && !isRenderHost){
+     8:       const target = RENDER_ORIGIN + String(location.pathname || "/") + String(location.search || "") + String(location.hash || "");
+     9:       if(target && target !== location.href){
+    10:         location.replace(target);
+    11:         return;
+    12:       }
+    13:     }
+    14:   }catch(_){ }
+    15: 
+    16:   const STORAGE_KEY = "nova_public_config_v1";
+    17:   const EMPTY_CONFIG = Object.freeze({
+    18:     supabaseUrl: "",
+    19:     supabaseAnonKey: "",
+    20:     razorpayKeyId: "",
+    21:     firebaseApiKey: "",
+    22:     firebaseAuthDomain: "",
+    23:     firebaseProjectId: "",
+    24:     firebaseStorageBucket: "",
+    25:     firebaseMessagingSenderId: "",
+    26:     firebaseAppId: "",
+    27:     firebaseMeasurementId: "",
+    28:     firebaseVapidKey: "",
+    29:     googleMapsApiKey: ""
+    30:   });
+    31:   const FALLBACK_CONFIG = Object.freeze({
+    32:     // Keep empty in source. Runtime values should come from /api/public/config.
+    33:     supabaseUrl: "",
+    34:     supabaseAnonKey: "",
+    35:     razorpayKeyId: "",
+    36:     firebaseApiKey: "",
+    37:     firebaseAuthDomain: "",
+    38:     firebaseProjectId: "",
+    39:     firebaseStorageBucket: "",
+    40:     firebaseMessagingSenderId: "",
+    41:     firebaseAppId: "",
+    42:     firebaseMeasurementId: "",
+    43:     firebaseVapidKey: "",
+    44:     googleMapsApiKey: ""
+    45:   });
+    46:   const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
+    47: 
+    48:   function getHostName(){
+    49:     try{
+    50:       return String(location.hostname || "").toLowerCase();
+    51:     }catch(_){
+    52:       return "";
+    53:     }
+    54:   }
+    55: 
+    56:   function isLocalRuntime(){
+    57:     return String(location.protocol || "") === "file:";
+    58:   }
+    59: 
+    60:   function isLoopbackBase(base){
+    61:     const value = String(base || "").trim().toLowerCase();
+    62:     return value.startsWith("http://");
+    63:   }
+    64: 
+    65:   function cleanupLoopbackApiBases(){
+    66:     if(isLocalRuntime()) return;
+    67:     const keys = ["contest_api_base", "api_base", "tryonApiBase"];
+    68:     const cleanupStore = (store, storeKeys) => {
+    69:       if(!store) return;
+    70:       storeKeys.forEach(key => {
+    71:         try{
+    72:           const raw = String(store.getItem(key) || "").trim();
+    73:           if(isLoopbackBase(raw)){
+    74:             store.removeItem(key);
+    75:           }
+    76:         }catch(_){ }
+    77:       });
+    78:     };
+    79:     cleanupStore(window.localStorage, keys);
+    80:     cleanupStore(window.sessionStorage, ["contest_api_base", "api_base"]);
+    81:   }
+    82: 
+    83:   function sanitizeConfig(raw){
+    84:     const next = {
+    85:       supabaseUrl: String(raw?.supabaseUrl || "").trim(),
+    86:       supabaseAnonKey: String(raw?.supabaseAnonKey || "").trim(),
+    87:       razorpayKeyId: String(raw?.razorpayKeyId || "").trim(),
+    88:       firebaseApiKey: String(raw?.firebaseApiKey || "").trim(),
+    89:       firebaseAuthDomain: String(raw?.firebaseAuthDomain || "").trim(),
+    90:       firebaseProjectId: String(raw?.firebaseProjectId || "").trim(),
+    91:       firebaseStorageBucket: String(raw?.firebaseStorageBucket || "").trim(),
+    92:       firebaseMessagingSenderId: String(raw?.firebaseMessagingSenderId || "").trim(),
+    93:       firebaseAppId: String(raw?.firebaseAppId || "").trim(),
+    94:       firebaseMeasurementId: String(raw?.firebaseMeasurementId || "").trim(),
+    95:       firebaseVapidKey: String(raw?.firebaseVapidKey || "").trim(),
+    96:       googleMapsApiKey: String(raw?.googleMapsApiKey || "").trim()
+    97:     };
+    98:     return next;
+    99:   }
+   100: 
+   101:   function readStored(){
+   102:     try{
+   103:       const raw = localStorage.getItem(STORAGE_KEY);
+   104:       if(!raw) return null;
+   105:       return sanitizeConfig(JSON.parse(raw));
+   106:     }catch(_){
+   107:       return null;
+   108:     }
+   109:   }
+   110: 
+   111:   function writeStored(config){
+   112:     try{
+   113:       localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitizeConfig(config)));
+   114:     }catch(_){ }
+   115:   }
+   116: 
+   117:   function hasSupabaseConfig(config){
+   118:     const safe = sanitizeConfig(config || EMPTY_CONFIG);
+   119:     return Boolean(safe.supabaseUrl && safe.supabaseAnonKey);
+   120:   }
+   121: 
+   122:   function mergePreferPrimary(primary, secondary){
+   123:     const p = sanitizeConfig(primary || EMPTY_CONFIG);
+   124:     const s = sanitizeConfig(secondary || EMPTY_CONFIG);
+   125:     return sanitizeConfig({
+   126:       supabaseUrl: p.supabaseUrl || s.supabaseUrl,
+   127:       supabaseAnonKey: p.supabaseAnonKey || s.supabaseAnonKey,
+   128:       razorpayKeyId: p.razorpayKeyId || s.razorpayKeyId,
+   129:       firebaseApiKey: p.firebaseApiKey || s.firebaseApiKey,
+   130:       firebaseAuthDomain: p.firebaseAuthDomain || s.firebaseAuthDomain,
+   131:       firebaseProjectId: p.firebaseProjectId || s.firebaseProjectId,
+   132:       firebaseStorageBucket: p.firebaseStorageBucket || s.firebaseStorageBucket,
+   133:       firebaseMessagingSenderId: p.firebaseMessagingSenderId || s.firebaseMessagingSenderId,
+   134:       firebaseAppId: p.firebaseAppId || s.firebaseAppId,
+   135:       firebaseMeasurementId: p.firebaseMeasurementId || s.firebaseMeasurementId,
+   136:       firebaseVapidKey: p.firebaseVapidKey || s.firebaseVapidKey,
+   137:       googleMapsApiKey: p.googleMapsApiKey || s.googleMapsApiKey
+   138:     });
+   139:   }
+   140: 
+   141:   function readFallback(){
+   142:     const fromWindow = sanitizeConfig(
+   143:       window.NOVA_PUBLIC_CONFIG_DEFAULTS ||
+   144:       window.__NOVA_PUBLIC_CONFIG_DEFAULTS__ ||
+   145:       EMPTY_CONFIG
+   146:     );
+   147:     if(hasSupabaseConfig(fromWindow) || fromWindow.razorpayKeyId){
+   148:       return fromWindow;
+   149:     }
+   150:     return sanitizeConfig(FALLBACK_CONFIG);
+   151:   }
+   152: 
+   153:   function normalizeBase(value){
+   154:     const raw = String(value || "").trim();
+   155:     if(!raw) return "";
+   156:     const next = raw.replace(/\/+$/g, "");
+   157:     try{
+   158:       const parsed = new URL(next);
+   159:       if(parsed.protocol !== "http:" && parsed.protocol !== "https:"){
+   160:         return "";
+   161:       }
+   162:       if(!parsed.hostname){
+   163:         return "";
+   164:       }
+   165:       return next;
+   166:     }catch(_){
+   167:       return "";
+   168:     }
+   169:   }
+   170: 
+   171:   function buildConfigEndpoints(){
+   172:     const endpoints = [];
+   173:     const pushEndpoint = (value) => {
+   174:       const next = String(value || "").trim();
+   175:       if(!next) return;
+   176:       if(endpoints.includes(next)) return;
+   177:       endpoints.push(next);
+   178:     };
+   179: 
+   180:     pushEndpoint("/api/public/config");
+   181:     pushEndpoint(DEFAULT_REMOTE_API_BASE + "/api/public/config");
+   182: 
+   183:     try{
+   184:       const isLocal = isLocalRuntime();
+   185:       const liveServer = String(location.port || "") === "5500";
+   186:       if(isLocal && liveServer){
+   187:         pushEndpoint("https://novagapp-mart.onrender.com/api/public/config");
+   188:       }
+   189:     }catch(_){ }
+   190: 
+   191:     const explicitBases = [];
+   192:     try{
+   193:       explicitBases.push(window.CONTEST_API_BASE);
+   194:       explicitBases.push(localStorage.getItem("contest_api_base"));
+   195:       explicitBases.push(localStorage.getItem("api_base"));
+   196:       explicitBases.push(sessionStorage.getItem("contest_api_base"));
+   197:       explicitBases.push(sessionStorage.getItem("api_base"));
+   198:     }catch(_){ }
+   199: 
+   200:     explicitBases
+   201:       .map(normalizeBase)
+   202:       .filter(Boolean)
+   203:       .forEach(base => {
+   204:         if(!isLocalRuntime() && isLoopbackBase(base)) return;
+   205:         pushEndpoint(base + "/api/public/config");
+   206:       });
+   207: 
+   208:     return endpoints;
+   209:   }
+   210: 
+   211:   function readFromServerSync(){
+   212:     const endpoints = buildConfigEndpoints();
+   213:     for(const endpoint of endpoints){
+   214:       try{
+   215:         const xhr = new XMLHttpRequest();
+   216:         xhr.open("GET", endpoint, false);
+   217:         xhr.setRequestHeader("Accept", "application/json");
+   218:         xhr.send(null);
+   219:         if(xhr.status < 200 || xhr.status >= 300) continue;
+   220:         const parsed = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+   221:         if(parsed){
+   222:           return sanitizeConfig(parsed);
+   223:         }
+   224:       }catch(_){ }
+   225:     }
+   226:     return null;
+   227:   }
+   228: 
+   229:   async function readFromServerAsync(){
+   230:     const endpoints = buildConfigEndpoints();
+   231:     for(const endpoint of endpoints){
+   232:       try{
+   233:         const res = await fetch(endpoint, {
+   234:           method: "GET",
+   235:           headers: { Accept: "application/json" },
+   236:           credentials: "omit"
+   237:         });
+   238:         if(!res.ok){
+   239:           continue;
+   240:         }
+   241:         const payload = await res.json();
+   242:         return sanitizeConfig(payload);
+   243:       }catch(_){ }
+   244:     }
+   245:     throw new Error("public_config_fetch_failed");
+   246:   }
+   247: 
+   248:   cleanupLoopbackApiBases();
+   249: 
+   250:   const fromStorage = readStored();
+   251:   const fromFallback = readFallback();
+   252:   const localPreferred = mergePreferPrimary(fromStorage, fromFallback);
+   253:   const fromServerSync = hasSupabaseConfig(localPreferred) ? null : readFromServerSync();
+   254:   const initial = fromServerSync || localPreferred || { ...EMPTY_CONFIG };
+   255:   window.NOVA_PUBLIC_CONFIG = sanitizeConfig(initial);
+   256:   window.__NOVA_PUBLIC_CONFIG__ = window.NOVA_PUBLIC_CONFIG;
+   257:   if(fromServerSync){
+   258:     writeStored(fromServerSync);
+   259:   }else if(hasSupabaseConfig(localPreferred) || localPreferred.razorpayKeyId){
+   260:     writeStored(localPreferred);
+   261:   }
+   262: 
+   263:   let inflight = null;
+   264:   window.getNovaPublicConfig = async function(forceRefresh){
+   265:     const force = !!forceRefresh;
+   266:     if(!force){
+   267:       const current = sanitizeConfig(window.NOVA_PUBLIC_CONFIG || EMPTY_CONFIG);
+   268:       if(current.supabaseUrl || current.supabaseAnonKey || current.razorpayKeyId){
+   269:         return current;
+   270:       }
+   271:     }
+   272:     if(inflight) return inflight;
+   273:     inflight = readFromServerAsync()
+   274:       .then(cfg => {
+   275:         window.NOVA_PUBLIC_CONFIG = sanitizeConfig(cfg);
+   276:         window.__NOVA_PUBLIC_CONFIG__ = window.NOVA_PUBLIC_CONFIG;
+   277:         writeStored(window.NOVA_PUBLIC_CONFIG);
+   278:         return window.NOVA_PUBLIC_CONFIG;
+   279:       })
+   280:       .catch(() => {
+   281:         return sanitizeConfig(window.NOVA_PUBLIC_CONFIG || EMPTY_CONFIG);
+   282:       })
+   283:       .finally(() => {
+   284:         inflight = null;
+   285:       });
+   286:     return inflight;
+   287:   };
+   288: 
+   289:   function getEffectiveConfigSync(){
+   290:     const current = sanitizeConfig(window.NOVA_PUBLIC_CONFIG || EMPTY_CONFIG);
+   291:     if(current.supabaseUrl && current.supabaseAnonKey){
+   292:       return current;
+   293:     }
+   294:     const fromServer = readFromServerSync();
+   295:     if(fromServer){
+   296:       const next = sanitizeConfig(fromServer);
+   297:       window.NOVA_PUBLIC_CONFIG = next;
+   298:       window.__NOVA_PUBLIC_CONFIG__ = next;
+   299:       writeStored(next);
+   300:       return next;
+   301:     }
+   302:     return current;
+   303:   }
+   304: 
+   305:   function createSupabaseClient(options){
+   306:     const sdk = window.supabase;
+   307:     if(!sdk || typeof sdk.createClient !== "function"){
+   308:       return null;
+   309:     }
+   310:     const cfg = getEffectiveConfigSync();
+   311:     if(!cfg.supabaseUrl || !cfg.supabaseAnonKey){
+   312:       return null;
+   313:     }
+   314:     try{
+   315:       return sdk.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, options);
+   316:     }catch(_){
+   317:       return null;
+   318:     }
+   319:   }
+   320: 
+   321:   window.novaCreateSupabaseClient = function(options){
+   322:     if(window.supa) return window.supa;
+   323:     const client = createSupabaseClient(options);
+   324:     if(client){
+   325:       window.supa = client;
+   326:     }
+   327:     return client;
+   328:   };
+   329: 
+   330:   window.ensureNovaSupabaseClient = async function(options){
+   331:     const existing = window.novaCreateSupabaseClient(options);
+   332:     if(existing) return existing;
+   333:     try{
+   334:       await window.getNovaPublicConfig(true);
+   335:     }catch(_){ }
+   336:     return window.novaCreateSupabaseClient(options);
+   337:   };
+   338: })();

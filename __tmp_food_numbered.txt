@@ -1,0 +1,1896 @@
+     1: 
+     2: <!DOCTYPE html>
+     3: <html lang="en">
+     4: <head>
+     5: <meta charset="UTF-8">
+     6: <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, viewport-fit=cover">
+     7: <title>Ride - NovaGapp Mart</title>
+     8: <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+     9: <script src="global.js"></script>
+    10: <script src="public-config.js"></script>
+    11: <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    12: <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    13: <style>
+    14: :root{--brand:#ff6a00;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--bg:#f1f5f9;--ok:#16974b;--bad:#c62828}
+    15: *{box-sizing:border-box}
+    16: body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,sans-serif}
+    17: .hide{display:none!important}
+    18: #rideView{position:fixed;inset:0;background:#fff}
+    19: #rideMap{position:absolute;inset:0;z-index:1}
+    20: .top-search{position:absolute;left:12px;right:12px;top:12px;z-index:20;display:flex;gap:8px;background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:8px;box-shadow:0 6px 18px rgba(0,0,0,.16)}
+    21: .top-search input{flex:1;border:none;outline:none;font-size:14px}
+    22: .top-search button{border:none;border-radius:10px;background:#111;color:#fff;padding:9px 12px;font-weight:700;cursor:pointer}
+    23: .float-loc{position:absolute;right:12px;top:74px;z-index:20;border:none;border-radius:999px;background:#fff;padding:10px 12px;font-weight:700;box-shadow:0 6px 18px rgba(0,0,0,.18);cursor:pointer}
+    24: .sheet{position:absolute;left:0;right:0;bottom:58px;z-index:25;background:#fff;border-top:1px solid #e2e8f0;border-radius:18px 18px 0 0;max-height:50vh;overflow:auto;padding:12px}
+    25: .panel{display:block}
+    26: .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    27: .input,select{width:100%;padding:11px;border:1px solid #d6deea;border-radius:10px;font-size:14px;background:#fff}
+    28: .btn{border:none;border-radius:10px;padding:11px 12px;font-weight:700;cursor:pointer}
+    29: .btn.brand{background:var(--brand);color:#fff}
+    30: .btn.gray{background:#334155;color:#fff}
+    31: .btn.bad{background:var(--bad);color:#fff}
+    32: .btn.ok{background:var(--ok);color:#fff}
+    33: .btn.full{width:100%}
+    34: .muted{font-size:12px;color:var(--muted)}
+    35: .badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:11px;background:#eaf2ff;color:#1d4ed8;font-weight:700}
+    36: .vehicle-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px}
+    37: .vehicle-card{border:1px solid #dce3f0;border-radius:11px;padding:10px;cursor:pointer;background:#fff}
+    38: .vehicle-card.active{border-color:var(--brand);background:#fff4ec}
+    39: .matching{display:flex;gap:10px;align-items:center}
+    40: .dot{width:10px;height:10px;border-radius:99px;background:var(--brand);animation:p 1.2s infinite}
+    41: @keyframes p{0%{transform:scale(1)}60%{transform:scale(2);opacity:.25}100%{transform:scale(1)}}
+    42: .driver{display:grid;grid-template-columns:58px 1fr auto;gap:10px;align-items:center}
+    43: .driver img{width:58px;height:58px;border-radius:999px;object-fit:cover;background:#ffe4d5}
+    44: .status-line{margin-top:6px}
+    45: #foodView,#agentView{position:fixed;inset:0;background:#f7fafc;padding:14px 12px 74px 12px;overflow:auto}
+    46: .block{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px}
+    47: .bottom-nav{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid #dbe2ee;display:grid;grid-template-columns:repeat(5,1fr);z-index:60}
+    48: .nav-item{border:none;background:transparent;padding:8px 4px;font-size:11px;color:#475569;cursor:pointer;text-align:center}
+    49: .nav-item.active{color:var(--brand);font-weight:700}
+    50: .suggest-popup{
+    51:   position:fixed;
+    52:   z-index:120;
+    53:   background:#fff;
+    54:   border:1px solid #d8e1ef;
+    55:   border-radius:12px;
+    56:   box-shadow:0 14px 28px rgba(0,0,0,.18);
+    57:   max-height:220px;
+    58:   overflow:auto;
+    59: }
+    60: .suggest-item{
+    61:   width:100%;
+    62:   border:none;
+    63:   text-align:left;
+    64:   background:#fff;
+    65:   padding:10px;
+    66:   font-size:13px;
+    67:   color:#0f172a;
+    68:   cursor:pointer;
+    69:   border-bottom:1px solid #edf2f8;
+    70: }
+    71: .suggest-item:last-child{border-bottom:none}
+    72: .suggest-item:hover{background:#f8fafc}
+    73: </style>
+    74: </head>
+    75: <body>
+    76: <div id="rideView">
+    77:   <div id="rideMap"></div>
+    78:   <div class="top-search">
+    79:     <input id="whereToInput" placeholder="Where to?">
+    80:     <button id="whereSetBtn" type="button">Set</button>
+    81:   </div>
+    82:   <button class="float-loc" id="locBtn" type="button">Current Location</button>
+    83: 
+    84:   <div class="sheet">
+    85:     <div id="idlePanel" class="panel">
+    86:       <div class="row" style="justify-content:space-between">
+    87:         <b>Book a Ride</b>
+    88:         <span class="badge" id="gpsBadge">GPS: detecting...</span>
+    89:       </div>
+    90:       <div class="row" style="margin-top:8px">
+    91:         <input id="pickupInput" class="input" placeholder="Pickup location">
+    92:         <input id="dropInput" class="input" placeholder="Drop location">
+    93:       </div>
+    94:       <div class="row" style="margin-top:8px">
+    95:         <input id="pickupLandmarkInput" class="input" placeholder="Pickup landmark / village (e.g. Temple Chowk)">
+    96:         <input id="dropLandmarkInput" class="input" placeholder="Drop landmark / village (e.g. School gate)">
+    97:       </div>
+    98:       <div class="muted" style="margin-top:6px">For small cities/villages: add clear landmark names so driver reaches exact spot.</div>
+    99:       <div id="routeMeta" class="muted" style="margin-top:8px">Set destination to see fare and ETA.</div>
+   100:       <div id="vehicleList" class="vehicle-list"></div>
+   101:       <div class="row" style="margin-top:8px">
+   102:         <select id="paymentMethod">
+   103:           <option value="cash">Cash</option>
+   104:           <option value="upi">UPI</option>
+   105:           <option value="card">Card</option>
+   106:         </select>
+   107:       </div>
+   108:       <button id="confirmRideBtn" class="btn brand full" style="margin-top:8px">Confirm Ride</button>
+   109:     </div>
+   110: 
+   111:     <div id="matchingPanel" class="panel hide">
+   112:       <div class="matching"><div class="dot"></div><b>Finding nearby drivers...</b></div>
+   113:       <div id="matchingText" class="muted status-line">Searching in 3km...</div>
+   114:       <button id="cancelMatchingBtn" class="btn bad full" style="margin-top:10px">Cancel Search</button>
+   115:     </div>
+   116: 
+   117:     <div id="confirmedPanel" class="panel hide">
+   118:       <div class="driver">
+   119:         <img id="driverPhoto" src="Images/no-image.jpg" alt="Driver">
+   120:         <div>
+   121:           <div><b id="driverName">Assigned Driver</b></div>
+   122:           <div id="driverMeta" class="muted">Rating 4.8 | Vehicle</div>
+   123:         </div>
+   124:         <div class="badge" id="driverEta">ETA -</div>
+   125:       </div>
+   126:       <div id="confirmedStatus" class="muted status-line">Status: accepted</div>
+   127:       <div id="driverPhone" class="muted status-line">Phone: -</div>
+   128:       <a id="callDriverBtn" class="btn gray full" href="#" style="display:block;text-align:center;text-decoration:none;margin-top:8px">Call Driver</a>
+   129:       <div class="row" style="margin-top:8px">
+   130:         <input id="otpInput" class="input" placeholder="Enter start OTP">
+   131:         <button id="verifyOtpBtn" class="btn ok">Start Ride</button>
+   132:       </div>
+   133:       <button id="cancelAfterAcceptBtn" class="btn bad full" style="margin-top:8px">Cancel Ride</button>
+   134:     </div>
+   135: 
+   136:     <div id="tripPanel" class="panel hide">
+   137:       <span class="badge">Ride Started</span>
+   138:       <div id="remainText" class="muted status-line">Distance remaining: -</div>
+   139:       <div id="tripEtaText" class="muted status-line">ETA: -</div>
+   140:       <button id="sosBtn" class="btn bad full" style="margin-top:8px">Emergency SOS</button>
+   141:       <button id="checkCompleteBtn" class="btn brand full" style="margin-top:8px">Check Ride Completion</button>
+   142:     </div>
+   143: 
+   144:     <div id="donePanel" class="panel hide">
+   145:       <b>Ride Complete</b>
+   146:       <div class="row" style="justify-content:space-between;margin-top:8px"><span>Ride Fare</span><b id="fareOut">INR 0.00</b></div>
+   147:       <div class="row" style="justify-content:space-between;margin-top:4px"><span>Driver Earning</span><b id="driverOut">INR 0.00</b></div>
+   148:       <div class="row" style="justify-content:space-between;margin-top:4px"><span>Total Payable</span><b id="totalOut">INR 0.00</b></div>
+   149:       <div class="row" style="margin-top:8px">
+   150:         <select id="rateInput">
+   151:           <option value="5">Rate 5</option>
+   152:           <option value="4">Rate 4</option>
+   153:           <option value="3">Rate 3</option>
+   154:           <option value="2">Rate 2</option>
+   155:           <option value="1">Rate 1</option>
+   156:         </select>
+   157:         <input id="tipInput" class="input" placeholder="Tip amount">
+   158:       </div>
+   159:       <button id="bookAgainBtn" class="btn brand full" style="margin-top:8px">Book Again</button>
+   160:     </div>
+   161:   </div>
+   162: </div>
+   163: 
+   164: <section id="foodView" class="hide">
+   165:   <div class="block">
+   166:     <b>Food / Grocery</b>
+   167:     <div class="muted" style="margin-top:6px">Ride tab is production focus. Food and grocery module can be expanded next.</div>
+   168:   </div>
+   169: </section>
+   170: 
+   171: <section id="agentView" class="hide">
+   172:   <div class="block">
+   173:     <b>Agent</b>
+   174:     <div class="muted" style="margin-top:6px">Ride tab is production focus. Agent module can be expanded next.</div>
+   175:   </div>
+   176: </section>
+   177: 
+   178: <nav class="bottom-nav">
+   179:   <button class="nav-item" data-nav="home">Home</button>
+   180:   <button class="nav-item active" data-nav="ride">Ride</button>
+   181:   <button class="nav-item" data-nav="food">Food/Grocery</button>
+   182:   <button class="nav-item" data-nav="agent">Agent</button>
+   183:   <button class="nav-item" data-nav="account">F-Account</button>
+   184: </nav>
+   185: 
+   186: <script>
+   187: const supa = window.supa || window.novaCreateSupabaseClient();
+   188: const RIDE_STATE_KEY = "nova_ride_state_v3";
+   189: const PRICING = {
+   190:   bike: { label: "Bike", base: 30, perKm: 8, perMin: 1.5, speed: 28 },
+   191:   auto: { label: "Auto", base: 45, perKm: 11, perMin: 2, speed: 24 },
+   192:   car: { label: "Car", base: 70, perKm: 15, perMin: 2.8, speed: 30 }
+   193: };
+   194: 
+   195: const state = {
+   196:   me: null,
+   197:   vehicle: "auto",
+   198:   pickupLat: null,
+   199:   pickupLng: null,
+   200:   dropLat: null,
+   201:   dropLng: null,
+   202:   pickupText: "",
+   203:   dropText: "",
+   204:   pickupLandmark: "",
+   205:   dropLandmark: "",
+   206:   distanceKm: 0,
+   207:   durationMin: 0,
+   208:   fare: 0,
+   209:   phase: "idle",
+   210:   requestId: "",
+   211:   trackTimer: null,
+   212:   watchId: null,
+   213:   lastReverseAt: 0,
+   214:   lastNearbyAt: 0,
+   215:   matchSecond: 0,
+   216:   matchAttempt: 1,
+   217:   lastRematchAt: 0,
+   218:   gpsLastFixAt: 0,
+   219:   gpsFailCount: 0,
+   220:   gpsRefreshTimer: null,
+   221:   driverUserId: "",
+   222:   driverLat: null,
+   223:   driverLng: null
+   224: };
+   225: 
+   226: let map = null;
+   227: let pickupMarker = null;
+   228: let dropMarker = null;
+   229: let routeLine = null;
+   230: let nearbyLayer = null;
+   231: let driverMarker = null;
+   232: let driverGuideLine = null;
+   233: let suggestPopup = null;
+   234: let suggestSeq = 0;
+   235: let suggestDebounceTimer = null;
+   236: let rideRealtimeChannel = null;
+   237: let driverLocationRealtimeChannel = null;
+   238: 
+   239: function money(v){ return "INR " + Number(v || 0).toFixed(2); }
+   240: function haversineKm(lat1, lon1, lat2, lon2){
+   241:   const toRad = d => d * Math.PI / 180;
+   242:   const R = 6371;
+   243:   const dLat = toRad(lat2 - lat1);
+   244:   const dLon = toRad(lon2 - lon1);
+   245:   const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+   246:   return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+   247: }
+   248: 
+   249: function rideStatusPublic(statusRaw){
+   250:   const s = String(statusRaw || "").trim().toLowerCase();
+   251:   if(s === "arriving") return "arrived";
+   252:   if(s === "on_trip") return "started";
+   253:   return s;
+   254: }
+   255: 
+   256: function rideStatusLabel(statusRaw){
+   257:   const s = rideStatusPublic(statusRaw);
+   258:   if(!s) return "unknown";
+   259:   if(s === "searching") return "searching";
+   260:   if(s === "accepted") return "accepted";
+   261:   if(s === "arrived") return "arrived at pickup";
+   262:   if(s === "started") return "ride started";
+   263:   if(s === "completed") return "completed";
+   264:   if(s === "cancelled") return "cancelled";
+   265:   return s;
+   266: }
+   267: 
+   268: function isRideArrived(statusRaw){
+   269:   return rideStatusPublic(statusRaw) === "arrived";
+   270: }
+   271: 
+   272: function isRideStarted(statusRaw){
+   273:   return rideStatusPublic(statusRaw) === "started";
+   274: }
+   275: 
+   276: function apiBases(){
+   277:   const out = [];
+   278:   const push = (value) => {
+   279:     const clean = String(value || "").trim().replace(/\/+$/g, "");
+   280:     if(!clean || !/^https?:\/\//i.test(clean)) return;
+   281:     if(!out.includes(clean)) out.push(clean);
+   282:   };
+   283:   push(window.CONTEST_API_BASE || window.API_BASE || "");
+   284:   try{
+   285:     push(localStorage.getItem("contest_api_base"));
+   286:     push(localStorage.getItem("api_base"));
+   287:   }catch(_){ }
+   288:   if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+   289:   push("https://novagapp-mart.onrender.com");
+   290:   return out;
+   291: }
+   292: 
+   293: async function apiGet(path){
+   294:   for(const base of apiBases()){
+   295:     try{
+   296:       const res = await fetch(base + path, { cache: "no-store" });
+   297:       const json = await res.json().catch(() => null);
+   298:       if(res.ok && json?.ok) return json;
+   299:     }catch(_){ }
+   300:   }
+   301:   return null;
+   302: }
+   303: 
+   304: async function apiPost(path, body){
+   305:   for(const base of apiBases()){
+   306:     try{
+   307:       const res = await fetch(base + path, {
+   308:         method: "POST",
+   309:         headers: { "Content-Type": "application/json" },
+   310:         body: JSON.stringify(body)
+   311:       });
+   312:       const json = await res.json().catch(() => null);
+   313:       if(res.ok && json?.ok) return json;
+   314:     }catch(_){ }
+   315:   }
+   316:   return null;
+   317: }
+   318: function setPhase(next){
+   319:   state.phase = next;
+   320:   document.getElementById("idlePanel").classList.toggle("hide", next !== "idle");
+   321:   document.getElementById("matchingPanel").classList.toggle("hide", next !== "matching");
+   322:   document.getElementById("confirmedPanel").classList.toggle("hide", next !== "confirmed");
+   323:   document.getElementById("tripPanel").classList.toggle("hide", next !== "trip");
+   324:   document.getElementById("donePanel").classList.toggle("hide", next !== "done");
+   325: }
+   326: 
+   327: function saveState(){
+   328:   try{
+   329:     const hasDraft = Boolean(
+   330:       state.pickupText || state.dropText || state.pickupLandmark || state.dropLandmark ||
+   331:       (state.pickupLat != null && state.pickupLng != null) ||
+   332:       (state.dropLat != null && state.dropLng != null)
+   333:     );
+   334:     if(!state.requestId && !hasDraft){
+   335:       localStorage.removeItem(RIDE_STATE_KEY);
+   336:       return;
+   337:     }
+   338:     localStorage.setItem(RIDE_STATE_KEY, JSON.stringify({
+   339:       requestId: state.requestId,
+   340:       phase: state.phase,
+   341:       vehicle: state.vehicle,
+   342:       pickupLat: state.pickupLat,
+   343:       pickupLng: state.pickupLng,
+   344:       dropLat: state.dropLat,
+   345:       dropLng: state.dropLng,
+   346:       pickupText: state.pickupText,
+   347:       dropText: state.dropText,
+   348:       pickupLandmark: state.pickupLandmark,
+   349:       dropLandmark: state.dropLandmark,
+   350:       distanceKm: state.distanceKm,
+   351:       durationMin: state.durationMin,
+   352:       fare: state.fare,
+   353:       savedAt: Date.now()
+   354:     }));
+   355:   }catch(_){ }
+   356: }
+   357: 
+   358: function clearState(){
+   359:   try{ localStorage.removeItem(RIDE_STATE_KEY); }catch(_){ }
+   360: }
+   361: 
+   362: function loadState(){
+   363:   try{
+   364:     const raw = localStorage.getItem(RIDE_STATE_KEY);
+   365:     if(!raw) return null;
+   366:     const json = JSON.parse(raw);
+   367:     if(!json || typeof json !== "object") return null;
+   368:     return json;
+   369:   }catch(_){
+   370:     return null;
+   371:   }
+   372: }
+   373: 
+   374: async function ensureMe(){
+   375:   if(state.me) return state.me;
+   376:   const { data } = await supa.auth.getSession();
+   377:   state.me = data?.session?.user || null;
+   378:   if(!state.me){
+   379:     location.href = "login.html";
+   380:     return null;
+   381:   }
+   382:   return state.me;
+   383: }
+   384: 
+   385: function initMap(){
+   386:   if(map) return;
+   387:   map = L.map("rideMap", { zoomControl: true }).setView([18.5204, 73.8567], 14);
+   388:   const primaryTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+   389:     subdomains: "abcd",
+   390:     maxZoom: 19,
+   391:     attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
+   392:   });
+   393:   const fallbackTiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+   394:     maxZoom: 19,
+   395:     attribution: "&copy; OpenStreetMap contributors"
+   396:   });
+   397:   let fallbackAdded = false;
+   398:   primaryTiles.on("tileerror", () => {
+   399:     if(fallbackAdded) return;
+   400:     fallbackAdded = true;
+   401:     fallbackTiles.addTo(map);
+   402:   });
+   403:   primaryTiles.addTo(map);
+   404:   nearbyLayer = L.layerGroup().addTo(map);
+   405:   map.on("click", (e) => {
+   406:     const lat = Number(e.latlng?.lat);
+   407:     const lng = Number(e.latlng?.lng);
+   408:     if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+   409:     setDrop(lat, lng, true).catch(() => {});
+   410:   });
+   411: }
+   412: 
+   413: function setPickupMarker(){
+   414:   if(!map || state.pickupLat == null || state.pickupLng == null) return;
+   415:   const p = [state.pickupLat, state.pickupLng];
+   416:   if(!pickupMarker) pickupMarker = L.marker(p).addTo(map).bindPopup("Pickup");
+   417:   else pickupMarker.setLatLng(p);
+   418: }
+   419: 
+   420: function setDropMarker(){
+   421:   if(!map || state.dropLat == null || state.dropLng == null) return;
+   422:   const d = [state.dropLat, state.dropLng];
+   423:   if(!dropMarker){
+   424:     dropMarker = L.marker(d, { draggable: true }).addTo(map).bindPopup("Drop");
+   425:     dropMarker.on("dragend", () => {
+   426:       const pos = dropMarker.getLatLng();
+   427:       setDrop(Number(pos.lat), Number(pos.lng), true).catch(() => {});
+   428:     });
+   429:   }else{
+   430:     dropMarker.setLatLng(d);
+   431:   }
+   432: }
+   433: 
+   434: function updateDriverMarker(){
+   435:   if(!map || state.driverLat == null || state.driverLng == null) return;
+   436:   const p = [state.driverLat, state.driverLng];
+   437:   if(!driverMarker) driverMarker = L.circleMarker(p, { radius: 7, color: "#dc2626", fillOpacity: 1 }).addTo(map);
+   438:   else driverMarker.setLatLng(p);
+   439: }
+   440: 
+   441: function clearDriverGuide(){
+   442:   if(map && driverGuideLine){
+   443:     map.removeLayer(driverGuideLine);
+   444:     driverGuideLine = null;
+   445:   }
+   446: }
+   447: 
+   448: async function reverseGeocode(lat, lng){
+   449:   try{
+   450:     const bdc = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(String(lat))}&longitude=${encodeURIComponent(String(lng))}&localityLanguage=en`;
+   451:     const res = await fetch(bdc, { cache: "no-store" });
+   452:     if(res.ok){
+   453:       const json = await res.json().catch(() => null);
+   454:       const name = [json?.locality || json?.city || "", json?.principalSubdivision || "", json?.countryName || ""].filter(Boolean).join(", ");
+   455:       if(name) return name.slice(0, 120);
+   456:     }
+   457:   }catch(_){ }
+   458:   try{
+   459:     const n = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}`;
+   460:     const res = await fetch(n, { cache: "no-store", headers: { "Accept": "application/json" } });
+   461:     if(res.ok){
+   462:       const json = await res.json().catch(() => null);
+   463:       const a = json?.address || {};
+   464:       const name = [a.road || a.suburb || a.neighbourhood || a.city || a.town || a.village || "", a.state || "", a.country || ""].filter(Boolean).join(", ");
+   465:       if(name) return name.slice(0, 120);
+   466:     }
+   467:   }catch(_){ }
+   468:   return "Current location";
+   469: }
+   470: 
+   471: async function geocode(text){
+   472:   const q = String(text || "").trim();
+   473:   if(!q) return null;
+   474:   const fast = await searchLandmarkSuggestions(q, 1);
+   475:   if(fast.length){
+   476:     const first = fast[0];
+   477:     return {
+   478:       lat: Number(first.lat),
+   479:       lng: Number(first.lng),
+   480:       name: String(first.name || q).slice(0, 120)
+   481:     };
+   482:   }
+   483:   try{
+   484:     const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(q)}`;
+   485:     const res = await fetch(url, { cache: "no-store" });
+   486:     const rows = await res.json().catch(() => []);
+   487:     const first = Array.isArray(rows) ? rows[0] : null;
+   488:     const lat = Number(first?.lat);
+   489:     const lng = Number(first?.lon);
+   490:     if(Number.isFinite(lat) && Number.isFinite(lng)){
+   491:       return { lat, lng, name: String(first?.display_name || q).slice(0, 120) };
+   492:     }
+   493:   }catch(_){ }
+   494:   return null;
+   495: }
+   496: 
+   497: function buildPlaceName(parts){
+   498:   return parts.map((item) => String(item || "").trim()).filter(Boolean).join(", ").slice(0, 140);
+   499: }
+   500: 
+   501: function normalizeSuggestion(name, lat, lng){
+   502:   const la = Number(lat);
+   503:   const ln = Number(lng);
+   504:   const nm = String(name || "").trim();
+   505:   if(!nm || !Number.isFinite(la) || !Number.isFinite(ln)) return null;
+   506:   return { name: nm.slice(0, 140), lat: la, lng: ln };
+   507: }
+   508: 
+   509: function dedupeSuggestions(list){
+   510:   const out = [];
+   511:   const seen = new Set();
+   512:   (Array.isArray(list) ? list : []).forEach((item) => {
+   513:     const row = normalizeSuggestion(item?.name, item?.lat, item?.lng);
+   514:     if(!row) return;
+   515:     const key = `${row.name.toLowerCase()}|${row.lat.toFixed(6)}|${row.lng.toFixed(6)}`;
+   516:     if(seen.has(key)) return;
+   517:     seen.add(key);
+   518:     out.push(row);
+   519:   });
+   520:   return out;
+   521: }
+   522: 
+   523: async function searchLandmarkSuggestions(query, limitCount){
+   524:   const q = String(query || "").trim();
+   525:   const limit = Math.max(1, Math.min(8, Number(limitCount || 6)));
+   526:   if(q.length < 2) return [];
+   527:   const merged = [];
+   528: 
+   529:   try{
+   530:     const photon = new URL("https://photon.komoot.io/api/");
+   531:     photon.searchParams.set("q", q);
+   532:     photon.searchParams.set("limit", String(limit));
+   533:     if(Number.isFinite(state.liveLat) && Number.isFinite(state.liveLng)){
+   534:       photon.searchParams.set("lat", String(state.liveLat));
+   535:       photon.searchParams.set("lon", String(state.liveLng));
+   536:     }
+   537:     const res = await fetch(photon.toString(), { cache: "no-store" });
+   538:     if(res.ok){
+   539:       const data = await res.json().catch(() => null);
+   540:       const features = Array.isArray(data?.features) ? data.features : [];
+   541:       features.forEach((feature) => {
+   542:         const coords = Array.isArray(feature?.geometry?.coordinates) ? feature.geometry.coordinates : [];
+   543:         const lng = Number(coords[0]);
+   544:         const lat = Number(coords[1]);
+   545:         const p = feature?.properties || {};
+   546:         const name = buildPlaceName([
+   547:           p.name || p.street || "",
+   548:           p.city || p.district || p.county || "",
+   549:           p.state || "",
+   550:           p.country || ""
+   551:         ]);
+   552:         const row = normalizeSuggestion(name, lat, lng);
+   553:         if(row) merged.push(row);
+   554:       });
+   555:     }
+   556:   }catch(_){ }
+   557: 
+   558:   if(merged.length < limit){
+   559:     try{
+   560:       const nom = new URL("https://nominatim.openstreetmap.org/search");
+   561:       nom.searchParams.set("format", "jsonv2");
+   562:       nom.searchParams.set("addressdetails", "1");
+   563:       nom.searchParams.set("limit", String(limit));
+   564:       nom.searchParams.set("q", q);
+   565:       const res = await fetch(nom.toString(), {
+   566:         cache: "no-store",
+   567:         headers: { "Accept": "application/json" }
+   568:       });
+   569:       if(res.ok){
+   570:         const rows = await res.json().catch(() => []);
+   571:         (Array.isArray(rows) ? rows : []).forEach((row) => {
+   572:           const a = row?.address || {};
+   573:           const name = buildPlaceName([
+   574:             a.road || a.neighbourhood || a.suburb || a.hamlet || a.city || a.town || a.village || "",
+   575:             a.city || a.town || a.village || a.county || "",
+   576:             a.state || "",
+   577:             a.country || ""
+   578:           ]) || String(row?.display_name || "").slice(0, 140);
+   579:           const item = normalizeSuggestion(name, row?.lat, row?.lon);
+   580:           if(item) merged.push(item);
+   581:         });
+   582:       }
+   583:     }catch(_){ }
+   584:   }
+   585: 
+   586:   return dedupeSuggestions(merged).slice(0, limit);
+   587: }
+   588: 
+   589: function estimateFare(vehicleType){
+   590:   const cfg = PRICING[vehicleType] || PRICING.auto;
+   591:   if(state.distanceKm <= 0 || state.durationMin <= 0) return null;
+   592:   const fare = cfg.base + (state.distanceKm * cfg.perKm) + (state.durationMin * cfg.perMin);
+   593:   const eta = Math.max(2, Math.round(state.durationMin * 1.15));
+   594:   return { fare, eta };
+   595: }
+   596: 
+   597: function renderVehicleList(){
+   598:   const box = document.getElementById("vehicleList");
+   599:   box.innerHTML = "";
+   600:   Object.keys(PRICING).forEach((key) => {
+   601:     const est = estimateFare(key);
+   602:     const card = document.createElement("div");
+   603:     card.className = "vehicle-card" + (state.vehicle === key ? " active" : "");
+   604:     card.innerHTML = `
+   605:       <div><b>${PRICING[key].label}</b></div>
+   606:       <div class="muted">ETA ${est ? est.eta : "-"} min</div>
+   607:       <div style="margin-top:4px"><b>${est ? money(est.fare) : "Set drop"}</b></div>
+   608:     `;
+   609:     card.onclick = () => {
+   610:       state.vehicle = key;
+   611:       const e = estimateFare(key);
+   612:       if(e) state.fare = e.fare;
+   613:       renderVehicleList();
+   614:     };
+   615:     box.appendChild(card);
+   616:   });
+   617: }
+   618: 
+   619: async function loadRouteAndFare(){
+   620:   if(state.pickupLat == null || state.pickupLng == null || state.dropLat == null || state.dropLng == null){
+   621:     document.getElementById("routeMeta").textContent = "Set destination to see fare and ETA.";
+   622:     renderVehicleList();
+   623:     return;
+   624:   }
+   625:   let distanceKm = 0;
+   626:   let durationMin = 0;
+   627:   let geo = null;
+   628:   try{
+   629:     const url = `https://router.project-osrm.org/route/v1/driving/${state.pickupLng},${state.pickupLat};${state.dropLng},${state.dropLat}?overview=full&geometries=geojson`;
+   630:     const res = await fetch(url, { cache: "no-store" });
+   631:     const json = await res.json().catch(() => null);
+   632:     const route = json?.routes?.[0];
+   633:     distanceKm = Number(route?.distance || 0) / 1000;
+   634:     durationMin = Number(route?.duration || 0) / 60;
+   635:     geo = route?.geometry?.coordinates || null;
+   636:   }catch(_){ }
+   637:   if(!Number.isFinite(distanceKm) || distanceKm <= 0){
+   638:     distanceKm = haversineKm(state.pickupLat, state.pickupLng, state.dropLat, state.dropLng);
+   639:   }
+   640:   if(!Number.isFinite(durationMin) || durationMin <= 0){
+   641:     durationMin = Math.max((distanceKm / PRICING[state.vehicle].speed) * 60, 3);
+   642:   }
+   643:   state.distanceKm = distanceKm;
+   644:   state.durationMin = durationMin;
+   645: 
+   646:   if(map){
+   647:     if(routeLine){ map.removeLayer(routeLine); routeLine = null; }
+   648:     if(Array.isArray(geo) && geo.length > 1){
+   649:       const latlngs = geo.map((c) => [Number(c[1]), Number(c[0])]).filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+   650:       if(latlngs.length > 1) routeLine = L.polyline(latlngs, { color: "#1d4ed8", weight: 5 }).addTo(map);
+   651:     }else{
+   652:       routeLine = L.polyline([[state.pickupLat, state.pickupLng], [state.dropLat, state.dropLng]], { color: "#1d4ed8", weight: 5 }).addTo(map);
+   653:     }
+   654:     map.fitBounds([[state.pickupLat, state.pickupLng], [state.dropLat, state.dropLng]], { padding: [24, 24] });
+   655:   }
+   656: 
+   657:   const est = estimateFare(state.vehicle);
+   658:   if(est) state.fare = est.fare;
+   659:   document.getElementById("routeMeta").textContent = `Distance ${distanceKm.toFixed(1)} km | Duration ${Math.round(durationMin)} min | Fare ${est ? money(est.fare) : "-"}`;
+   660:   renderVehicleList();
+   661: }
+   662: 
+   663: const RECENT_DEST_KEY = "nova_ride_recent_dest_v1";
+   664: const REMATCH_INTERVAL_SEC = 10;
+   665: const TRACK_INTERVAL_MS = 3000;
+   666: const NEARBY_INTERVAL_MS = 15000;
+   667: const MAX_RECENT_DEST = 6;
+   668: const RIDE_STATE_TTL_MS = 6 * 60 * 60 * 1000;
+   669: 
+   670: state.pickupMode = "gps";
+   671: state.liveLat = null;
+   672: state.liveLng = null;
+   673: state.lastGpsAddressAt = 0;
+   674: 
+   675: function ensureRideExtrasUI(){
+   676:   const top = document.querySelector(".top-search");
+   677:   if(top && !document.getElementById("liveAddressLabel")){
+   678:     const label = document.createElement("div");
+   679:     label.id = "liveAddressLabel";
+   680:     label.className = "muted";
+   681:     label.style.marginTop = "6px";
+   682:     label.style.marginLeft = "2px";
+   683:     label.style.marginRight = "2px";
+   684:     label.style.background = "rgba(255,255,255,0.92)";
+   685:     label.style.padding = "6px 8px";
+   686:     label.style.borderRadius = "10px";
+   687:     label.textContent = "Current location: detecting...";
+   688:     top.insertAdjacentElement("afterend", label);
+   689:   }
+   690: 
+   691:   const routeMeta = document.getElementById("routeMeta");
+   692:   if(routeMeta && !document.getElementById("nearbyInfo")){
+   693:     const near = document.createElement("div");
+   694:     near.id = "nearbyInfo";
+   695:     near.className = "muted";
+   696:     near.style.marginTop = "8px";
+   697:     near.textContent = "Nearby drivers: checking...";
+   698:     routeMeta.parentElement.insertBefore(near, routeMeta);
+   699:   }
+   700: 
+   701:   const row = document.querySelector("#idlePanel .row[style*='margin-top:8px']");
+   702:   if(row && !document.getElementById("recentWrap")){
+   703:     const wrap = document.createElement("div");
+   704:     wrap.id = "recentWrap";
+   705:     wrap.className = "muted";
+   706:     wrap.style.marginTop = "8px";
+   707:     wrap.innerHTML = "Recent destinations";
+   708:     const chips = document.createElement("div");
+   709:     chips.id = "recentList";
+   710:     chips.style.display = "flex";
+   711:     chips.style.gap = "6px";
+   712:     chips.style.overflowX = "auto";
+   713:     chips.style.marginTop = "5px";
+   714:     chips.style.paddingBottom = "2px";
+   715:     wrap.appendChild(chips);
+   716:     row.insertAdjacentElement("afterend", wrap);
+   717:   }
+   718: 
+   719:   const matchingText = document.getElementById("matchingText");
+   720:   if(matchingText && !document.getElementById("matchingTimer")){
+   721:     const timer = document.createElement("div");
+   722:     timer.id = "matchingTimer";
+   723:     timer.className = "muted status-line";
+   724:     timer.textContent = "Elapsed: 0s";
+   725:     matchingText.insertAdjacentElement("afterend", timer);
+   726:   }
+   727: }
+   728: 
+   729: function ensureSuggestPopup(){
+   730:   if(suggestPopup) return suggestPopup;
+   731:   suggestPopup = document.createElement("div");
+   732:   suggestPopup.id = "globalSuggestPopup";
+   733:   suggestPopup.className = "suggest-popup hide";
+   734:   document.body.appendChild(suggestPopup);
+   735: 
+   736:   const hideSoon = () => setTimeout(() => hideSuggestPopup(), 120);
+   737:   window.addEventListener("scroll", hideSoon, { passive: true });
+   738:   window.addEventListener("resize", hideSoon);
+   739:   document.addEventListener("click", (event) => {
+   740:     if(!suggestPopup || suggestPopup.classList.contains("hide")) return;
+   741:     const t = event.target;
+   742:     if(t instanceof Element && (t.closest("#globalSuggestPopup") || t.closest("#whereToInput") || t.closest("#dropInput") || t.closest("#pickupInput"))){
+   743:       return;
+   744:     }
+   745:     hideSuggestPopup();
+   746:   });
+   747:   return suggestPopup;
+   748: }
+   749: 
+   750: function hideSuggestPopup(){
+   751:   const box = ensureSuggestPopup();
+   752:   box.classList.add("hide");
+   753:   box.innerHTML = "";
+   754:   box.style.left = "0px";
+   755:   box.style.top = "0px";
+   756:   box.style.width = "0px";
+   757: }
+   758: 
+   759: function showSuggestPopup(inputEl, items, onPick){
+   760:   const input = inputEl instanceof HTMLElement ? inputEl : null;
+   761:   const list = Array.isArray(items) ? items : [];
+   762:   if(!input || !list.length){
+   763:     hideSuggestPopup();
+   764:     return;
+   765:   }
+   766:   const box = ensureSuggestPopup();
+   767:   box.innerHTML = "";
+   768:   const rect = input.getBoundingClientRect();
+   769:   box.style.left = `${Math.max(8, rect.left)}px`;
+   770:   box.style.top = `${Math.max(8, rect.bottom + 4)}px`;
+   771:   box.style.width = `${Math.max(180, rect.width)}px`;
+   772:   list.forEach((item) => {
+   773:     const row = document.createElement("button");
+   774:     row.type = "button";
+   775:     row.className = "suggest-item";
+   776:     row.textContent = String(item?.name || "").trim().slice(0, 140);
+   777:     row.onclick = () => {
+   778:       if(typeof onPick === "function"){
+   779:         onPick(item);
+   780:       }
+   781:       hideSuggestPopup();
+   782:     };
+   783:     box.appendChild(row);
+   784:   });
+   785:   box.classList.remove("hide");
+   786: }
+   787: 
+   788: function scheduleLandmarkSuggest(inputId, pickHandler){
+   789:   const input = document.getElementById(inputId);
+   790:   if(!input) return;
+   791:   const query = String(input.value || "").trim();
+   792:   if(query.length < 2){
+   793:     hideSuggestPopup();
+   794:     return;
+   795:   }
+   796:   clearTimeout(suggestDebounceTimer);
+   797:   suggestDebounceTimer = setTimeout(async () => {
+   798:     const seq = ++suggestSeq;
+   799:     const list = await searchLandmarkSuggestions(query, 7);
+   800:     if(seq !== suggestSeq) return;
+   801:     showSuggestPopup(input, list, pickHandler);
+   802:   }, 220);
+   803: }
+   804: 
+   805: function loadRecentDestinations(){
+   806:   try{
+   807:     const raw = localStorage.getItem(RECENT_DEST_KEY);
+   808:     if(!raw) return [];
+   809:     const list = JSON.parse(raw);
+   810:     return Array.isArray(list) ? list : [];
+   811:   }catch(_){
+   812:     return [];
+   813:   }
+   814: }
+   815: 
+   816: function saveRecentDestination(place){
+   817:   const text = String(place?.text || "").trim().slice(0, 140);
+   818:   const lat = Number(place?.lat);
+   819:   const lng = Number(place?.lng);
+   820:   if(!text || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+   821:   const list = loadRecentDestinations();
+   822:   const filtered = list.filter((it) => String(it?.text || "").toLowerCase() !== text.toLowerCase());
+   823:   filtered.unshift({ text, lat, lng });
+   824:   const finalList = filtered.slice(0, MAX_RECENT_DEST);
+   825:   try{ localStorage.setItem(RECENT_DEST_KEY, JSON.stringify(finalList)); }catch(_){ }
+   826: }
+   827: 
+   828: function renderRecentDestinations(){
+   829:   const box = document.getElementById("recentList");
+   830:   if(!box) return;
+   831:   box.innerHTML = "";
+   832:   const list = loadRecentDestinations();
+   833:   if(!list.length){
+   834:     const t = document.createElement("span");
+   835:     t.textContent = "No recent destination";
+   836:     t.style.fontSize = "11px";
+   837:     box.appendChild(t);
+   838:     return;
+   839:   }
+   840:   list.forEach((item) => {
+   841:     const btn = document.createElement("button");
+   842:     btn.type = "button";
+   843:     btn.textContent = String(item?.text || "Recent").slice(0, 45);
+   844:     btn.style.border = "1px solid #dce3f0";
+   845:     btn.style.borderRadius = "999px";
+   846:     btn.style.padding = "6px 10px";
+   847:     btn.style.background = "#fff";
+   848:     btn.style.whiteSpace = "nowrap";
+   849:     btn.style.cursor = "pointer";
+   850:     btn.onclick = () => {
+   851:       setDrop(Number(item?.lat), Number(item?.lng), false, String(item?.text || ""))
+   852:         .then(() => loadRouteAndFare())
+   853:         .catch(() => {});
+   854:     };
+   855:     box.appendChild(btn);
+   856:   });
+   857: }
+   858: 
+   859: function shouldRestoreSavedState(saved){
+   860:   const ts = Number(saved?.savedAt || 0);
+   861:   return ts > 0 && (Date.now() - ts) <= RIDE_STATE_TTL_MS;
+   862: }
+   863: 
+   864: function updateLiveAddressLabel(text){
+   865:   const label = document.getElementById("liveAddressLabel");
+   866:   if(!label) return;
+   867:   label.textContent = "Current location: " + (String(text || "").trim() || "detecting...");
+   868: }
+   869: 
+   870: function setMatchingText(text){
+   871:   const el = document.getElementById("matchingText");
+   872:   if(el) el.textContent = text;
+   873: }
+   874: 
+   875: function setMatchingTimerText(text){
+   876:   const el = document.getElementById("matchingTimer");
+   877:   if(el) el.textContent = text;
+   878: }
+   879: 
+   880: function setNearbyInfo(text){
+   881:   const el = document.getElementById("nearbyInfo");
+   882:   if(el) el.textContent = text;
+   883: }
+   884: 
+   885: function setRideHint(text){
+   886:   const msg = String(text || "").trim();
+   887:   if(!msg) return;
+   888:   const routeMeta = document.getElementById("routeMeta");
+   889:   if(routeMeta) routeMeta.textContent = msg;
+   890:   setMatchingText(msg);
+   891: }
+   892: 
+   893: function composePlaceText(baseText, landmarkText){
+   894:   const base = String(baseText || "").trim();
+   895:   const landmark = String(landmarkText || "").trim();
+   896:   if(!base && !landmark) return "Location pin";
+   897:   if(!landmark) return base || "Location pin";
+   898:   if(!base) return `Landmark: ${landmark}`;
+   899:   if(base.toLowerCase().includes(landmark.toLowerCase())) return base;
+   900:   return `${base} | Landmark: ${landmark}`;
+   901: }
+   902: 
+   903: async function ensureConsumerRole(){
+   904:   const me = await ensureMe();
+   905:   if(!me) return false;
+   906:   const roles = await apiGet(`/api/local/roles?user_id=${encodeURIComponent(me.id)}`);
+   907:   const hasConsumer = Array.isArray(roles?.roles)
+   908:     && roles.roles.some((r) => String(r?.role || "") === "consumer" && String(r?.status || "") === "active");
+   909:   if(hasConsumer) return true;
+   910:   const displayName = String(me?.user_metadata?.full_name || me?.user_metadata?.name || me?.email || "Consumer").slice(0, 80);
+   911:   const enroll = await apiPost("/api/local/role/enroll", {
+   912:     user_id: me.id,
+   913:     role: "consumer",
+   914:     display_name: displayName,
+   915:     fee_paid: true,
+   916:     payment_ref: "consumer_auto"
+   917:   });
+   918:   return Boolean(enroll?.ok);
+   919: }
+   920: 
+   921: async function setPickup(lat, lng, fromGps){
+   922:   if(!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return;
+   923:   state.pickupLat = Number(lat);
+   924:   state.pickupLng = Number(lng);
+   925:   setPickupMarker();
+   926: 
+   927:   const now = Date.now();
+   928:   const shouldResolve = !state.pickupText || (now - state.lastReverseAt > 9000) || !fromGps;
+   929:   if(shouldResolve){
+   930:     state.lastReverseAt = now;
+   931:     const name = await reverseGeocode(state.pickupLat, state.pickupLng);
+   932:     if(name) state.pickupText = name;
+   933:   }
+   934: 
+   935:   document.getElementById("pickupInput").value = state.pickupText || "";
+   936:   updateLiveAddressLabel(state.pickupText || "detecting...");
+   937: 
+   938:   if(map && fromGps && state.phase === "idle"){
+   939:     map.setView([state.pickupLat, state.pickupLng], Math.max(15, map.getZoom()));
+   940:   }
+   941: 
+   942:   if(state.dropLat != null && state.dropLng != null){
+   943:     await loadRouteAndFare();
+   944:   }
+   945: 
+   946:   if(state.phase === "idle"){
+   947:     await fetchNearbyDrivers();
+   948:   }
+   949: 
+   950:   saveState();
+   951: }
+   952: 
+   953: async function setDrop(lat, lng, fromMap, explicitName){
+   954:   if(!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return;
+   955:   state.dropLat = Number(lat);
+   956:   state.dropLng = Number(lng);
+   957:   setDropMarker();
+   958: 
+   959:   let dropName = String(explicitName || "").trim();
+   960:   if(!dropName){
+   961:     dropName = await reverseGeocode(state.dropLat, state.dropLng);
+   962:   }
+   963:   state.dropText = String(dropName || "").trim().slice(0, 160);
+   964: 
+   965:   const dropInput = document.getElementById("dropInput");
+   966:   const whereInput = document.getElementById("whereToInput");
+   967:   dropInput.value = state.dropText;
+   968:   whereInput.value = state.dropText;
+   969: 
+   970:   if(map && fromMap){
+   971:     map.fitBounds([[state.pickupLat || state.dropLat, state.pickupLng || state.dropLng], [state.dropLat, state.dropLng]], { padding: [24, 24] });
+   972:   }
+   973: 
+   974:   if(state.dropText){
+   975:     saveRecentDestination({ text: state.dropText, lat: state.dropLat, lng: state.dropLng });
+   976:     renderRecentDestinations();
+   977:   }
+   978: 
+   979:   saveState();
+   980: }
+   981: 
+   982: function updateGpsBadgeLive(accuracy){
+   983:   const badge = document.getElementById("gpsBadge");
+   984:   const acc = Number(accuracy);
+   985:   const accTxt = Number.isFinite(acc) ? ` (${Math.round(acc)}m)` : "";
+   986:   const quality = Number.isFinite(acc) ? (acc <= 40 ? "accurate" : (acc <= 120 ? "ok" : "weak")) : "live";
+   987:   badge.textContent = `GPS: ${quality}${accTxt}`;
+   988: }
+   989: 
+   990: function updateGpsBadgeBlocked(){
+   991:   state.gpsFailCount = (Number(state.gpsFailCount || 0) + 1);
+   992:   document.getElementById("gpsBadge").textContent = "GPS: blocked";
+   993:   updateLiveAddressLabel("permission required");
+   994: }
+   995: 
+   996: async function applyGpsFix(pos, shouldCenter){
+   997:   const lat = Number(pos?.coords?.latitude);
+   998:   const lng = Number(pos?.coords?.longitude);
+   999:   const acc = Number(pos?.coords?.accuracy);
+  1000:   if(!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  1001:   state.gpsFailCount = 0;
+  1002:   state.gpsLastFixAt = Date.now();
+  1003:   state.liveLat = lat;
+  1004:   state.liveLng = lng;
+  1005:   updateGpsBadgeLive(acc);
+  1006:   if(state.phase === "idle" && state.pickupMode !== "manual"){
+  1007:     await setPickup(lat, lng, true);
+  1008:   }else if(shouldCenter && map){
+  1009:     map.setView([lat, lng], Math.max(15, map.getZoom()));
+  1010:   }
+  1011:   return true;
+  1012: }
+  1013: 
+  1014: async function tryApproxLocationFallback(){
+  1015:   if(state.gpsLastFixAt && (Date.now() - state.gpsLastFixAt) < 15000) return;
+  1016:   try{
+  1017:     const res = await fetch("https://ipapi.co/json/", { cache: "no-store" });
+  1018:     const data = await res.json().catch(() => null);
+  1019:     const lat = Number(data?.latitude);
+  1020:     const lng = Number(data?.longitude);
+  1021:     if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  1022:     state.liveLat = lat;
+  1023:     state.liveLng = lng;
+  1024:     if(state.phase === "idle" && state.pickupMode !== "manual"){
+  1025:       await setPickup(lat, lng, false);
+  1026:     }else if(map){
+  1027:       map.setView([lat, lng], Math.max(13, map.getZoom()));
+  1028:     }
+  1029:     document.getElementById("gpsBadge").textContent = "GPS: approx";
+  1030:   }catch(_){ }
+  1031: }
+  1032: 
+  1033: async function fetchNearbyDrivers(){
+  1034:   if(state.pickupLat == null || state.pickupLng == null) return;
+  1035:   const now = Date.now();
+  1036:   if(now - state.lastNearbyAt < 2500) return;
+  1037:   state.lastNearbyAt = now;
+  1038: 
+  1039:   const res = await apiGet(`/api/local/riders/nearby?lat=${encodeURIComponent(String(state.pickupLat))}&lng=${encodeURIComponent(String(state.pickupLng))}&radius_km=3&limit=20`);
+  1040:   if(!res?.ok){
+  1041:     setNearbyInfo("Nearby drivers unavailable right now");
+  1042:     if(nearbyLayer) nearbyLayer.clearLayers();
+  1043:     return;
+  1044:   }
+  1045: 
+  1046:   const drivers = Array.isArray(res.drivers) ? res.drivers : [];
+  1047:   if(nearbyLayer) nearbyLayer.clearLayers();
+  1048:   drivers.forEach((driver) => {
+  1049:     const lat = Number(driver?.lat);
+  1050:     const lng = Number(driver?.lng);
+  1051:     if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  1052:     const marker = L.circleMarker([lat, lng], {
+  1053:       radius: 5,
+  1054:       color: "#0f766e",
+  1055:       fillColor: "#14b8a6",
+  1056:       fillOpacity: 0.85,
+  1057:       weight: 1
+  1058:     }).addTo(nearbyLayer);
+  1059:     const store = String(driver?.store_name || "Nearby driver").trim();
+  1060:     const distance = Number(driver?.distance_km);
+  1061:     marker.bindTooltip(Number.isFinite(distance) ? `${store} - ${distance.toFixed(2)} km` : store);
+  1062:   });
+  1063:   setNearbyInfo(`${drivers.length} nearby driver(s) in 3 km`);
+  1064: }
+  1065: 
+  1066: function startNearbyLoop(){
+  1067:   if(state.nearbyTimer){
+  1068:     clearInterval(state.nearbyTimer);
+  1069:     state.nearbyTimer = null;
+  1070:   }
+  1071:   state.nearbyTimer = setInterval(() => {
+  1072:     if(state.phase !== "idle") return;
+  1073:     fetchNearbyDrivers().catch(() => {});
+  1074:   }, NEARBY_INTERVAL_MS);
+  1075: }
+  1076: 
+  1077: function stopNearbyLoop(){
+  1078:   if(state.nearbyTimer){
+  1079:     clearInterval(state.nearbyTimer);
+  1080:     state.nearbyTimer = null;
+  1081:   }
+  1082: }
+  1083: 
+  1084: function startGpsWatch(){
+  1085:   if(!navigator.geolocation){
+  1086:     document.getElementById("gpsBadge").textContent = "GPS: unsupported";
+  1087:     updateLiveAddressLabel("unsupported on this device");
+  1088:     tryApproxLocationFallback().catch(() => {});
+  1089:     return;
+  1090:   }
+  1091: 
+  1092:   const requestCurrent = (centerNow) => {
+  1093:     navigator.geolocation.getCurrentPosition(
+  1094:       async (pos) => {
+  1095:         await applyGpsFix(pos, Boolean(centerNow));
+  1096:       },
+  1097:       async () => {
+  1098:         updateGpsBadgeBlocked();
+  1099:         if(state.gpsFailCount >= 2){
+  1100:           await tryApproxLocationFallback();
+  1101:         }
+  1102:       },
+  1103:       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+  1104:     );
+  1105:   };
+  1106: 
+  1107:   if(navigator.permissions?.query){
+  1108:     navigator.permissions.query({ name: "geolocation" }).then((perm) => {
+  1109:       if(perm?.state === "denied"){
+  1110:         updateGpsBadgeBlocked();
+  1111:       }else{
+  1112:         requestCurrent(true);
+  1113:       }
+  1114:     }).catch(() => requestCurrent(true));
+  1115:   }else{
+  1116:     requestCurrent(true);
+  1117:   }
+  1118: 
+  1119:   if(state.watchId != null){
+  1120:     navigator.geolocation.clearWatch(state.watchId);
+  1121:     state.watchId = null;
+  1122:   }
+  1123: 
+  1124:   state.watchId = navigator.geolocation.watchPosition(
+  1125:     async (pos) => {
+  1126:       await applyGpsFix(pos, false);
+  1127:     },
+  1128:     async () => {
+  1129:       updateGpsBadgeBlocked();
+  1130:       if(state.gpsFailCount >= 3){
+  1131:         await tryApproxLocationFallback();
+  1132:       }
+  1133:     },
+  1134:     { enableHighAccuracy: true, timeout: 20000, maximumAge: 1000 }
+  1135:   );
+  1136: 
+  1137:   if(state.gpsRefreshTimer){
+  1138:     clearInterval(state.gpsRefreshTimer);
+  1139:     state.gpsRefreshTimer = null;
+  1140:   }
+  1141:   state.gpsRefreshTimer = setInterval(() => {
+  1142:     if(state.phase !== "idle") return;
+  1143:     const stale = !state.gpsLastFixAt || (Date.now() - state.gpsLastFixAt) > 15000;
+  1144:     if(!stale) return;
+  1145:     requestCurrent(false);
+  1146:   }, 8000);
+  1147: }
+  1148: 
+  1149: async function focusCurrentLocation(){
+  1150:   state.pickupMode = "gps";
+  1151:   if(state.liveLat != null && state.liveLng != null){
+  1152:     if(map) map.setView([state.liveLat, state.liveLng], Math.max(15, map.getZoom()));
+  1153:     if(state.phase === "idle"){
+  1154:       await setPickup(state.liveLat, state.liveLng, true);
+  1155:     }
+  1156:     return;
+  1157:   }
+  1158: 
+  1159:   if(!navigator.geolocation){
+  1160:     updateGpsBadgeBlocked();
+  1161:     await tryApproxLocationFallback();
+  1162:     return;
+  1163:   }
+  1164: 
+  1165:   navigator.geolocation.getCurrentPosition(
+  1166:     async (pos) => {
+  1167:       await applyGpsFix(pos, true);
+  1168:     },
+  1169:     async () => {
+  1170:       updateGpsBadgeBlocked();
+  1171:       await tryApproxLocationFallback();
+  1172:     },
+  1173:     { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+  1174:   );
+  1175: }
+  1176: 
+  1177: function stopGpsWatch(){
+  1178:   if(state.watchId != null && navigator.geolocation){
+  1179:     navigator.geolocation.clearWatch(state.watchId);
+  1180:   }
+  1181:   state.watchId = null;
+  1182:   if(state.gpsRefreshTimer){
+  1183:     clearInterval(state.gpsRefreshTimer);
+  1184:     state.gpsRefreshTimer = null;
+  1185:   }
+  1186: }
+  1187: 
+  1188: async function handleDestinationInput(text){
+  1189:   const query = String(text || "").trim();
+  1190:   if(!query) return;
+  1191:   const found = await geocode(query);
+  1192:   if(!found){
+  1193:     setRideHint("Destination not found. Try area + city.");
+  1194:     return;
+  1195:   }
+  1196:   await setDrop(Number(found.lat), Number(found.lng), true, String(found.name || query));
+  1197:   await loadRouteAndFare();
+  1198: }
+  1199: 
+  1200: function stopMatchingLoop(){
+  1201:   if(state.matchTimer){
+  1202:     clearInterval(state.matchTimer);
+  1203:     state.matchTimer = null;
+  1204:   }
+  1205: }
+  1206: 
+  1207: function stopTrackLoop(){
+  1208:   if(state.trackTimer){
+  1209:     clearInterval(state.trackTimer);
+  1210:     state.trackTimer = null;
+  1211:   }
+  1212: }
+  1213: 
+  1214: async function stopRideRealtime(){
+  1215:   if(!rideRealtimeChannel) return;
+  1216:   try{
+  1217:     await supa.removeChannel(rideRealtimeChannel);
+  1218:   }catch(_){ }
+  1219:   rideRealtimeChannel = null;
+  1220: }
+  1221: 
+  1222: async function stopDriverLocationRealtime(){
+  1223:   if(!driverLocationRealtimeChannel) return;
+  1224:   try{
+  1225:     await supa.removeChannel(driverLocationRealtimeChannel);
+  1226:   }catch(_){ }
+  1227:   driverLocationRealtimeChannel = null;
+  1228: }
+  1229: 
+  1230: async function startDriverLocationRealtime(driverUserId){
+  1231:   const id = String(driverUserId || "").trim();
+  1232:   if(!id) return;
+  1233:   if(state.driverUserId === id && driverLocationRealtimeChannel) return;
+  1234:   await stopDriverLocationRealtime();
+  1235:   state.driverUserId = id;
+  1236: 
+  1237:   const channelName = `ride-driver-loc-${id}-${Date.now()}`;
+  1238:   driverLocationRealtimeChannel = supa.channel(channelName);
+  1239:   driverLocationRealtimeChannel
+  1240:     .on("postgres_changes", {
+  1241:       event: "*",
+  1242:       schema: "public",
+  1243:       table: "local_rider_locations",
+  1244:       filter: `user_id=eq.${id}`
+  1245:     }, (payload) => {
+  1246:       const row = payload?.new || payload?.record || {};
+  1247:       const lat = Number(row?.lat);
+  1248:       const lng = Number(row?.lng);
+  1249:       if(!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  1250:       state.driverLat = lat;
+  1251:       state.driverLng = lng;
+  1252:       updateDriverMarker();
+  1253:       updateDriverGuide();
+  1254:       if(state.pickupLat != null && state.pickupLng != null){
+  1255:         const etaKm = haversineKm(lat, lng, state.pickupLat, state.pickupLng);
+  1256:         const etaMin = Math.max(1, Math.round((etaKm / 24) * 60));
+  1257:         document.getElementById("driverEta").textContent = `ETA ${etaMin} min`;
+  1258:       }
+  1259:       if(state.phase === "trip"){
+  1260:         updateTripStats();
+  1261:       }
+  1262:     })
+  1263:     .subscribe((status) => {
+  1264:       if(status === "CHANNEL_ERROR"){
+  1265:         stopDriverLocationRealtime().catch(() => {});
+  1266:       }
+  1267:     });
+  1268: }
+  1269: 
+  1270: async function startRideRealtime(requestId){
+  1271:   const reqId = String(requestId || "").trim();
+  1272:   if(!reqId) return;
+  1273:   if(rideRealtimeChannel && state.requestId === reqId) return;
+  1274:   await stopRideRealtime();
+  1275: 
+  1276:   const channelName = `ride-status-${reqId}-${Date.now()}`;
+  1277:   rideRealtimeChannel = supa.channel(channelName);
+  1278:   rideRealtimeChannel
+  1279:     .on("postgres_changes", {
+  1280:       event: "*",
+  1281:       schema: "public",
+  1282:       table: "local_ride_requests",
+  1283:       filter: `id=eq.${reqId}`
+  1284:     }, (payload) => {
+  1285:       const row = payload?.new || payload?.record || {};
+  1286:       const status = rideStatusPublic(row?.status);
+  1287:       const driverUserId = String(row?.driver_user_id || "").trim();
+  1288:       if(driverUserId){
+  1289:         startDriverLocationRealtime(driverUserId).catch(() => {});
+  1290:       }
+  1291:       if(status === "cancelled" || status === "completed"){
+  1292:         stopDriverLocationRealtime().catch(() => {});
+  1293:       }
+  1294:       pollRideTrack().catch(() => {});
+  1295:     })
+  1296:     .subscribe((status) => {
+  1297:       if(status === "CHANNEL_ERROR"){
+  1298:         stopRideRealtime().catch(() => {});
+  1299:       }
+  1300:     });
+  1301: }
+  1302: 
+  1303: function updateDriverGuide(){
+  1304:   clearDriverGuide();
+  1305:   if(!map || state.driverLat == null || state.driverLng == null) return;
+  1306:   const onTrip = state.phase === "trip";
+  1307:   const toLat = onTrip ? state.dropLat : state.pickupLat;
+  1308:   const toLng = onTrip ? state.dropLng : state.pickupLng;
+  1309:   if(toLat == null || toLng == null) return;
+  1310:   driverGuideLine = L.polyline([[state.driverLat, state.driverLng], [toLat, toLng]], {
+  1311:     color: onTrip ? "#16a34a" : "#f97316",
+  1312:     weight: 4,
+  1313:     dashArray: onTrip ? undefined : "8,8"
+  1314:   }).addTo(map);
+  1315: }
+  1316: 
+  1317: function applyDriverFromTrack(track, status){
+  1318:   const profile = track?.driver_profile || {};
+  1319:   const loc = track?.driver_location || {};
+  1320:   const ride = track?.ride_request || {};
+  1321:   const publicStatus = rideStatusPublic(status);
+  1322:   const driverUserId = String(ride?.driver_user_id || "").trim();
+  1323:   const driverName = String(profile?.name || "Assigned Driver").trim() || "Assigned Driver";
+  1324:   const image = String(profile?.image_url || "").trim();
+  1325:   const phone = String(track?.driver_phone || "").trim();
+  1326: 
+  1327:   document.getElementById("driverName").textContent = driverName;
+  1328:   document.getElementById("driverMeta").textContent = `Vehicle ${String(PRICING[state.vehicle]?.label || state.vehicle).toUpperCase()} | ${rideStatusLabel(publicStatus)}`;
+  1329:   document.getElementById("confirmedStatus").textContent = `Status: ${rideStatusLabel(publicStatus)}`;
+  1330:   document.getElementById("driverPhone").textContent = phone ? `Phone: ${phone}` : "Phone: unavailable";
+  1331:   document.getElementById("driverPhoto").src = image || "Images/no-image.jpg";
+  1332:   if(driverUserId){
+  1333:     startDriverLocationRealtime(driverUserId).catch(() => {});
+  1334:   }
+  1335: 
+  1336:   const callBtn = document.getElementById("callDriverBtn");
+  1337:   callBtn.href = phone ? `tel:${phone}` : "#";
+  1338:   callBtn.style.opacity = phone ? "1" : "0.6";
+  1339: 
+  1340:   const dLat = Number(loc?.lat);
+  1341:   const dLng = Number(loc?.lng);
+  1342:   if(Number.isFinite(dLat) && Number.isFinite(dLng)){
+  1343:     state.driverLat = dLat;
+  1344:     state.driverLng = dLng;
+  1345:     updateDriverMarker();
+  1346:     updateDriverGuide();
+  1347: 
+  1348:     if(state.pickupLat != null && state.pickupLng != null){
+  1349:       const etaKm = haversineKm(dLat, dLng, state.pickupLat, state.pickupLng);
+  1350:       const etaMin = Math.max(1, Math.round((etaKm / 24) * 60));
+  1351:       document.getElementById("driverEta").textContent = `ETA ${etaMin} min`;
+  1352:     }
+  1353:   }
+  1354: }
+  1355: 
+  1356: function updateTripStats(){
+  1357:   let remainKm = 0;
+  1358:   if(state.driverLat != null && state.driverLng != null && state.dropLat != null && state.dropLng != null){
+  1359:     remainKm = haversineKm(state.driverLat, state.driverLng, state.dropLat, state.dropLng);
+  1360:   }else{
+  1361:     remainKm = Number(state.distanceKm || 0);
+  1362:   }
+  1363:   const etaMin = Math.max(1, Math.round((remainKm / 24) * 60));
+  1364:   document.getElementById("remainText").textContent = `Distance remaining: ${remainKm.toFixed(1)} km`;
+  1365:   document.getElementById("tripEtaText").textContent = `ETA: ${etaMin} min`;
+  1366: }
+  1367: 
+  1368: async function rematchRide(){
+  1369:   if(!state.requestId || state.phase !== "matching") return;
+  1370:   const me = await ensureMe();
+  1371:   if(!me) return;
+  1372:   const rematch = await apiPost("/api/local/rides/rematch", {
+  1373:     request_id: state.requestId,
+  1374:     rider_user_id: me.id,
+  1375:     pickup_lat: state.pickupLat,
+  1376:     pickup_lng: state.pickupLng
+  1377:   });
+  1378:   if(rematch?.ok){
+  1379:     const offered = Number(rematch?.newly_offered_count || 0);
+  1380:     setMatchingText(offered > 0 ? `Offered to ${offered} new driver(s)...` : "Still checking next nearest rider...");
+  1381:   }
+  1382: }
+  1383: 
+  1384: function startMatchingAndTrackLoops(){
+  1385:   stopMatchingLoop();
+  1386:   stopTrackLoop();
+  1387:   state.matchSecond = 0;
+  1388:   setMatchingTimerText("Elapsed: 0s");
+  1389:   state.matchTimer = setInterval(() => {
+  1390:     state.matchSecond += 1;
+  1391:     setMatchingTimerText(`Elapsed: ${state.matchSecond}s`);
+  1392:     if(state.matchSecond % REMATCH_INTERVAL_SEC === 0){
+  1393:       rematchRide().catch(() => {});
+  1394:     }
+  1395:   }, 1000);
+  1396: 
+  1397:   state.trackTimer = setInterval(() => {
+  1398:     pollRideTrack().catch(() => {});
+  1399:   }, TRACK_INTERVAL_MS);
+  1400: }
+  1401: 
+  1402: function startTrackLoopOnly(){
+  1403:   stopTrackLoop();
+  1404:   state.trackTimer = setInterval(() => {
+  1405:     pollRideTrack().catch(() => {});
+  1406:   }, TRACK_INTERVAL_MS);
+  1407: }
+  1408: 
+  1409: async function pollRideTrack(){
+  1410:   if(!state.requestId) return;
+  1411:   const track = await apiGet(`/api/local/rides/track?request_id=${encodeURIComponent(state.requestId)}`);
+  1412:   if(!track?.ok) return;
+  1413:   const rideRow = track?.ride_request || {};
+  1414:   const status = rideStatusPublic(rideRow?.status);
+  1415:   const driverUserId = String(rideRow?.driver_user_id || "").trim();
+  1416:   if(driverUserId){
+  1417:     state.driverUserId = driverUserId;
+  1418:     startDriverLocationRealtime(driverUserId).catch(() => {});
+  1419:   }
+  1420: 
+  1421:   if(status === "searching"){
+  1422:     if(state.phase !== "matching"){
+  1423:       setPhase("matching");
+  1424:       startMatchingAndTrackLoops();
+  1425:     }
+  1426:     saveState();
+  1427:     return;
+  1428:   }
+  1429: 
+  1430:   if(status === "accepted" || isRideArrived(status)){
+  1431:     stopMatchingLoop();
+  1432:     setPhase("confirmed");
+  1433:     applyDriverFromTrack(track, status);
+  1434:     saveState();
+  1435:     return;
+  1436:   }
+  1437: 
+  1438:   if(isRideStarted(status)){
+  1439:     stopMatchingLoop();
+  1440:     setPhase("trip");
+  1441:     applyDriverFromTrack(track, status);
+  1442:     updateTripStats();
+  1443:     saveState();
+  1444:     return;
+  1445:   }
+  1446: 
+  1447:   if(status === "completed"){
+  1448:     stopMatchingLoop();
+  1449:     stopTrackLoop();
+  1450:     await stopDriverLocationRealtime();
+  1451:     await stopRideRealtime();
+  1452:     setPhase("done");
+  1453:     await renderRideSummary();
+  1454:     saveState();
+  1455:     return;
+  1456:   }
+  1457: 
+  1458:   if(status === "cancelled" || status === "rejected"){
+  1459:     stopMatchingLoop();
+  1460:     stopTrackLoop();
+  1461:     await stopDriverLocationRealtime();
+  1462:     await stopRideRealtime();
+  1463:     await resetRideFlow(true);
+  1464:   }
+  1465: }
+  1466: 
+  1467: async function requestRide(){
+  1468:   const me = await ensureMe();
+  1469:   if(!me) return;
+  1470:   state.pickupLandmark = String(document.getElementById("pickupLandmarkInput")?.value || state.pickupLandmark || "").trim().slice(0, 120);
+  1471:   state.dropLandmark = String(document.getElementById("dropLandmarkInput")?.value || state.dropLandmark || "").trim().slice(0, 120);
+  1472:   if(state.pickupLat == null || state.pickupLng == null){
+  1473:     setRideHint("Pickup not detected yet. Tap Current Location.");
+  1474:     return;
+  1475:   }
+  1476:   if(state.dropLat == null || state.dropLng == null){
+  1477:     setRideHint("Please set destination first.");
+  1478:     return;
+  1479:   }
+  1480: 
+  1481:   const roleOk = await ensureConsumerRole();
+  1482:   if(!roleOk){
+  1483:     setRideHint("Consumer role setup failed. Retry in few seconds.");
+  1484:     return;
+  1485:   }
+  1486: 
+  1487:   const fareRes = await apiPost("/api/local/rides/fare-estimate", {
+  1488:     pickup_lat: state.pickupLat,
+  1489:     pickup_lng: state.pickupLng,
+  1490:     drop_lat: state.dropLat,
+  1491:     drop_lng: state.dropLng,
+  1492:     vehicle_type: state.vehicle,
+  1493:     distance_km: state.distanceKm,
+  1494:     duration_min: state.durationMin
+  1495:   });
+  1496:   if(fareRes?.ok && fareRes?.estimate?.fare_inr){
+  1497:     state.fare = Number(fareRes.estimate.fare_inr);
+  1498:   }
+  1499: 
+  1500:   const req = await apiPost("/api/local/rides/request", {
+  1501:     user_id: me.id,
+  1502:     pickup_lat: state.pickupLat,
+  1503:     pickup_lng: state.pickupLng,
+  1504:     drop_lat: state.dropLat,
+  1505:     drop_lng: state.dropLng,
+  1506:     pickup_text: composePlaceText(state.pickupText || "Pickup", state.pickupLandmark).slice(0, 160),
+  1507:     drop_text: composePlaceText(state.dropText || "Drop", state.dropLandmark).slice(0, 160),
+  1508:     vehicle_type: state.vehicle,
+  1509:     payment_method: document.getElementById("paymentMethod").value,
+  1510:     fare_inr: state.fare,
+  1511:     distance_km: state.distanceKm,
+  1512:     duration_min: state.durationMin
+  1513:   });
+  1514: 
+  1515:   if(!req?.ok || !req?.ride_request?.id){
+  1516:     const msg = String(req?.message || req?.error || "Ride request failed");
+  1517:     setRideHint(msg);
+  1518:     return;
+  1519:   }
+  1520: 
+  1521:   state.requestId = String(req.ride_request.id || "").trim();
+  1522:   setPhase("matching");
+  1523:   setMatchingText("Searching in 3km...");
+  1524:   startRideRealtime(state.requestId).catch(() => {});
+  1525:   startMatchingAndTrackLoops();
+  1526:   saveState();
+  1527: }
+  1528: 
+  1529: async function verifyOtp(){
+  1530:   const me = await ensureMe();
+  1531:   if(!me || !state.requestId) return;
+  1532:   const otp = String(document.getElementById("otpInput").value || "").trim();
+  1533:   if(!otp){
+  1534:     document.getElementById("confirmedStatus").textContent = "Status: enter OTP first";
+  1535:     return;
+  1536:   }
+  1537:   const out = await apiPost("/api/local/rides/otp/verify", {
+  1538:     request_id: state.requestId,
+  1539:     rider_user_id: me.id,
+  1540:     otp
+  1541:   });
+  1542:   if(!out?.ok){
+  1543:     document.getElementById("confirmedStatus").textContent = "Status: invalid OTP";
+  1544:     return;
+  1545:   }
+  1546:   setPhase("trip");
+  1547:   updateTripStats();
+  1548:   saveState();
+  1549: }
+  1550: 
+  1551: async function cancelRideAsRider(){
+  1552:   const me = await ensureMe();
+  1553:   if(!me || !state.requestId) return;
+  1554:   await apiPost("/api/local/rides/cancel", {
+  1555:     request_id: state.requestId,
+  1556:     user_id: me.id,
+  1557:     by: "rider"
+  1558:   });
+  1559:   await resetRideFlow(true);
+  1560: }
+  1561: 
+  1562: async function renderRideSummary(){
+  1563:   const tipRaw = Number(document.getElementById("tipInput").value || 0);
+  1564:   const tip = Number.isFinite(tipRaw) && tipRaw > 0 ? tipRaw : 0;
+  1565:   const summary = await apiGet(`/api/local/rides/summary?request_id=${encodeURIComponent(state.requestId)}&vehicle_type=${encodeURIComponent(state.vehicle)}&tip_inr=${encodeURIComponent(String(tip))}`);
+  1566: 
+  1567:   let fare = Number(state.fare || 0);
+  1568:   let driver = Number((fare * 0.9).toFixed(2));
+  1569:   let total = Number((fare + tip).toFixed(2));
+  1570: 
+  1571:   if(summary?.ok && summary?.summary){
+  1572:     fare = Number(summary.summary.fare_inr || fare);
+  1573:     driver = Number(summary.summary.driver_earning_inr || driver);
+  1574:     total = Number(summary.summary.total_fare_inr || total);
+  1575:   }
+  1576: 
+  1577:   document.getElementById("fareOut").textContent = money(fare);
+  1578:   document.getElementById("driverOut").textContent = money(driver);
+  1579:   document.getElementById("totalOut").textContent = money(total);
+  1580: }
+  1581: 
+  1582: async function resetRideFlow(keepPickup){
+  1583:   stopMatchingLoop();
+  1584:   stopTrackLoop();
+  1585:   await stopRideRealtime();
+  1586:   await stopDriverLocationRealtime();
+  1587: 
+  1588:   state.requestId = "";
+  1589:   state.matchSecond = 0;
+  1590:   state.driverUserId = "";
+  1591:   state.driverLat = null;
+  1592:   state.driverLng = null;
+  1593: 
+  1594:   if(routeLine && map){ map.removeLayer(routeLine); routeLine = null; }
+  1595:   if(dropMarker && map){ map.removeLayer(dropMarker); dropMarker = null; }
+  1596:   if(driverMarker && map){ map.removeLayer(driverMarker); driverMarker = null; }
+  1597:   clearDriverGuide();
+  1598: 
+  1599:   state.dropLat = null;
+  1600:   state.dropLng = null;
+  1601:   state.dropText = "";
+  1602:   state.dropLandmark = "";
+  1603:   state.distanceKm = 0;
+  1604:   state.durationMin = 0;
+  1605:   state.fare = 0;
+  1606: 
+  1607:   document.getElementById("dropInput").value = "";
+  1608:   document.getElementById("dropLandmarkInput").value = "";
+  1609:   document.getElementById("whereToInput").value = "";
+  1610:   document.getElementById("otpInput").value = "";
+  1611: 
+  1612:   if(!keepPickup){
+  1613:     state.pickupLat = null;
+  1614:     state.pickupLng = null;
+  1615:     state.pickupText = "";
+  1616:     state.pickupLandmark = "";
+  1617:     document.getElementById("pickupLandmarkInput").value = "";
+  1618:     if(pickupMarker && map){ map.removeLayer(pickupMarker); pickupMarker = null; }
+  1619:   }
+  1620: 
+  1621:   setPhase("idle");
+  1622:   clearState();
+  1623:   document.getElementById("routeMeta").textContent = "Set destination to see fare and ETA.";
+  1624:   renderVehicleList();
+  1625: 
+  1626:   if(state.phase === "idle"){
+  1627:     await fetchNearbyDrivers();
+  1628:   }
+  1629: }
+  1630: 
+  1631: function setActiveView(view){
+  1632:   const ride = document.getElementById("rideView");
+  1633:   const food = document.getElementById("foodView");
+  1634:   const agent = document.getElementById("agentView");
+  1635: 
+  1636:   ride.classList.toggle("hide", view !== "ride");
+  1637:   food.classList.toggle("hide", view !== "food");
+  1638:   agent.classList.toggle("hide", view !== "agent");
+  1639: 
+  1640:   document.querySelectorAll(".nav-item").forEach((btn) => {
+  1641:     btn.classList.toggle("active", btn.getAttribute("data-nav") === view);
+  1642:   });
+  1643: 
+  1644:   if(view === "ride" && map){
+  1645:     setTimeout(() => map.invalidateSize(), 80);
+  1646:   }
+  1647: }
+  1648: 
+  1649: async function restoreStateIfPresent(){
+  1650:   const saved = loadState();
+  1651:   if(!saved || !shouldRestoreSavedState(saved)) return;
+  1652: 
+  1653:   state.requestId = String(saved.requestId || "").trim();
+  1654:   state.phase = String(saved.phase || "idle").trim() || "idle";
+  1655:   state.vehicle = PRICING[saved.vehicle] ? saved.vehicle : "auto";
+  1656:   state.pickupLat = Number.isFinite(Number(saved.pickupLat)) ? Number(saved.pickupLat) : null;
+  1657:   state.pickupLng = Number.isFinite(Number(saved.pickupLng)) ? Number(saved.pickupLng) : null;
+  1658:   state.dropLat = Number.isFinite(Number(saved.dropLat)) ? Number(saved.dropLat) : null;
+  1659:   state.dropLng = Number.isFinite(Number(saved.dropLng)) ? Number(saved.dropLng) : null;
+  1660:   state.pickupText = String(saved.pickupText || "").trim().slice(0, 160);
+  1661:   state.dropText = String(saved.dropText || "").trim().slice(0, 160);
+  1662:   state.pickupLandmark = String(saved.pickupLandmark || "").trim().slice(0, 120);
+  1663:   state.dropLandmark = String(saved.dropLandmark || "").trim().slice(0, 120);
+  1664:   state.distanceKm = Number(saved.distanceKm || 0);
+  1665:   state.durationMin = Number(saved.durationMin || 0);
+  1666:   state.fare = Number(saved.fare || 0);
+  1667: 
+  1668:   document.getElementById("pickupInput").value = state.pickupText;
+  1669:   document.getElementById("dropInput").value = state.dropText;
+  1670:   document.getElementById("pickupLandmarkInput").value = state.pickupLandmark;
+  1671:   document.getElementById("dropLandmarkInput").value = state.dropLandmark;
+  1672:   document.getElementById("whereToInput").value = state.dropText;
+  1673: 
+  1674:   if(state.pickupLat != null && state.pickupLng != null){
+  1675:     setPickupMarker();
+  1676:     updateLiveAddressLabel(state.pickupText || "detecting...");
+  1677:   }
+  1678:   if(state.dropLat != null && state.dropLng != null){
+  1679:     setDropMarker();
+  1680:     await loadRouteAndFare();
+  1681:   }
+  1682: 
+  1683:   if(state.requestId && ["matching", "confirmed", "trip", "done"].includes(state.phase)){
+  1684:     setPhase(state.phase === "done" ? "matching" : state.phase);
+  1685:     startRideRealtime(state.requestId).catch(() => {});
+  1686:     if(state.phase === "matching"){
+  1687:       startMatchingAndTrackLoops();
+  1688:     }else{
+  1689:       stopMatchingLoop();
+  1690:       startTrackLoopOnly();
+  1691:     }
+  1692:     await pollRideTrack();
+  1693:   }else{
+  1694:     setPhase("idle");
+  1695:   }
+  1696: }
+  1697: 
+  1698: function bindRideEvents(){
+  1699:   const whereInput = document.getElementById("whereToInput");
+  1700:   const dropInput = document.getElementById("dropInput");
+  1701:   const pickupInput = document.getElementById("pickupInput");
+  1702:   const pickupLandmarkInput = document.getElementById("pickupLandmarkInput");
+  1703:   const dropLandmarkInput = document.getElementById("dropLandmarkInput");
+  1704: 
+  1705:   document.getElementById("whereSetBtn").onclick = () => {
+  1706:     handleDestinationInput(whereInput.value).catch(() => {});
+  1707:   };
+  1708: 
+  1709:   whereInput.addEventListener("keydown", (e) => {
+  1710:     if(e.key === "Enter"){
+  1711:       e.preventDefault();
+  1712:       hideSuggestPopup();
+  1713:       handleDestinationInput(whereInput.value).catch(() => {});
+  1714:     }
+  1715:   });
+  1716:   whereInput.addEventListener("input", () => {
+  1717:     scheduleLandmarkSuggest("whereToInput", async (place) => {
+  1718:       await setDrop(Number(place?.lat), Number(place?.lng), true, String(place?.name || ""));
+  1719:       await loadRouteAndFare();
+  1720:     });
+  1721:   });
+  1722:   whereInput.addEventListener("focus", () => {
+  1723:     scheduleLandmarkSuggest("whereToInput", async (place) => {
+  1724:       await setDrop(Number(place?.lat), Number(place?.lng), true, String(place?.name || ""));
+  1725:       await loadRouteAndFare();
+  1726:     });
+  1727:   });
+  1728: 
+  1729:   dropInput.addEventListener("keydown", (e) => {
+  1730:     if(e.key === "Enter"){
+  1731:       e.preventDefault();
+  1732:       hideSuggestPopup();
+  1733:       handleDestinationInput(dropInput.value).catch(() => {});
+  1734:     }
+  1735:   });
+  1736:   dropInput.addEventListener("input", () => {
+  1737:     scheduleLandmarkSuggest("dropInput", async (place) => {
+  1738:       await setDrop(Number(place?.lat), Number(place?.lng), true, String(place?.name || ""));
+  1739:       await loadRouteAndFare();
+  1740:     });
+  1741:   });
+  1742:   dropInput.addEventListener("focus", () => {
+  1743:     scheduleLandmarkSuggest("dropInput", async (place) => {
+  1744:       await setDrop(Number(place?.lat), Number(place?.lng), true, String(place?.name || ""));
+  1745:       await loadRouteAndFare();
+  1746:     });
+  1747:   });
+  1748: 
+  1749:   pickupInput.addEventListener("keydown", (e) => {
+  1750:     if(e.key === "Enter"){
+  1751:       e.preventDefault();
+  1752:       hideSuggestPopup();
+  1753:       const q = String(pickupInput.value || "").trim();
+  1754:       if(!q) return;
+  1755:       geocode(q).then(async (found) => {
+  1756:         if(!found) return;
+  1757:         state.pickupMode = "manual";
+  1758:         state.pickupText = String(found.name || q).slice(0, 160);
+  1759:         await setPickup(Number(found.lat), Number(found.lng), false);
+  1760:       }).catch(() => {});
+  1761:     }
+  1762:   });
+  1763:   pickupInput.addEventListener("input", () => {
+  1764:     scheduleLandmarkSuggest("pickupInput", async (place) => {
+  1765:       state.pickupMode = "manual";
+  1766:       state.pickupText = String(place?.name || "").slice(0, 160);
+  1767:       await setPickup(Number(place?.lat), Number(place?.lng), false);
+  1768:     });
+  1769:   });
+  1770:   pickupInput.addEventListener("focus", () => {
+  1771:     scheduleLandmarkSuggest("pickupInput", async (place) => {
+  1772:       state.pickupMode = "manual";
+  1773:       state.pickupText = String(place?.name || "").slice(0, 160);
+  1774:       await setPickup(Number(place?.lat), Number(place?.lng), false);
+  1775:     });
+  1776:   });
+  1777: 
+  1778:   pickupLandmarkInput.addEventListener("input", () => {
+  1779:     state.pickupLandmark = String(pickupLandmarkInput.value || "").trim().slice(0, 120);
+  1780:     saveState();
+  1781:   });
+  1782:   dropLandmarkInput.addEventListener("input", () => {
+  1783:     state.dropLandmark = String(dropLandmarkInput.value || "").trim().slice(0, 120);
+  1784:     saveState();
+  1785:   });
+  1786: 
+  1787:   document.getElementById("locBtn").onclick = () => {
+  1788:     focusCurrentLocation().catch(() => {});
+  1789:   };
+  1790: 
+  1791:   document.getElementById("confirmRideBtn").onclick = () => {
+  1792:     requestRide().catch(() => {});
+  1793:   };
+  1794: 
+  1795:   document.getElementById("cancelMatchingBtn").onclick = () => {
+  1796:     cancelRideAsRider().catch(() => {});
+  1797:   };
+  1798: 
+  1799:   document.getElementById("cancelAfterAcceptBtn").onclick = () => {
+  1800:     cancelRideAsRider().catch(() => {});
+  1801:   };
+  1802: 
+  1803:   document.getElementById("verifyOtpBtn").onclick = () => {
+  1804:     verifyOtp().catch(() => {});
+  1805:   };
+  1806: 
+  1807:   document.getElementById("checkCompleteBtn").onclick = () => {
+  1808:     pollRideTrack().catch(() => {});
+  1809:   };
+  1810: 
+  1811:   document.getElementById("sosBtn").onclick = () => {
+  1812:     location.href = "tel:112";
+  1813:   };
+  1814: 
+  1815:   document.getElementById("tipInput").addEventListener("change", () => {
+  1816:     if(state.phase === "done"){
+  1817:       renderRideSummary().catch(() => {});
+  1818:     }
+  1819:   });
+  1820: 
+  1821:   document.getElementById("bookAgainBtn").onclick = () => {
+  1822:     resetRideFlow(true).catch(() => {});
+  1823:   };
+  1824: 
+  1825:   document.querySelectorAll(".nav-item").forEach((btn) => {
+  1826:     btn.addEventListener("click", () => {
+  1827:       const nav = String(btn.getAttribute("data-nav") || "").trim();
+  1828:       if(nav === "home"){
+  1829:         location.href = "index.html";
+  1830:         return;
+  1831:       }
+  1832:       if(nav === "account"){
+  1833:         location.href = "f-account.html";
+  1834:         return;
+  1835:       }
+  1836:       if(nav === "food"){
+  1837:         setActiveView("food");
+  1838:         return;
+  1839:       }
+  1840:       if(nav === "agent"){
+  1841:         setActiveView("agent");
+  1842:         return;
+  1843:       }
+  1844:       setActiveView("ride");
+  1845:     });
+  1846:   });
+  1847: }
+  1848: 
+  1849: async function bootRidePage(){
+  1850:   ensureRideExtrasUI();
+  1851:   ensureSuggestPopup();
+  1852:   renderRecentDestinations();
+  1853:   initMap();
+  1854:   bindRideEvents();
+  1855:   renderVehicleList();
+  1856:   setPhase("idle");
+  1857:   setActiveView("ride");
+  1858: 
+  1859:   await ensureMe();
+  1860:   await restoreStateIfPresent();
+  1861: 
+  1862:   startGpsWatch();
+  1863:   startNearbyLoop();
+  1864: 
+  1865:   if(state.phase === "idle"){
+  1866:     await fetchNearbyDrivers();
+  1867:   }
+  1868: 
+  1869:   window.addEventListener("beforeunload", () => {
+  1870:     stopGpsWatch();
+  1871:     stopNearbyLoop();
+  1872:     stopRideRealtime().catch(() => {});
+  1873:     stopDriverLocationRealtime().catch(() => {});
+  1874:     hideSuggestPopup();
+  1875:   });
+  1876: 
+  1877:   document.addEventListener("visibilitychange", () => {
+  1878:     if(document.visibilityState === "visible"){
+  1879:       startGpsWatch();
+  1880:       if(state.requestId){
+  1881:         startRideRealtime(state.requestId).catch(() => {});
+  1882:         pollRideTrack().catch(() => {});
+  1883:       }
+  1884:       if(state.phase === "idle"){
+  1885:         fetchNearbyDrivers().catch(() => {});
+  1886:       }
+  1887:     }
+  1888:   });
+  1889: }
+  1890: 
+  1891: bootRidePage().catch((err) => {
+  1892:   console.error("ride_boot_failed", err);
+  1893: });
+  1894: </script>
+  1895: </body>
+  1896: </html>

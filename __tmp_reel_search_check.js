@@ -1,0 +1,1767 @@
+
+const reelWrapper = document.getElementById("reelWrapper");
+const reelInput = document.getElementById("reelInput");
+const emptyState = document.getElementById("emptyState");
+const commentsBackdrop = document.getElementById("commentsBackdrop");
+const commentsPanel = document.getElementById("commentsPanel");
+const commentsList = document.getElementById("commentsList");
+const commentInput = document.getElementById("commentInput");
+const commentSend = document.getElementById("commentSend");
+const commentsClose = document.getElementById("commentsClose");
+const commentReplying = document.getElementById("commentReplying");
+const commentReplyLabel = document.getElementById("commentReplyLabel");
+const commentReplyCancel = document.getElementById("commentReplyCancel");
+const shareBackdrop = document.getElementById("shareBackdrop");
+const shareSheet = document.getElementById("shareSheet");
+const shareClose = document.getElementById("shareClose");
+const shareChatList = document.getElementById("shareChatList");
+const shareButtons = Array.from(document.querySelectorAll("[data-share]"));
+const shopBackdrop = document.getElementById("shopBackdrop");
+const shopSheet = document.getElementById("shopSheet");
+const shopTitle = document.getElementById("shopTitle");
+const shopClose = document.getElementById("shopClose");
+const shopList = document.getElementById("shopList");
+const reelSearchToggle = document.getElementById("reelSearchToggle");
+const reelSearchPanel = document.getElementById("reelSearchPanel");
+const reelSearchInput = document.getElementById("reelSearchInput");
+const reelSearchSubmit = document.getElementById("reelSearchSubmit");
+const reelSearchClear = document.getElementById("reelSearchClear");
+const reelSearchStatus = document.getElementById("reelSearchStatus");
+
+let page = 0;
+let loading = false;
+let done = false;
+const PAGE_SIZE = 4;
+const SEARCH_DELAY_MS = 2300;
+const SEARCH_FETCH_LIMIT = 180;
+let searchMode = false;
+let searchBusy = false;
+let activeSearchTerm = "";
+let searchToken = 0;
+function hasNovaClient(){
+  return Boolean(window.NOVA && window.NOVA.supa && typeof window.NOVA.getUser === "function");
+}
+
+async function ensureNovaClientReady(timeoutMs){
+  const timeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : 4500;
+  const start = Date.now();
+  while(Date.now() - start < timeout){
+    if(hasNovaClient()) return true;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  return hasNovaClient();
+}
+
+const currentUserPromise = (async () => {
+  const ready = await ensureNovaClientReady();
+  if(!ready) return null;
+  try{
+    return await window.NOVA.getUser();
+  }catch(_){
+    return null;
+  }
+})();
+const creatorCache = {};
+const commentUserCache = {};
+const followerCountCache = {};
+const SAVE_KEY = "nova_saved_reels";
+const renderedIds = new Set();
+const LAST_REEL_KEY = "nova_last_reel_upload";
+const REEL_SHARE_KEY = "nova_reel_share_count_";
+const viewedInSession = new Set();
+let activeCommentReelId = null;
+let activeCommentCountEl = null;
+let activeCommentOwnerId = "";
+let activeReplyRowId = "";
+let activeEditRowId = "";
+let activeCommentThread = null;
+let activeShareItem = null;
+let activeShareCountEl = null;
+let activeShopOwnerId = "";
+const params = new URLSearchParams(location.search);
+const feedUserId = params.get("uid") || "";
+const focusReelId = params.get("focus") || "";
+let focusApplied = false;
+
+function compactCount(value){
+  const num = Number(value) || 0;
+  if(num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+  if(num >= 1000) return (num / 1000).toFixed(1).replace(/\.0$/, "") + "K";
+  return String(num);
+}
+
+function formatCount(value){
+  const n = Math.max(0, Number(value) || 0);
+  return new Intl.NumberFormat("en-US").format(n);
+}
+
+function sleep(ms){
+  return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function sanitizeSearchText(value){
+  return String(value || "").trim().replace(/\s+/g, " ").slice(0, 80);
+}
+
+function setReelSearchStatus(text){
+  if(reelSearchStatus){
+    reelSearchStatus.textContent = String(text || "");
+  }
+}
+
+function toggleReelSearchBusy(state){
+  const busy = !!state;
+  searchBusy = busy;
+  if(reelSearchInput){
+    reelSearchInput.disabled = busy;
+  }
+  if(reelSearchSubmit){
+    reelSearchSubmit.disabled = busy;
+    reelSearchSubmit.textContent = busy ? "Loading..." : "Go";
+  }
+  if(reelSearchClear){
+    reelSearchClear.disabled = busy;
+  }
+}
+
+function showReelSearchPanel(){
+  if(!reelSearchPanel) return;
+  reelSearchPanel.classList.add("show");
+  if(reelSearchToggle){
+    reelSearchToggle.textContent = "Close";
+  }
+  if(reelSearchInput){
+    setTimeout(() => {
+      reelSearchInput.focus();
+      reelSearchInput.select();
+    }, 0);
+  }
+}
+
+function hideReelSearchPanel(){
+  if(reelSearchPanel){
+    reelSearchPanel.classList.remove("show");
+  }
+  if(reelSearchToggle){
+    reelSearchToggle.textContent = "Search";
+  }
+}
+
+function clearRenderedReels(){
+  reelWrapper.querySelectorAll(".reel").forEach(node => {
+    node.remove();
+  });
+  reelWrapper.querySelectorAll(".reel-ad-wrap").forEach(node => {
+    node.remove();
+  });
+  renderedIds.clear();
+}
+
+function resetFeedCursor(){
+  page = 0;
+  loading = false;
+  done = false;
+  focusApplied = false;
+}
+
+function matchReelSearch(item, needle){
+  const q = String(needle || "").toLowerCase();
+  if(!q) return false;
+  const title = String(item?.title || "").toLowerCase();
+  const description = String(item?.description || "").toLowerCase();
+  const keywords = Array.isArray(item?.keywords)
+    ? item.keywords.map(v => String(v || "").trim()).join(" ")
+    : String(item?.keywords || "");
+  const searchText = `${title} ${description} ${keywords}`.toLowerCase();
+  return searchText.includes(q);
+}
+
+async function fetchSearchCandidates(){
+  const ready = await ensureNovaClientReady();
+  if(!ready){
+    throw new Error("Unable to load reels.");
+  }
+  let query = window.NOVA.supa
+    .from("reels")
+    .select("id,user_id,video_url,thumb_url,title,description,keywords,created_at")
+    .order("created_at", { ascending:false })
+    .limit(SEARCH_FETCH_LIMIT);
+  if(feedUserId){
+    query = query.eq("user_id", feedUserId);
+  }
+  const { data, error } = await query;
+  if(error){
+    throw error;
+  }
+  return Array.isArray(data) ? data : [];
+}
+
+async function runReelSearch(rawText){
+  const queryText = sanitizeSearchText(rawText);
+  if(!queryText){
+    await clearReelSearch();
+    return;
+  }
+
+  searchToken += 1;
+  const token = searchToken;
+  searchMode = true;
+  activeSearchTerm = queryText;
+  toggleReelSearchBusy(true);
+  setReelSearchStatus("Searching reels...");
+  if(emptyState){
+    emptyState.textContent = "Searching reels...";
+    emptyState.style.display = "flex";
+  }
+
+  try{
+    const [rows] = await Promise.all([
+      fetchSearchCandidates(),
+      sleep(SEARCH_DELAY_MS)
+    ]);
+    if(token !== searchToken) return;
+
+    const matches = rows.filter(item => matchReelSearch(item, queryText));
+    clearRenderedReels();
+    loading = false;
+    done = true;
+
+    if(!matches.length){
+      if(emptyState){
+        emptyState.textContent = `No reels found for "${queryText}".`;
+        emptyState.style.display = "flex";
+      }
+      setReelSearchStatus("No reels found.");
+      return;
+    }
+
+    if(emptyState){
+      emptyState.style.display = "none";
+    }
+    for(const item of matches){
+      await renderReel(item);
+    }
+    setReelSearchStatus(`Showing ${formatCount(matches.length)} result(s) for "${queryText}".`);
+  }catch(err){
+    if(token !== searchToken) return;
+    console.error("reel_search_error", err);
+    if(emptyState){
+      emptyState.textContent = "Unable to search reels right now.";
+      emptyState.style.display = "flex";
+    }
+    setReelSearchStatus("Search failed. Please try again.");
+  }finally{
+    if(token === searchToken){
+      toggleReelSearchBusy(false);
+    }
+  }
+}
+
+async function clearReelSearch(){
+  searchToken += 1;
+  searchMode = false;
+  activeSearchTerm = "";
+  toggleReelSearchBusy(false);
+  setReelSearchStatus("");
+  if(reelSearchInput){
+    reelSearchInput.value = "";
+  }
+
+  clearRenderedReels();
+  resetFeedCursor();
+  if(emptyState){
+    emptyState.textContent = "No reels yet";
+    emptyState.style.display = "none";
+  }
+
+  await ensureFocusReelLoaded();
+  loadMore();
+}
+
+if(reelSearchToggle){
+  reelSearchToggle.addEventListener("click", () => {
+    if(reelSearchPanel && reelSearchPanel.classList.contains("show")){
+      hideReelSearchPanel();
+    }else{
+      showReelSearchPanel();
+    }
+  });
+}
+
+if(reelSearchPanel){
+  reelSearchPanel.addEventListener("submit", event => {
+    event.preventDefault();
+    runReelSearch(reelSearchInput?.value || "");
+  });
+}
+
+if(reelSearchClear){
+  reelSearchClear.addEventListener("click", () => {
+    clearReelSearch();
+    showReelSearchPanel();
+  });
+}
+
+if(reelSearchInput){
+  reelSearchInput.addEventListener("keydown", event => {
+    if(event.key === "Escape"){
+      event.preventDefault();
+      hideReelSearchPanel();
+    }
+  });
+}
+
+function insertReelBannerAfter(node){
+  if(!node) return;
+  const adWrap = document.createElement("div");
+  adWrap.className = "reel-ad-wrap";
+  adWrap.style.display = "flex";
+  adWrap.style.justifyContent = "center";
+  adWrap.style.padding = "8px 0";
+  node.insertAdjacentElement("afterend", adWrap);
+
+  const adConfig = document.createElement("script");
+  adConfig.text = `
+  atOptions = {
+    'key' : '46e89ac16d0401b27133419219f055c6',
+    'format' : 'iframe',
+    'height' : 50,
+    'width' : 320,
+    'params' : {}
+  };
+`;
+  adWrap.appendChild(adConfig);
+
+  const adInvoke = document.createElement("script");
+  adInvoke.src = "https://www.highperformanceformat.com/46e89ac16d0401b27133419219f055c6/invoke.js";
+  adWrap.appendChild(adInvoke);
+}
+
+function getReelShareCount(reelId){
+  const key = String(reelId || "");
+  if(!key) return 0;
+  return Math.max(0, Number(localStorage.getItem(REEL_SHARE_KEY + key)) || 0);
+}
+
+function incrementReelShareCount(reelId){
+  const key = String(reelId || "");
+  if(!key) return 0;
+  const next = getReelShareCount(key) + 1;
+  localStorage.setItem(REEL_SHARE_KEY + key, String(next));
+  return next;
+}
+
+function syncOverlayScrollLock(){
+  const commentsOpen = commentsPanel.classList.contains("show");
+  const shareOpen = shareSheet.classList.contains("show");
+  const shopOpen = shopSheet.classList.contains("show");
+  reelWrapper.style.overflowY = (commentsOpen || shareOpen || shopOpen) ? "hidden" : "auto";
+}
+
+function escapeHtml(value){
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function getReelShareUrl(item){
+  const url = new URL("reel.html", location.href);
+  if(item?.user_id) url.searchParams.set("uid", item.user_id);
+  url.searchParams.set("focus", item?.id || "");
+  return url.href;
+}
+
+function getProductDeepLink(productId){
+  const url = new URL("product-details.html", location.href);
+  if(productId) url.searchParams.set("id", String(productId || ""));
+  return url.href;
+}
+
+function parseSafeUrl(urlText){
+  const raw = String(urlText || "").trim();
+  if(!raw) return "";
+  try{
+    const parsed = new URL(raw, location.origin);
+    if(!/^https?:$/i.test(parsed.protocol)) return "";
+    return parsed.href;
+  }catch(_){
+    return "";
+  }
+}
+
+function resolveShopLink(product){
+  const ownLink = parseSafeUrl(
+    product?.product_link ||
+    product?.product_url ||
+    product?.buy_link ||
+    product?.link ||
+    ""
+  );
+  if(ownLink) return ownLink;
+  return getProductDeepLink(product?.id || "");
+}
+
+function formatShopPrice(amount, currency){
+  const value = Number(amount || 0);
+  const code = String(currency || "INR").toUpperCase();
+  if(typeof window.moneyTag === "function"){
+    return window.moneyTag(value, code);
+  }
+  return `${code} ${value}`;
+}
+
+function closeShopSheet(){
+  activeShopOwnerId = "";
+  if(shopList) shopList.innerHTML = "";
+  if(shopSheet) shopSheet.classList.remove("show");
+  if(shopBackdrop) shopBackdrop.classList.remove("show");
+  syncOverlayScrollLock();
+}
+
+function renderShopProducts(products){
+  if(!shopList) return;
+  shopList.innerHTML = "";
+  const list = Array.isArray(products) ? products : [];
+  if(!list.length){
+    shopList.innerHTML = "<div class='shop-empty'>No products available for this reel creator.</div>";
+    return;
+  }
+
+  list.forEach(product => {
+    const row = document.createElement("div");
+    row.className = "shop-item";
+
+    const imageUrl = Array.isArray(product?.images) && product.images.length
+      ? product.images[0]
+      : "";
+    if(imageUrl){
+      const img = document.createElement("img");
+      img.className = "shop-thumb";
+      img.src = String(imageUrl);
+      img.alt = "Product";
+      row.appendChild(img);
+    }else{
+      const fallback = document.createElement("div");
+      fallback.className = "shop-thumb-fallback";
+      fallback.textContent = "No image";
+      row.appendChild(fallback);
+    }
+
+    const meta = document.createElement("div");
+    meta.className = "shop-meta";
+    const title = document.createElement("div");
+    title.className = "shop-name";
+    title.textContent = String(product?.name || "Product");
+    const price = document.createElement("div");
+    price.className = "shop-price";
+    price.textContent = formatShopPrice(product?.price, product?.currency);
+    meta.appendChild(title);
+    meta.appendChild(price);
+    row.appendChild(meta);
+
+    const link = resolveShopLink(product);
+    const openBtn = document.createElement("a");
+    openBtn.className = "shop-open";
+    openBtn.href = link;
+    openBtn.textContent = "Open";
+    openBtn.addEventListener("click", () => {
+      closeShopSheet();
+    });
+    row.appendChild(openBtn);
+
+    shopList.appendChild(row);
+  });
+}
+
+async function openShopSheet(ownerId, ownerName){
+  const cleanOwner = String(ownerId || "").trim();
+  if(!cleanOwner){
+    alert("Shop is unavailable.");
+    return;
+  }
+  if(!window.NOVA || !window.NOVA.supa){
+    alert("Shop is unavailable right now.");
+    return;
+  }
+  activeShopOwnerId = cleanOwner;
+  if(shareSheet && shareSheet.classList.contains("show")){
+    closeShareSheet();
+  }
+  if(commentsPanel && commentsPanel.classList.contains("show")){
+    closeComments();
+  }
+  if(shopTitle){
+    const label = String(ownerName || "Creator").trim() || "Creator";
+    shopTitle.textContent = `${label} Shop`;
+  }
+  if(shopList){
+    shopList.innerHTML = "<div class='shop-empty'>Loading products...</div>";
+  }
+  if(shopBackdrop) shopBackdrop.classList.add("show");
+  if(shopSheet) shopSheet.classList.add("show");
+  syncOverlayScrollLock();
+
+  try{
+    const { data, error } = await window.NOVA.supa
+      .from("products")
+      .select("*")
+      .eq("owner_id", cleanOwner)
+      .order("created_at", { ascending:false })
+      .limit(50);
+    if(error){
+      throw error;
+    }
+    if(activeShopOwnerId !== cleanOwner) return;
+    renderShopProducts(data || []);
+  }catch(_){
+    if(activeShopOwnerId !== cleanOwner) return;
+    if(shopList){
+      shopList.innerHTML = "<div class='shop-empty'>Unable to load products right now.</div>";
+    }
+  }
+}
+
+function formatCommentTime(value){
+  const ts = Date.parse(String(value || ""));
+  if(!Number.isFinite(ts)) return "";
+  const diff = Math.max(1, Math.floor((Date.now() - ts) / 1000));
+  if(diff < 60) return diff + "s";
+  if(diff < 3600) return Math.floor(diff / 60) + "m";
+  if(diff < 86400) return Math.floor(diff / 3600) + "h";
+  if(diff < 604800) return Math.floor(diff / 86400) + "d";
+  return new Date(ts).toLocaleDateString(undefined, { month:"short", day:"numeric" });
+}
+
+async function getViewerSessionKey(){
+  try{
+    const liveViewer = await window.NOVA.getUser();
+    if(liveViewer && liveViewer.id){
+      return "user:" + liveViewer.id;
+    }
+  }catch(_){}
+  try{
+    const viewer = await currentUserPromise;
+    if(viewer && viewer.id){
+      return "user:" + viewer.id;
+    }
+  }catch(_){}
+  return "anon";
+}
+
+async function getReelViewCount(reelId){
+  const key = String(reelId || "");
+  if(!key){
+    return 0;
+  }
+  if(window.NOVA && typeof window.NOVA.getReelViewCount === "function"){
+    try{
+      const count = await window.NOVA.getReelViewCount(key);
+      return Math.max(0, Number(count) || 0);
+    }catch(_){}
+  }
+  return 0;
+}
+
+async function markReelView(reelEl){
+  const reelId = String(reelEl?.dataset?.id || "");
+  if(!reelId) return;
+
+  const viewerKey = await getViewerSessionKey();
+  const sessionKey = `${viewerKey}|${reelId}`;
+  if(viewedInSession.has(sessionKey)) return;
+  viewedInSession.add(sessionKey);
+
+  let nextCount = 0;
+  if(window.NOVA && typeof window.NOVA.markReelView === "function"){
+    try{
+      const result = await window.NOVA.markReelView(reelId);
+      if(result?.ok){
+        nextCount = Math.max(0, Number(result.count) || 0);
+      }
+    }catch(_){}
+  }
+  if(!nextCount){
+    nextCount = await getReelViewCount(reelId);
+  }
+
+  const viewsEl = reelEl.querySelector("[data-views]");
+  if(viewsEl){
+    viewsEl.textContent = `${compactCount(nextCount)} views`;
+  }
+}
+
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    const video = entry.target.querySelector("video");
+    if(!video) return;
+    if(entry.isIntersecting){
+      markReelView(entry.target);
+      if(video.dataset.userPaused !== "1"){
+        video.muted = false;
+        video.volume = 1;
+        video.play().catch(()=>{});
+      }
+    }else{
+      video.pause();
+    }
+  });
+},{ threshold:0.6 });
+
+async function getFollowerCount(userId){
+  const key = String(userId || "");
+  if(!key) return 0;
+  if(Object.prototype.hasOwnProperty.call(followerCountCache, key)){
+    return followerCountCache[key];
+  }
+  try{
+    const { count } = await window.NOVA.supa
+      .from("follows")
+      .select("follower_id", { count:"exact", head:true })
+      .eq("following_id", key);
+    followerCountCache[key] = Number(count || 0);
+    return followerCountCache[key];
+  }catch(_){
+    followerCountCache[key] = 0;
+    return 0;
+  }
+}
+
+async function createReel(){
+  const ready = await ensureNovaClientReady();
+  if(!ready){
+    alert("Reels are not ready. Please refresh and try again.");
+    return;
+  }
+  reelInput.click();
+}
+
+reelInput.onchange = async e => {
+  const ready = await ensureNovaClientReady();
+  if(!ready){
+    alert("Reel upload is unavailable right now.");
+    return;
+  }
+  const file = e.target.files[0];
+  if(!file) return;
+
+  const meta = await window.NOVA.getVideoMeta(file);
+  const isAspectOk = window.NOVA.validateAspect(meta.width, meta.height, 9/16, 0.18);
+  if(!isAspectOk){
+    alert("Reel must be 9:16 video.");
+    return;
+  }
+  if(meta.duration > 120){
+    alert("Reel max length is 2 minutes.");
+    return;
+  }
+
+  const user = await window.NOVA.requireUser();
+  const metaInfo = await window.NOVA.askMeta();
+  const keywordsArray = (metaInfo.keywords || "").split(",").map(k => k.trim());
+  const path = window.NOVA.makePath(user.id, file);
+  const videoUrl = await window.NOVA.uploadToBucket("reels", file, path);
+
+  await window.NOVA.supa.from("reels").insert({
+    user_id: user.id,
+    video_url: videoUrl,
+    thumb_url: metaInfo.thumbUrl || null,
+    title: metaInfo.title || null,
+    description: metaInfo.description || null,
+    keywords: keywordsArray,
+    duration: Math.round(meta.duration),
+    width: meta.width,
+    height: meta.height
+  });
+
+  alert("Reel uploaded");
+  location.href = "reel.html";
+};
+
+async function loadMore(){
+  if(loading || done) return;
+  loading = true;
+  const ready = await ensureNovaClientReady();
+  if(!ready){
+    loading = false;
+    done = true;
+    if(emptyState){
+      emptyState.textContent = "Unable to load reels.";
+      emptyState.style.display = "flex";
+    }
+    return;
+  }
+
+  const from = page * PAGE_SIZE;
+  const to = from + PAGE_SIZE - 1;
+
+  let query = window.NOVA.supa
+    .from("reels")
+    .select("id,user_id,video_url,thumb_url,title,description,created_at")
+    .order("created_at", { ascending:false })
+    .range(from, to);
+  if(feedUserId){
+    query = query.eq("user_id", feedUserId);
+  }
+
+  const { data, error } = await query;
+
+  if(error){
+    console.error(error);
+    if(emptyState){
+      emptyState.textContent = "Unable to load reels.";
+      emptyState.style.display = "flex";
+    }
+    loading = false;
+    return;
+  }
+
+  if(!data || !data.length){
+    done = true;
+    loading = false;
+    return;
+  }
+
+  if(emptyState) emptyState.style.display = "none";
+
+  data.forEach(item => renderReel(item));
+  page += 1;
+  loading = false;
+}
+
+async function renderReel(item, options){
+  if(!item || !item.id) return;
+  if(renderedIds.has(item.id)) return;
+  renderedIds.add(item.id);
+
+  const opts = options || {};
+  const prepend = !!opts.prepend;
+
+  const creator = await getCreatorInfo(item.user_id);
+  const creatorName = creator?.name || "User";
+  const creatorAvatarUrl = creator?.avatarUrl || "";
+  const creatorInitial = (creatorName || "U")[0].toUpperCase();
+
+  const reel = document.createElement("div");
+  reel.className = "reel";
+  reel.dataset.id = String(item.id || "");
+
+  reel.innerHTML = `
+    <div class="reel-stage">
+      <video src="${item.video_url}" playsinline loop></video>
+      <div class="actions">
+        <div class="action-item">
+          <div class="icon-btn" data-action="like">
+            <svg viewBox="0 0 24 24"><path d="M12 21s-6.7-4.35-9.33-7.58C.4 10.68 1.3 6.5 5 5.5c2-.54 4 .3 5 1.5 1-1.2 3-2.04 5-1.5 3.7 1 4.6 5.18 2.33 7.92C18.7 16.65 12 21 12 21z"/></svg>
+          </div>
+          <span class="count" data-like>0</span>
+        </div>
+        <div class="action-item">
+          <div class="icon-btn" data-action="dislike">
+            <svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22L2 9v2h6v9l7.31-7.31c.37-.37.69-.81.94-1.28l1.75-3.49c.11-.23.18-.49.18-.76V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>
+          </div>
+          <span class="count" data-dislike>0</span>
+        </div>
+        <div class="action-item">
+          <div class="icon-btn" data-action="comment">
+            <svg viewBox="0 0 24 24"><path d="M21 6h-18v12h4v4l4-4h10z"/></svg>
+          </div>
+          <span class="count" data-comment>0</span>
+        </div>
+        <div class="action-item">
+          <div class="icon-btn" data-action="share">
+            <svg viewBox="0 0 24 24"><path d="M12 3l9 9-9 9-9-9 9-9z"/></svg>
+          </div>
+          <span class="count" data-share-count>0</span>
+        </div>
+        <div class="action-item">
+          <div class="icon-btn" data-action="download">
+            <svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zm7-18v10.17l3.59-3.58L17 10l-5 5-5-5 1.41-1.41L11 12.17V2h1z"/></svg>
+          </div>
+          <span class="count" data-download-label>Download</span>
+        </div>
+        <div class="action-item">
+          <div class="icon-btn" data-action="shop">
+            <svg viewBox="0 0 24 24"><path d="M7 6V4a5 5 0 0 1 10 0v2h3a1 1 0 0 1 1 1l-1 12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2L3 7a1 1 0 0 1 1-1h3zm2 0h6V4a3 3 0 0 0-6 0v2z"/></svg>
+          </div>
+          <span>Shop</span>
+        </div>
+      </div>
+      <div class="caption">
+        <div class="creator-row">
+          <div class="creator-avatar">
+            ${creatorAvatarUrl ? `<img src="${creatorAvatarUrl}" alt="">` : `<span>${creatorInitial}</span>`}
+          </div>
+          <div class="creator-meta">
+            <div class="creator-name">${creatorName}</div>
+            <div class="creator-sub">
+              <span data-followers>0 followers</span>
+              <span class="dot">|</span>
+              <span data-views>0 views</span>
+            </div>
+          </div>
+          <button class="follow-btn" data-follow>Follow</button>
+        </div>
+        <div class="title-row">
+          <div class="title">${item.title || "Reel"}</div>
+          <button class="more-btn" data-more>...</button>
+          <div class="more-menu" data-menu>
+            <button data-menu-desc>Description</button>
+            <button data-menu-save>Save</button>
+          </div>
+        </div>
+        <div class="desc" data-desc>${item.description || ""}</div>
+      </div>
+    </div>
+  `;
+
+  const firstReel = reelWrapper.querySelector(".reel");
+  if(prepend && firstReel){
+    reelWrapper.insertBefore(reel, firstReel);
+  }else if(sentinel.parentNode === reelWrapper){
+    reelWrapper.insertBefore(reel, sentinel);
+  }else{
+    reelWrapper.appendChild(reel);
+  }
+  const reelCount = reelWrapper.querySelectorAll(".reel").length;
+  if(reelCount % 3 === 0){
+    insertReelBannerAfter(reel);
+  }
+  observer.observe(reel);
+  if(focusReelId && String(item.id) === String(focusReelId)){
+    focusReelElement(reel);
+  }
+
+  const videoEl = reel.querySelector("video");
+  if(videoEl){
+    videoEl.dataset.userPaused = "0";
+  }
+
+  const likeEl = reel.querySelector("[data-like]");
+  const dislikeEl = reel.querySelector("[data-dislike]");
+  const commentEl = reel.querySelector("[data-comment]");
+  const shareCountEl = reel.querySelector("[data-share-count]");
+  const downloadLabelEl = reel.querySelector("[data-download-label]");
+  const likeBtn = reel.querySelector("[data-action='like']");
+  const dislikeBtn = reel.querySelector("[data-action='dislike']");
+  const downloadBtn = reel.querySelector("[data-action='download']");
+  const followBtn = reel.querySelector("[data-follow]");
+  const creatorRow = reel.querySelector(".creator-row");
+  const shopIcon = reel.querySelector("[data-action='shop']");
+  const moreBtn = reel.querySelector("[data-more]");
+  const menu = reel.querySelector("[data-menu]");
+  const descEl = reel.querySelector("[data-desc]");
+  const menuDesc = reel.querySelector("[data-menu-desc]");
+  const menuSave = reel.querySelector("[data-menu-save]");
+  const followersEl = reel.querySelector("[data-followers]");
+  const viewsEl = reel.querySelector("[data-views]");
+
+  const counts = await window.NOVA.getReactionCounts("reel", item.id);
+  const comments = await window.NOVA.getCommentCount("reel", item.id);
+  likeEl.textContent = counts.likes;
+  dislikeEl.textContent = counts.dislikes;
+  commentEl.textContent = formatCount(comments);
+  if(shareCountEl){
+    shareCountEl.textContent = formatCount(getReelShareCount(item.id));
+  }
+  if(viewsEl){
+    viewsEl.textContent = `${compactCount(await getReelViewCount(item.id))} views`;
+  }
+
+  const currentUser = await currentUserPromise;
+  let currentReaction = null;
+  let reactionBusy = false;
+  let tapTimeout = null;
+  let lastTapAt = 0;
+  let pointerStartX = 0;
+  let pointerStartY = 0;
+  let reactionErrorShown = false;
+  let isFollowing = false;
+  let downloadBusy = false;
+  let followerCount = await getFollowerCount(item.user_id);
+
+  function renderFollowerCount(){
+    if(followersEl){
+      followersEl.textContent = `${compactCount(followerCount)} followers`;
+    }
+  }
+  renderFollowerCount();
+
+  async function renderDownloadUi(){
+    if(!downloadBtn || !downloadLabelEl) return;
+    if(downloadBusy){
+      downloadLabelEl.textContent = "Saving...";
+      return;
+    }
+    if(!(window.NOVA_OFFLINE && typeof window.NOVA_OFFLINE.has === "function")){
+      downloadBtn.classList.remove("active");
+      downloadLabelEl.textContent = "Download";
+      return;
+    }
+    try{
+      const saved = await window.NOVA_OFFLINE.has("reel", item.id);
+      downloadBtn.classList.toggle("active", !!saved);
+      downloadLabelEl.textContent = saved ? "Saved" : "Download";
+    }catch(_){
+      downloadBtn.classList.remove("active");
+      downloadLabelEl.textContent = "Download";
+    }
+  }
+  await renderDownloadUi();
+
+  function setReactionButtons(reaction){
+    likeBtn.classList.toggle("active", reaction === "like");
+    dislikeBtn.classList.toggle("active", reaction === "dislike");
+  }
+
+  function applyReactionTransition(prevReaction, nextReaction){
+    let likes = Number(likeEl.textContent || 0);
+    let dislikes = Number(dislikeEl.textContent || 0);
+
+    if(prevReaction === "like") likes = Math.max(0, likes - 1);
+    if(prevReaction === "dislike") dislikes = Math.max(0, dislikes - 1);
+    if(nextReaction === "like") likes += 1;
+    if(nextReaction === "dislike") dislikes += 1;
+
+    likeEl.textContent = likes;
+    dislikeEl.textContent = dislikes;
+  }
+
+  async function refreshCountsFromServer(syncOwnReaction){
+    const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    for(let attempt = 0; attempt < 3; attempt += 1){
+      try{
+        const updated = await window.NOVA.getReactionCounts("reel", item.id);
+        likeEl.textContent = updated.likes;
+        dislikeEl.textContent = updated.dislikes;
+      }catch(_){}
+      if(attempt < 2){
+        await wait(120);
+      }
+    }
+
+    if(syncOwnReaction && currentUser && currentUser.id){
+      try{
+        const { data: latestReaction } = await window.NOVA.supa
+          .from("reactions")
+          .select("reaction")
+          .eq("user_id", currentUser.id)
+          .eq("target_type", "reel")
+          .eq("target_id", item.id)
+          .maybeSingle();
+        currentReaction = latestReaction?.reaction || null;
+        setReactionButtons(currentReaction);
+      }catch(_){}
+    }
+  }
+
+  async function toggleReaction(requestedReaction, forceOn){
+    if(reactionBusy) return;
+    if(forceOn && currentReaction === requestedReaction) return;
+
+    reactionBusy = true;
+    const prevReaction = currentReaction;
+    try{
+      const res = await window.NOVA.toggleReaction("reel", item.id, requestedReaction);
+      const previousFromServer = (res && Object.prototype.hasOwnProperty.call(res, "previousReaction"))
+        ? res.previousReaction
+        : prevReaction;
+      const nextReaction = (res && Object.prototype.hasOwnProperty.call(res, "reaction"))
+        ? (res.reaction || null)
+        : (res && res.active ? requestedReaction : null);
+      applyReactionTransition(previousFromServer, nextReaction);
+      currentReaction = nextReaction;
+      setReactionButtons(currentReaction);
+      await refreshCountsFromServer(true);
+    }catch(err){
+      console.error(err);
+      await refreshCountsFromServer(true);
+      setReactionButtons(currentReaction);
+      if(!reactionErrorShown){
+        reactionErrorShown = true;
+        alert("Reaction update failed. Please refresh and try again.");
+      }
+    }finally{
+      reactionBusy = false;
+    }
+  }
+
+  function toggleVideoPlayback(){
+    if(videoEl.paused){
+      videoEl.dataset.userPaused = "0";
+      videoEl.play().catch(()=>{});
+    }else{
+      videoEl.dataset.userPaused = "1";
+      videoEl.pause();
+    }
+  }
+
+  function setFollowUi(isFollowing){
+    followBtn.textContent = isFollowing ? "Followed" : "Follow";
+    followBtn.classList.toggle("following", !!isFollowing);
+  }
+
+  async function refreshFollowState(){
+    if(!currentUser || !currentUser.id) return false;
+    const { data: followRow } = await window.NOVA.supa
+      .from("follows")
+      .select("following_id")
+      .eq("follower_id", currentUser.id)
+      .eq("following_id", item.user_id)
+      .maybeSingle();
+    isFollowing = !!followRow;
+    setFollowUi(isFollowing);
+    return isFollowing;
+  }
+
+  if(currentUser && currentUser.id){
+    const { data: existingReaction } = await window.NOVA.supa
+      .from("reactions")
+      .select("reaction")
+      .eq("user_id", currentUser.id)
+      .eq("target_type", "reel")
+      .eq("target_id", item.id)
+      .maybeSingle();
+    currentReaction = existingReaction?.reaction || null;
+    setReactionButtons(currentReaction);
+
+    await refreshFollowState();
+  }
+
+  async function handleFollowToggle(e){
+    if(e) e.stopPropagation();
+    if(followBtn.disabled) return;
+    followBtn.disabled = true;
+
+    const prevFollowing = !!isFollowing;
+    try{
+      const res = await window.NOVA.toggleFollow(item.user_id);
+      let nextFollowing = prevFollowing;
+      if(typeof res?.following === "boolean"){
+        nextFollowing = res.following;
+      }else{
+        nextFollowing = await refreshFollowState();
+      }
+
+      if(nextFollowing !== prevFollowing){
+        followerCount = Math.max(0, followerCount + (nextFollowing ? 1 : -1));
+        followerCountCache[String(item.user_id || "")] = followerCount;
+      }
+      isFollowing = nextFollowing;
+      setFollowUi(isFollowing);
+      renderFollowerCount();
+    }finally{
+      followBtn.disabled = false;
+    }
+  }
+
+  likeBtn.onclick = async (e) => {
+    e.stopPropagation();
+    await toggleReaction("like", false);
+  };
+  dislikeBtn.onclick = async (e) => {
+    e.stopPropagation();
+    await toggleReaction("dislike", false);
+  };
+
+  if(videoEl){
+    videoEl.addEventListener("pointerdown", (e) => {
+      pointerStartX = e.clientX;
+      pointerStartY = e.clientY;
+    });
+    videoEl.addEventListener("pointerup", async (e) => {
+      if(e.pointerType === "mouse" && e.button !== 0) return;
+      e.stopPropagation();
+      const movedX = Math.abs(e.clientX - pointerStartX);
+      const movedY = Math.abs(e.clientY - pointerStartY);
+      if(movedX > 18 || movedY > 18){
+        return;
+      }
+
+      const now = Date.now();
+      if(now - lastTapAt <= 280){
+        lastTapAt = 0;
+        if(tapTimeout){
+          clearTimeout(tapTimeout);
+          tapTimeout = null;
+        }
+        await toggleReaction("like", true);
+        return;
+      }
+
+      lastTapAt = now;
+      if(tapTimeout) clearTimeout(tapTimeout);
+      tapTimeout = setTimeout(() => {
+        tapTimeout = null;
+        toggleVideoPlayback();
+      }, 280);
+    });
+  }
+  reel.querySelector("[data-action='comment']").onclick = () => {
+    openComments(item, commentEl, item.user_id);
+  };
+  reel.querySelector("[data-action='share']").onclick = () => {
+    openShareSheet(item, shareCountEl);
+  };
+  if(downloadBtn){
+    downloadBtn.onclick = async (e) => {
+      e.stopPropagation();
+      if(downloadBusy) return;
+      if(!(window.NOVA_OFFLINE && typeof window.NOVA_OFFLINE.save === "function")){
+        alert("Offline download is unavailable on this browser.");
+        return;
+      }
+      downloadBusy = true;
+      await renderDownloadUi();
+      try{
+        await window.NOVA_OFFLINE.save({
+          id: item.id,
+          type: "reel",
+          title: item.title || "Reel",
+          sourceUrl: item.video_url,
+          thumbUrl: item.thumb_url || "",
+          creatorName: creatorName
+        });
+        alert("Reel saved. Open dowlond.html to watch offline.");
+      }catch(err){
+        console.error("reel_offline_download_failed", err);
+        alert("Download failed. Please try again.");
+      }finally{
+        downloadBusy = false;
+        await renderDownloadUi();
+      }
+    };
+  }
+  if(shopIcon){
+    shopIcon.onclick = (e) => {
+      e.stopPropagation();
+      openShopSheet(item.user_id, creatorName);
+    };
+  }
+
+  if(creatorRow){
+    creatorRow.onclick = () => {
+      location.href = `m-account.html?uid=${item.user_id}`;
+    };
+  }
+
+  followBtn.onclick = handleFollowToggle;
+
+  moreBtn.onclick = e => {
+    e.stopPropagation();
+    menu.classList.toggle("show");
+  };
+  menuDesc.onclick = () => {
+    descEl.classList.toggle("expanded");
+    menu.classList.remove("show");
+  };
+  menuSave.onclick = () => {
+    saveReel(item, creator);
+    menu.classList.remove("show");
+  };
+}
+
+if(params.get("create") === "1"){
+  createReel();
+}
+
+const sentinel = document.createElement("div");
+sentinel.style.height = "1px";
+reelWrapper.appendChild(sentinel);
+
+const scrollObserver = new IntersectionObserver(entries => {
+  if(entries[0].isIntersecting && !searchMode){
+    loadMore();
+  }
+},{ root: reelWrapper, rootMargin:"200px" });
+scrollObserver.observe(sentinel);
+
+function renderCachedUpload(){
+  try{
+    const raw = sessionStorage.getItem(LAST_REEL_KEY);
+    if(!raw) return;
+    sessionStorage.removeItem(LAST_REEL_KEY);
+    const item = JSON.parse(raw);
+    if(item && item.id && item.video_url){
+      if(emptyState) emptyState.style.display = "none";
+      renderReel(item, { prepend:true });
+    }
+  }catch(_){
+    sessionStorage.removeItem(LAST_REEL_KEY);
+  }
+}
+
+function focusReelElement(reel){
+  if(!reel || focusApplied) return;
+  focusApplied = true;
+  requestAnimationFrame(() => {
+    reel.scrollIntoView({ behavior:"smooth", block:"center" });
+    const video = reel.querySelector("video");
+    if(video){
+      video.dataset.userPaused = "0";
+      video.muted = false;
+      video.volume = 1;
+      video.play().catch(()=>{});
+    }
+  });
+}
+
+async function ensureFocusReelLoaded(){
+  if(!focusReelId || renderedIds.has(focusReelId)) return;
+  const ready = await ensureNovaClientReady();
+  if(!ready) return;
+
+  let query = window.NOVA.supa
+    .from("reels")
+    .select("id,user_id,video_url,thumb_url,title,description,created_at")
+    .eq("id", focusReelId)
+    .maybeSingle();
+  if(feedUserId){
+    query = query.eq("user_id", feedUserId);
+  }
+
+  const { data, error } = await query;
+  if(error || !data || !data.id) return;
+  if(emptyState) emptyState.style.display = "none";
+  await renderReel(data, { prepend:true });
+}
+
+renderCachedUpload();
+(async()=>{
+  await ensureFocusReelLoaded();
+  loadMore();
+})();
+
+function go(p){location.href=p;}
+
+async function getCreatorInfo(userId){
+  if(!userId) return null;
+  if(creatorCache[userId]) return creatorCache[userId];
+  let name = "";
+  let avatarUrl = "";
+  const { data } = await window.NOVA.supa
+    .from("users")
+    .select("user_id,username,full_name,photo")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if(data){
+    name = data.full_name || data.username || "User";
+    avatarUrl = data.photo || "";
+  }
+  const localProfile = getLocalProfileOverride(userId);
+  if(localProfile){
+    if(localProfile.displayName) name = localProfile.displayName;
+    if(localProfile.avatarData) avatarUrl = localProfile.avatarData;
+    if(!name && localProfile.username) name = localProfile.username;
+  }
+  if(!name) name = "User";
+  const info = { name, avatarUrl };
+  creatorCache[userId] = info;
+  return info;
+}
+
+function getLocalProfileOverride(id){
+  try{
+    const raw = localStorage.getItem("m_profile_" + id);
+    return raw ? JSON.parse(raw) : null;
+  }catch(_){
+    return null;
+  }
+}
+
+function saveReel(item, creator){
+  try{
+    const raw = localStorage.getItem(SAVE_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    const exists = list.find(r => r.id === item.id);
+    if(!exists){
+      list.unshift({
+        id: item.id,
+        user_id: item.user_id,
+        video_url: item.video_url,
+        title: item.title || "Reel",
+        description: item.description || "",
+        creator_name: creator?.name || "User",
+        creator_avatar: creator?.avatarUrl || "",
+        created_at: item.created_at || new Date().toISOString()
+      });
+      localStorage.setItem(SAVE_KEY, JSON.stringify(list));
+    }
+  }catch(_){}
+}
+
+document.addEventListener("click", e => {
+  if(!e.target.closest(".comment-menu-wrap")){
+    closeCommentMenus();
+  }
+  if(e.target.closest(".more-btn") || e.target.closest(".more-menu")) return;
+  document.querySelectorAll(".more-menu.show").forEach(menu => {
+    menu.classList.remove("show");
+  });
+});
+
+commentsBackdrop.addEventListener("click", closeComments);
+commentsClose.addEventListener("click", closeComments);
+commentSend.addEventListener("click", sendComment);
+commentReplyCancel.addEventListener("click", clearCommentDraftState);
+commentInput.addEventListener("keydown", e => {
+  if(e.key === "Enter") sendComment();
+});
+shareBackdrop.addEventListener("click", closeShareSheet);
+shareClose.addEventListener("click", closeShareSheet);
+shareButtons.forEach(btn => {
+  btn.addEventListener("click", () => handleShareAction(btn.getAttribute("data-share") || ""));
+});
+shareChatList.addEventListener("click", e => {
+  const btn = e.target.closest("[data-send-chat]");
+  if(!btn) return;
+  const targetId = btn.getAttribute("data-send-chat") || "";
+  sendShareToChat(targetId, btn);
+});
+if(shopBackdrop){
+  shopBackdrop.addEventListener("click", closeShopSheet);
+}
+if(shopClose){
+  shopClose.addEventListener("click", closeShopSheet);
+}
+
+function closeCommentMenus(){
+  commentsList.querySelectorAll(".comment-menu.show").forEach(menu => menu.classList.remove("show"));
+}
+
+function clearCommentDraftState(){
+  activeReplyRowId = "";
+  activeEditRowId = "";
+  commentReplying.hidden = true;
+  commentReplyLabel.textContent = "";
+  commentInput.placeholder = "Add a comment";
+  commentSend.textContent = "Send";
+}
+
+function setReplyState(rowId, name){
+  activeReplyRowId = String(rowId || "");
+  activeEditRowId = "";
+  commentReplying.hidden = false;
+  commentReplyLabel.textContent = "Replying to " + (name || "User");
+  commentInput.placeholder = "Write a reply...";
+  commentSend.textContent = "Reply";
+  commentInput.focus();
+}
+
+function setEditState(rowId, body){
+  activeEditRowId = String(rowId || "");
+  activeReplyRowId = "";
+  commentReplying.hidden = false;
+  commentReplyLabel.textContent = "Editing your comment";
+  commentInput.placeholder = "Edit comment...";
+  commentSend.textContent = "Update";
+  commentInput.value = body || "";
+  commentInput.focus();
+}
+
+function openComments(item, countEl, ownerId){
+  activeCommentReelId = item.id;
+  activeCommentCountEl = countEl || null;
+  activeCommentOwnerId = String(ownerId || "");
+  commentsList.innerHTML = "<div class='comment-empty'>Loading comments...</div>";
+  commentsBackdrop.classList.add("show");
+  commentsPanel.classList.add("show");
+  clearCommentDraftState();
+  syncOverlayScrollLock();
+  loadComments(item.id);
+}
+
+function closeComments(){
+  commentsPanel.classList.remove("show");
+  commentsBackdrop.classList.remove("show");
+  commentInput.value = "";
+  activeCommentOwnerId = "";
+  activeCommentReelId = null;
+  activeCommentCountEl = null;
+  activeCommentThread = null;
+  clearCommentDraftState();
+  closeCommentMenus();
+  syncOverlayScrollLock();
+}
+
+async function getCommentUser(userId){
+  const key = String(userId || "");
+  if(!key) return { name:"User", avatarUrl:"" };
+  if(commentUserCache[key]) return commentUserCache[key];
+
+  const { data } = await window.NOVA.supa
+    .from("users")
+    .select("user_id,username,full_name,photo")
+    .eq("user_id", key)
+    .maybeSingle();
+
+  let name = data?.full_name || data?.username || "User";
+  let avatarUrl = data?.photo || "";
+  const localProfile = getLocalProfileOverride(key);
+  if(localProfile){
+    if(localProfile.displayName) name = localProfile.displayName;
+    if(localProfile.avatarData) avatarUrl = localProfile.avatarData;
+    if(!name && localProfile.username) name = localProfile.username;
+  }
+
+  const info = { name, avatarUrl };
+  commentUserCache[key] = info;
+  return info;
+}
+
+function getReplyStats(comment){
+  const queue = Array.isArray(comment?.replies) ? comment.replies.slice() : [];
+  const uniqueUsers = new Set();
+  let totalReplies = 0;
+
+  while(queue.length){
+    const current = queue.shift();
+    if(!current) continue;
+    totalReplies += 1;
+    if(current.user_id){
+      uniqueUsers.add(String(current.user_id));
+    }
+    if(Array.isArray(current.replies) && current.replies.length){
+      queue.push(...current.replies);
+    }
+  }
+
+  return {
+    totalReplies,
+    uniqueReplyUsers: uniqueUsers.size
+  };
+}
+
+async function renderCommentNode(comment, depth){
+  const info = await getCommentUser(comment.user_id);
+  const displayName = info.name || "User";
+  const avatarUrl = info.avatarUrl || "";
+  const initial = (displayName || "U").slice(0, 1).toUpperCase();
+  const viewer = await currentUserPromise;
+  const me = String(viewer?.id || "");
+  const isMine = !!(me && comment.user_id === me);
+  const isOwner = !!(me && activeCommentOwnerId && me === activeCommentOwnerId);
+  const canPin = isOwner && !comment.parentRowId;
+  const isPinned = !!comment.pinned;
+  const replyStats = getReplyStats(comment);
+  const hasReplies = replyStats.totalReplies > 0;
+
+  const wrap = document.createElement("div");
+  const row = document.createElement("div");
+  row.className = "comment-row";
+
+  const menuActions = [];
+  if(isMine){
+    menuActions.push({ action:"edit", label:"Edit" });
+    menuActions.push({ action:"delete", label:"Delete" });
+  }
+  if(canPin){
+    menuActions.push({ action:isPinned ? "unpin" : "pin", label:isPinned ? "Unpin" : "Pin to top" });
+  }
+
+  row.innerHTML = `
+    <div class="comment-avatar">
+      ${avatarUrl ? `<img src="${escapeHtml(avatarUrl)}" alt="">` : `<span>${escapeHtml(initial)}</span>`}
+    </div>
+    <div class="comment-content">
+      <div class="comment-top">
+        <span class="comment-name">${escapeHtml(displayName)}</span>
+        <span class="comment-time">${escapeHtml(formatCommentTime(comment.created_at))}</span>
+        ${isPinned ? `<span class="comment-pin">Pinned</span>` : ""}
+        ${menuActions.length ? `
+          <div class="comment-menu-wrap">
+            <button type="button" class="comment-menu-btn" data-comment-menu-btn>...</button>
+            <div class="comment-menu" data-comment-menu>
+              ${menuActions.map(item => `<button type="button" data-comment-action="${escapeHtml(item.action)}">${escapeHtml(item.label)}</button>`).join("")}
+            </div>
+          </div>
+        ` : ""}
+      </div>
+      <div class="comment-body">${escapeHtml(comment.body || "")}${comment.edited ? `<span class="comment-edited">(edited)</span>` : ""}</div>
+      <div class="comment-actions">
+        <button type="button" class="comment-action" data-comment-reply>Reply</button>
+        ${hasReplies ? `<button type="button" class="comment-action" data-comment-toggle-replies>Replied by ${replyStats.uniqueReplyUsers}</button>` : ""}
+      </div>
+    </div>
+  `;
+
+  const replyBtn = row.querySelector("[data-comment-reply]");
+  if(replyBtn){
+    replyBtn.addEventListener("click", () => {
+      setReplyState(comment.rowId, displayName);
+    });
+  }
+  const toggleRepliesBtn = row.querySelector("[data-comment-toggle-replies]");
+
+  const menuBtn = row.querySelector("[data-comment-menu-btn]");
+  const menu = row.querySelector("[data-comment-menu]");
+  if(menuBtn && menu){
+    menuBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      const wasOpen = menu.classList.contains("show");
+      closeCommentMenus();
+      menu.classList.toggle("show", !wasOpen);
+    });
+    menu.addEventListener("click", async e => {
+      const action = e.target?.getAttribute("data-comment-action") || "";
+      if(!action) return;
+      closeCommentMenus();
+
+      if(action === "edit"){
+        setEditState(comment.rowId, comment.body || "");
+        return;
+      }
+      if(action === "delete"){
+        const yes = confirm("Delete this comment?");
+        if(!yes) return;
+        const ok = await window.NOVA.deleteCommentById(comment.rowId);
+        if(!ok){
+          alert("Unable to delete comment.");
+          return;
+        }
+        await loadComments(activeCommentReelId);
+        return;
+      }
+      if(action === "pin"){
+        const ok = await window.NOVA.pinComment("reel", activeCommentReelId, comment.rowId);
+        if(!ok){
+          alert("Unable to pin comment.");
+          return;
+        }
+        await loadComments(activeCommentReelId);
+        return;
+      }
+      if(action === "unpin"){
+        const ok = await window.NOVA.pinComment("reel", activeCommentReelId, "");
+        if(!ok){
+          alert("Unable to unpin comment.");
+          return;
+        }
+        await loadComments(activeCommentReelId);
+      }
+    });
+  }
+
+  wrap.appendChild(row);
+  if(Array.isArray(comment.replies) && comment.replies.length){
+    const children = document.createElement("div");
+    children.className = "comment-children";
+    children.hidden = true;
+    for(const child of comment.replies){
+      children.appendChild(await renderCommentNode(child, depth + 1));
+    }
+    if(toggleRepliesBtn){
+      const collapsedLabel = `Replied by ${replyStats.uniqueReplyUsers}`;
+      const expandedLabel = `Hide replies (${replyStats.totalReplies})`;
+      toggleRepliesBtn.textContent = collapsedLabel;
+      toggleRepliesBtn.addEventListener("click", () => {
+        children.hidden = !children.hidden;
+        toggleRepliesBtn.textContent = children.hidden ? collapsedLabel : expandedLabel;
+      });
+    }
+    wrap.appendChild(children);
+  }
+  return wrap;
+}
+
+async function loadComments(reelId){
+  const thread = await window.NOVA.getCommentThread("reel", reelId, {
+    ownerUserId: activeCommentOwnerId,
+    limit: 500
+  });
+  if(thread.error){
+    commentsList.innerHTML = "<div class='comment-empty'>Unable to load comments.</div>";
+    return 0;
+  }
+  activeCommentThread = thread;
+  if(!thread.roots || !thread.roots.length){
+    commentsList.innerHTML = "<div class='comment-empty'>No comments yet.</div>";
+    if(activeCommentCountEl){
+      activeCommentCountEl.textContent = "0";
+    }
+    return 0;
+  }
+
+  commentsList.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  for(const root of thread.roots){
+    frag.appendChild(await renderCommentNode(root, 0));
+  }
+  commentsList.appendChild(frag);
+  commentsList.scrollTop = commentsList.scrollHeight;
+  if(activeCommentCountEl){
+    activeCommentCountEl.textContent = formatCount(thread.visibleCount);
+  }
+  return thread.visibleCount;
+}
+
+async function sendComment(){
+  const text = commentInput.value.trim();
+  if(!text || !activeCommentReelId) return;
+
+  let ok = false;
+  if(activeEditRowId){
+    ok = await window.NOVA.editComment("reel", activeCommentReelId, activeEditRowId, text);
+  }else if(activeReplyRowId){
+    ok = await window.NOVA.replyComment("reel", activeCommentReelId, activeReplyRowId, text);
+  }else{
+    ok = await window.NOVA.addComment("reel", activeCommentReelId, text);
+  }
+
+  if(!ok){
+    alert("Unable to submit comment.");
+    return;
+  }
+  commentInput.value = "";
+  clearCommentDraftState();
+  const latestCount = await loadComments(activeCommentReelId);
+  if(activeCommentCountEl){
+    activeCommentCountEl.textContent = formatCount(latestCount);
+  }
+}
+
+function openShareSheet(item, shareCountEl){
+  activeShareItem = item || null;
+  activeShareCountEl = shareCountEl || null;
+  shareChatList.innerHTML = "<div class='share-chat-empty'>Loading chats...</div>";
+  shareBackdrop.classList.add("show");
+  shareSheet.classList.add("show");
+  syncOverlayScrollLock();
+  loadShareChatTargets();
+}
+
+function closeShareSheet(){
+  shareSheet.classList.remove("show");
+  shareBackdrop.classList.remove("show");
+  activeShareItem = null;
+  activeShareCountEl = null;
+  shareChatList.innerHTML = "";
+  syncOverlayScrollLock();
+}
+
+function getSharePayload(){
+  const text = activeShareItem?.title || "Reel";
+  const url = activeShareItem ? getReelShareUrl(activeShareItem) : location.href;
+  return {
+    text,
+    url,
+    message: text + "\n" + url
+  };
+}
+
+function renderShareChatTargets(list){
+  shareChatList.innerHTML = "";
+  if(!Array.isArray(list) || !list.length){
+    shareChatList.innerHTML = "<div class='share-chat-empty'>No recent chats found.</div>";
+    return;
+  }
+  list.forEach(contact => {
+    const row = document.createElement("div");
+    row.className = "share-chat-item";
+    const name = contact?.name || "User";
+    const username = contact?.username ? "@" + contact.username : "";
+    const initial = (name || "U").slice(0, 1).toUpperCase();
+    row.innerHTML = `
+      ${contact?.avatarUrl ? `<img src="${escapeHtml(contact.avatarUrl)}" alt="">` : `<div class="share-chat-avatar">${escapeHtml(initial)}</div>`}
+      <div class="share-chat-meta">
+        <div class="share-chat-name">${escapeHtml(name)}</div>
+        <div class="share-chat-user">${escapeHtml(username)}</div>
+      </div>
+      <button type="button" class="share-chat-send" data-send-chat="${escapeHtml(contact.id)}">Send</button>
+    `;
+    shareChatList.appendChild(row);
+  });
+}
+
+async function loadShareChatTargets(){
+  if(!window.NOVA || typeof window.NOVA.getRecentChatContacts !== "function"){
+    shareChatList.innerHTML = "<div class='share-chat-empty'>Chat share not available.</div>";
+    return;
+  }
+  const { contacts, error } = await window.NOVA.getRecentChatContacts(24);
+  if(error){
+    shareChatList.innerHTML = "<div class='share-chat-empty'>Unable to load chats.</div>";
+    return;
+  }
+  renderShareChatTargets(contacts || []);
+}
+
+async function sendShareToChat(userId, sendBtn){
+  if(!activeShareItem || !userId) return;
+  if(!window.NOVA || typeof window.NOVA.sendChatMessage !== "function"){
+    alert("Chat share not available.");
+    return;
+  }
+  if(sendBtn) sendBtn.disabled = true;
+  const payload = getSharePayload();
+  const { ok } = await window.NOVA.sendChatMessage(userId, payload.message);
+  if(!ok){
+    if(sendBtn) sendBtn.disabled = false;
+    alert("Unable to send in chat.");
+    return;
+  }
+  if(activeShareItem?.id){
+    const next = incrementReelShareCount(activeShareItem.id);
+    if(activeShareCountEl){
+      activeShareCountEl.textContent = formatCount(next);
+    }
+  }
+  if(sendBtn){
+    sendBtn.textContent = "Sent";
+  }
+}
+
+async function handleShareAction(action){
+  if(!activeShareItem) return;
+  const payload = getSharePayload();
+  const text = payload.text;
+  const shareUrl = payload.url;
+  let shared = false;
+
+  if(action === "native"){
+    if(navigator.share){
+      try{
+        await navigator.share({ title:"NOVAGAPP", text, url: shareUrl });
+        shared = true;
+      }catch(_){
+        return;
+      }
+    }else{
+      action = "copy";
+    }
+  }
+
+  if(action === "copy"){
+    try{
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        await navigator.clipboard.writeText(shareUrl);
+        alert("Link copied");
+      }else{
+        window.prompt("Copy this link", shareUrl);
+      }
+    }catch(_){
+      window.prompt("Copy this link", shareUrl);
+    }
+    shared = true;
+  }else if(action === "whatsapp"){
+    const msg = encodeURIComponent(text + "\n" + shareUrl);
+    window.open(`https://wa.me/?text=${msg}`, "_blank");
+    shared = true;
+  }else if(action === "telegram"){
+    const msg = encodeURIComponent(text);
+    const url = encodeURIComponent(shareUrl);
+    window.open(`https://t.me/share/url?url=${url}&text=${msg}`, "_blank");
+    shared = true;
+  }
+
+  if(shared && activeShareItem?.id){
+    const next = incrementReelShareCount(activeShareItem.id);
+    if(activeShareCountEl){
+      activeShareCountEl.textContent = formatCount(next);
+    }
+  }
+  closeShareSheet();
+}
+
