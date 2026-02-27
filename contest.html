@@ -233,12 +233,13 @@ button.ghost{background:#fff7ee;color:#f1720a;border:1px solid var(--line)}
   <section class="card" id="coinWalletSection">
     <h2 id="coinWalletTitle">NovaCoins Wallet</h2>
     <ul class="coin-rates" id="coinRatesList">
-      <li>5000 NovaCoins = $5 -> 1 vote</li>
-      <li>25000 NovaCoins = $25 -> 7 votes</li>
-      <li>50000 NovaCoins = $50 -> 20 votes</li>
-      <li>Get Free Coins ad reward = +5 coins per ad</li>
+      <li>5000 NovaCoins = 1 Vote</li>
+      <li>25000 NovaCoins = 7 Votes</li>
+      <li>50000 NovaCoins = 20 Votes</li>
+      <li>Buy NovaCoins: $5 = 5000, $25 = 25000, $50 = 50000</li>
+      <li>Get Free Coins ad reward = +5 coins per verified reward</li>
     </ul>
-    <p class="notice" id="coinBalanceNotice">NovaCoins balance: 0</p>
+    <p class="notice" id="coinBalanceNotice">🪙 NovaCoins balance: 0</p>
     <div class="coin-actions">
       <button id="getFreeCoinsBtn">Get Free Coins (+5)</button>
       <button class="secondary" id="useCoinsVoteBtn">Use Coins for Vote</button>
@@ -281,10 +282,10 @@ button.ghost{background:#fff7ee;color:#f1720a;border:1px solid var(--line)}
   </section>
 
   <section class="card" id="rankPreviewSection">
-    <h2 id="rankPreviewTitle">Top Referral Ranks</h2>
-    <p class="muted" id="rankPreviewSub">Ranking by new users referred (verified installs).</p>
+    <h2 id="rankPreviewTitle">Top Supporters</h2>
+    <p class="muted" id="rankPreviewSub">Ranking by total votes given.</p>
     <div class="rank-preview-list" id="rankPreviewList">
-      <p class="muted" id="rankPreviewLoading">Loading ranks...</p>
+      <p class="muted" id="rankPreviewLoading">Loading supporters...</p>
     </div>
     <p class="notice" id="topReferrerNotice"></p>
   </section>
@@ -316,6 +317,7 @@ button.ghost{background:#fff7ee;color:#f1720a;border:1px solid var(--line)}
 <script>
 const SUPABASE_URL = window.NOVA_PUBLIC_CONFIG?.supabaseUrl || "";
 const SUPABASE_ANON_KEY = window.NOVA_PUBLIC_CONFIG?.supabaseAnonKey || "";
+const CONTEST_AD_SMARTLINK = "https://www.effectivegatecpm.com/enzzr9jd4u?key=174301013dc06d4fdd0c657c233d471e";
 const supa = window.supa || createSupabaseClientSafe();
 if(supa && !window.supa) window.supa = supa;
 
@@ -353,14 +355,15 @@ const I18N = {
     haveReferralBtn: "Do You Have Referral Code? (Optional)",
     voteNowBtn: "Vote Now",
     coinWalletTitle: "NovaCoins Wallet",
-    coinRates1: "5000 NovaCoins = $5 -> 1 vote",
-    coinRates2: "25000 NovaCoins = $25 -> 7 votes",
-    coinRates3: "50000 NovaCoins = $50 -> 20 votes",
-    coinRates4: "Get Free Coins ad reward = +5 coins per ad",
+    coinRates1: "5000 NovaCoins = 1 Vote",
+    coinRates2: "25000 NovaCoins = 7 Votes",
+    coinRates3: "50000 NovaCoins = 20 Votes",
+    coinRates4: "Buy NovaCoins: $5 = 5000, $25 = 25000, $50 = 50000",
+    coinRates5: "Get Free Coins ad reward = +5 coins per verified reward",
     coinBalanceLabel: "NovaCoins balance",
     getFreeCoinsBtn: "Get Free Coins (+5)",
     useCoinsVoteBtn: "Use Coins for Vote",
-    coinActionReady: "Watch ad and claim your 5 NovaCoins.",
+    coinActionReady: "Open ad smartlink, then claim your 5 NovaCoins.",
     coinActionWaiting: "Please wait",
     coinActionClaimReady: "Reward ready. Claim now.",
     adModalTitle: "Watch ad and earn 5 NovaCoins",
@@ -386,12 +389,13 @@ const I18N = {
     liveVotesTitle: "Live Team Votes",
     liveVotesLoading: "Loading live votes...",
     liveVotesEmpty: "No contest votes yet.",
-    rankPreviewTitle: "Top Referral Ranks",
-    rankPreviewSub: "Ranking by new users referred (verified installs).",
-    rankPreviewLoading: "Loading ranks...",
-    rankPreviewEmpty: "No referral ranking yet.",
-    topReferrerLabel: "Top referrer: {name} ({count} new users).",
-    topReferrerMissing: "Top referrer data not available yet.",
+    shareCountLabel: "Shares",
+    rankPreviewTitle: "Top Supporters",
+    rankPreviewSub: "Ranking by total votes given.",
+    rankPreviewLoading: "Loading supporters...",
+    rankPreviewEmpty: "No supporters yet.",
+    topReferrerLabel: "Top supporter: {name} ({count} votes).",
+    topReferrerMissing: "Top supporter data not available yet.",
     notifTitle: "New Referral Joined",
     notifMessage: "{name} used your referral code {code}.",
     errEnterCode: "Please enter a valid referral code.",
@@ -429,14 +433,15 @@ const I18N = {
     haveReferralBtn: "क्या आपके पास रेफरल कोड है? (वैकल्पिक)",
     voteNowBtn: "अभी वोट करें",
     coinWalletTitle: "NovaCoins Wallet",
-    coinRates1: "5000 NovaCoins = $5 -> 1 vote",
-    coinRates2: "25000 NovaCoins = $25 -> 7 votes",
-    coinRates3: "50000 NovaCoins = $50 -> 20 votes",
-    coinRates4: "Get Free Coins ad reward = +5 coins per ad",
+    coinRates1: "5000 NovaCoins = 1 Vote",
+    coinRates2: "25000 NovaCoins = 7 Votes",
+    coinRates3: "50000 NovaCoins = 20 Votes",
+    coinRates4: "NovaCoins खरीदें: $5 = 5000, $25 = 25000, $50 = 50000",
+    coinRates5: "Get Free Coins ad reward = +5 coins per verified reward",
     coinBalanceLabel: "NovaCoins balance",
     getFreeCoinsBtn: "Free Coins लो (+5)",
     useCoinsVoteBtn: "Coins से Vote",
-    coinActionReady: "Ad dekho aur 5 NovaCoins claim karo.",
+    coinActionReady: "Smartlink open karo, phir 5 NovaCoins claim karo.",
     coinActionWaiting: "Please wait",
     coinActionClaimReady: "Reward ready. Claim now.",
     adModalTitle: "Ad dekho aur 5 NovaCoins pao",
@@ -458,12 +463,22 @@ const I18N = {
     refPlaceholder: "रेफरल कोड लिखें",
     applyReferralBtn: "लागू करें",
     closeReferralBtn: "बंद करें",
+    liveVotesTitle: "Live Team Votes",
+    liveVotesLoading: "Live votes load ho rahe hain...",
+    liveVotesEmpty: "Abhi contest votes nahi hain.",
+    rankPreviewTitle: "Top Supporters",
+    rankPreviewSub: "Total votes ke basis par ranking.",
+    rankPreviewLoading: "Supporters load ho rahe hain...",
+    rankPreviewEmpty: "Abhi supporters nahi hain.",
+    topReferrerLabel: "Top supporter: {name} ({count} votes).",
+    topReferrerMissing: "Top supporter data abhi available nahi hai.",
     notifTitle: "नया रेफरल जुड़ा",
     notifMessage: "{name} ने आपका रेफरल कोड {code} इस्तेमाल किया।",
     errEnterCode: "कृपया मान्य रेफरल कोड दर्ज करें।",
     checkingCode: "रेफरल कोड जांचा जा रहा है...",
     appliedCode: "रेफरल कोड सफलतापूर्वक लागू हो गया।",
     toastApplied: "रेफरल कोड लागू हो गया।",
+    shareCountLabel: "Shares",
     errInvalid: "रेफरल कोड अमान्य है।",
     errSelf: "आप अपना खुद का रेफरल कोड इस्तेमाल नहीं कर सकते।",
     errNetwork: "अभी रेफरल सर्वर उपलब्ध नहीं है।",
@@ -489,12 +504,15 @@ const state = {
   sliderIndex: 0,
   metricsRetryTimer: 0,
   metricsRetryBusy: false,
+  realtimeChannel: null,
+  realtimeRefreshTimer: 0,
   adModalOpen: false,
   adRewardReady: false,
   adCountdownLeft: 0,
   adCountdownTimer: 0,
   adSlotPushed: false,
   adClaimBusy: false,
+  adSessionToken: "",
   metrics: {
     downloads: null,
     target: 5000000,
@@ -602,7 +620,8 @@ function applyLanguage(){
       tr("coinRates1"),
       tr("coinRates2"),
       tr("coinRates3"),
-      tr("coinRates4")
+      tr("coinRates4"),
+      tr("coinRates5")
     ].map(item => "<li>" + escapeHtml(item) + "</li>").join("");
   }
   if(dom.getFreeCoinsBtn) dom.getFreeCoinsBtn.textContent = tr("getFreeCoinsBtn");
@@ -676,6 +695,7 @@ function closeAdModal(){
   state.adModalOpen = false;
   state.adRewardReady = false;
   state.adCountdownLeft = 0;
+  state.adSessionToken = "";
   renderAdModalState();
 }
 
@@ -709,6 +729,44 @@ function openAdModal(){
   }, 1000);
 }
 
+async function startAdRewardSession(){
+  if(!state.userId){
+    showToast(tr("toastLoginRequired"), true);
+    return;
+  }
+  try{
+    const payload = await postJson("/api/contest/coins/reward-ad/start", {
+      user_id: state.userId,
+      user_name: state.userName || ""
+    });
+    state.adSessionToken = String(payload?.ad_session_token || "").trim();
+    const smartlinkUrl = String(payload?.smartlink_url || CONTEST_AD_SMARTLINK || "").trim();
+    if(smartlinkUrl){
+      try{
+        window.open(smartlinkUrl, "_blank", "noopener,noreferrer");
+      }catch(_){ }
+    }
+    openAdModal();
+  }catch(err){
+    const code = String(err?.payload?.error || "").toLowerCase();
+    if(code === "ad_reward_cooldown"){
+      const wait = Math.max(1, Math.ceil(safeInt(err?.payload?.retry_after_seconds || 0)));
+      if(dom.coinActionNotice){
+        dom.coinActionNotice.textContent = tr("freeCoinsCooldown") + " (" + wait + "s)";
+        dom.coinActionNotice.className = "notice warn";
+      }
+      showToast(tr("freeCoinsCooldown"), true);
+    }else{
+      const msg = String(err?.message || tr("errNetwork"));
+      if(dom.coinActionNotice){
+        dom.coinActionNotice.textContent = msg;
+        dom.coinActionNotice.className = "notice warn";
+      }
+      showToast(msg, true);
+    }
+  }
+}
+
 async function claimAdRewardCoins(){
   if(state.adClaimBusy || !state.adRewardReady || state.adCountdownLeft > 0){
     return;
@@ -724,9 +782,10 @@ async function claimAdRewardCoins(){
   try{
     const payload = await postJson("/api/contest/coins/reward-ad", {
       user_id: state.userId,
-      user_name: state.userName || ""
+      user_name: state.userName || "",
+      ad_session_token: state.adSessionToken || ""
     });
-    const nextBalance = safeInt(payload?.balance_coins || payload?.data?.user_stats?.coin_balance);
+    const nextBalance = safeInt(payload?.balance_coins || payload?.data?.user_stats?.novacoins || payload?.data?.user_stats?.coin_balance);
     state.metrics.coinBalance = nextBalance;
     renderContestMetrics();
     if(dom.coinActionNotice){
@@ -798,6 +857,9 @@ function formatInt(value){
 
 function renderContestMetrics(){
   const target = safeInt(state.metrics.target) || 5000000;
+  if(dom.saleName){
+    dom.saleName.textContent = tr("saleName") + " | 🪙 " + formatInt(state.metrics.coinBalance);
+  }
   if(state.metrics.downloads === null || typeof state.metrics.downloads === "undefined"){
     dom.downloadsValue.textContent = "-- / " + formatInt(target);
   }else{
@@ -813,7 +875,7 @@ function renderContestMetrics(){
     dom.gatewayStatus.textContent = tr("gatewayOffline");
   }
   if(dom.coinBalanceNotice){
-    dom.coinBalanceNotice.textContent = tr("coinBalanceLabel") + ": " + formatInt(state.metrics.coinBalance);
+    dom.coinBalanceNotice.textContent = "🪙 " + tr("coinBalanceLabel") + ": " + formatInt(state.metrics.coinBalance);
   }
   if(dom.useCoinsVoteBtn){
     dom.useCoinsVoteBtn.disabled = safeInt(state.metrics.coinBalance) <= 0;
@@ -837,7 +899,7 @@ function renderLiveVotes(){
     const sides = Array.isArray(contest?.sides) ? contest.sides : [];
     const sideRows = sides.length
       ? sides.map(side => (
-        "<div class='vote-side'><span>" + escapeHtml(String(side?.label || "Team")) + "</span><strong>" + escapeHtml(formatInt(side?.votes)) + "</strong></div>"
+        "<div class='vote-side'><span>" + escapeHtml(String(side?.label || "Team")) + "</span><strong>" + escapeHtml(formatInt(side?.votes)) + " | " + escapeHtml(tr("shareCountLabel")) + ": " + escapeHtml(formatInt(side?.share_count)) + "</strong></div>"
       )).join("")
       : "<p class='muted'>" + escapeHtml(tr("liveVotesEmpty")) + "</p>";
     return (
@@ -880,13 +942,13 @@ function renderRankPreview(){
 
   listWrap.innerHTML = rows.map(row => {
     const name = String(row?.display_name || "User").trim() || "User";
-    const newUsers = safeInt(row?.new_users);
+    const totalVotes = safeInt(row?.total_votes_cast || row?.paid_votes || row?.votes_given);
     const rankNum = safeInt(row?.rank) || 0;
     return (
       "<article class='rank-row'>" +
         rankAvatarMarkup(row) +
         "<div><div class='rank-name'>#" + escapeHtml(rankNum) + " " + escapeHtml(name) + "</div><div class='rank-meta'>" + escapeHtml(String(row?.user_id || "")) + "</div></div>" +
-        "<div class='rank-count'>" + escapeHtml(formatInt(newUsers)) + "</div>" +
+        "<div class='rank-count'>" + escapeHtml(formatInt(totalVotes)) + "</div>" +
       "</article>"
     );
   }).join("");
@@ -896,7 +958,7 @@ function renderRankPreview(){
     if(top){
       dom.topReferrerNotice.textContent = msgTemplate("topReferrerLabel", {
         name: String(top.display_name || "User"),
-        count: formatInt(top.new_users)
+        count: formatInt(top.total_votes_cast || top.paid_votes || top.votes_given)
       });
     }else{
       dom.topReferrerNotice.textContent = tr("topReferrerMissing");
@@ -913,8 +975,13 @@ async function loadContestMetrics(){
     coinBalance: 0,
     contests: []
   };
+  state.ranks.loading = true;
+  state.ranks.rows = [];
+  state.ranks.top = null;
+  state.ranks.total = 0;
   renderContestMetrics();
   renderLiveVotes();
+  renderRankPreview();
 
   try{
     const qp = new URLSearchParams();
@@ -929,40 +996,92 @@ async function loadContestMetrics(){
     state.metrics.target = safeInt(data.download_target) || 5000000;
     state.metrics.resultsReady = Boolean(data.results_ready);
     state.metrics.gateway = data.razorpay_ready ? "online" : "pending";
-    state.metrics.coinBalance = safeInt(data?.user_stats?.coin_balance);
+    state.metrics.coinBalance = safeInt(data?.user_stats?.novacoins ?? data?.user_stats?.coin_balance);
     state.metrics.contests = Array.isArray(data.contests) ? data.contests : [];
+    state.ranks.rows = Array.isArray(data.top_supporters) ? data.top_supporters : [];
+    state.ranks.top = state.ranks.rows[0] || null;
+    state.ranks.total = safeInt(data.top_supporters_total || state.ranks.rows.length);
   }catch(_){
     state.metrics.gateway = "offline";
     state.metrics.coinBalance = 0;
     state.metrics.contests = [];
-  }
-  renderContestMetrics();
-  renderLiveVotes();
-}
-
-async function loadReferralRanksPreview(){
-  state.ranks.loading = true;
-  state.ranks.rows = [];
-  state.ranks.top = null;
-  state.ranks.total = 0;
-  renderRankPreview();
-  try{
-    const qp = new URLSearchParams();
-    qp.set("limit", "5");
-    if(state.userId) qp.set("user_id", state.userId);
-    const payload = await fetchJson(apiUrl("/api/contest/ranks?" + qp.toString()), { method:"GET" });
-    const data = payload?.data || {};
-    state.ranks.rows = Array.isArray(data.rows) ? data.rows : [];
-    state.ranks.top = data.top_referrer || (state.ranks.rows[0] || null);
-    state.ranks.total = safeInt(data.total_rows);
-  }catch(_){
     state.ranks.rows = [];
     state.ranks.top = null;
     state.ranks.total = 0;
   }finally{
     state.ranks.loading = false;
-    renderRankPreview();
   }
+  renderContestMetrics();
+  renderLiveVotes();
+  renderRankPreview();
+  if(state.metrics.gateway === "offline"){
+    clearRealtimeSubscription();
+  }else{
+    bindRealtimeSync();
+  }
+}
+
+async function loadReferralRanksPreview(){
+  renderRankPreview();
+}
+
+function clearRealtimeSubscription(){
+  if(state.realtimeRefreshTimer){
+    clearTimeout(state.realtimeRefreshTimer);
+    state.realtimeRefreshTimer = 0;
+  }
+  if(!state.realtimeChannel) return;
+  try{
+    if(typeof supa?.removeChannel === "function"){
+      supa.removeChannel(state.realtimeChannel);
+    }else if(typeof state.realtimeChannel.unsubscribe === "function"){
+      state.realtimeChannel.unsubscribe();
+    }
+  }catch(_){ }
+  state.realtimeChannel = null;
+}
+
+function scheduleRealtimeRefresh(){
+  if(document.visibilityState === "hidden") return;
+  if(state.realtimeRefreshTimer){
+    clearTimeout(state.realtimeRefreshTimer);
+  }
+  state.realtimeRefreshTimer = setTimeout(async () => {
+    state.realtimeRefreshTimer = 0;
+    if(document.visibilityState === "hidden") return;
+    try{
+      await loadContestMetrics();
+      renderRankPreview();
+    }catch(_){ }
+  }, 600);
+}
+
+function bindRealtimeSync(){
+  if(!supa?.channel || !state.metrics?.contests?.length) return;
+  if(state.realtimeChannel) return;
+  const channelName = "contest-landing-live-" + Math.random().toString(36).slice(2, 8);
+  const channel = supa
+    .channel(channelName)
+    .on("postgres_changes", {
+      event: "*",
+      schema: "public",
+      table: "contest_votes"
+    }, scheduleRealtimeRefresh)
+    .on("postgres_changes", {
+      event: "*",
+      schema: "public",
+      table: "contest_users"
+    }, scheduleRealtimeRefresh)
+    .on("postgres_changes", {
+      event: "*",
+      schema: "public",
+      table: "coin_transactions"
+    }, scheduleRealtimeRefresh);
+
+  try{
+    channel.subscribe();
+    state.realtimeChannel = channel;
+  }catch(_){ }
 }
 
 function bindMetricsAutoRetry(){
@@ -984,10 +1103,12 @@ function bindMetricsAutoRetry(){
   document.addEventListener("visibilitychange", () => {
     if(document.visibilityState === "visible"){
       retry();
+      scheduleRealtimeRefresh();
     }
   });
   window.addEventListener("beforeunload", () => {
     clearAdCountdownTimer();
+    clearRealtimeSubscription();
     if(state.metricsRetryTimer){
       clearInterval(state.metricsRetryTimer);
       state.metricsRetryTimer = 0;
@@ -1521,7 +1642,7 @@ function bindEvents(){
         dom.coinActionNotice.textContent = tr("coinActionReady");
         dom.coinActionNotice.className = "notice";
       }
-      openAdModal();
+      startAdRewardSession();
     });
   }
 
