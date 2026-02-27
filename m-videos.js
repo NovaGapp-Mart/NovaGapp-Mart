@@ -51,6 +51,17 @@
       statusMessage:"",
       loading:false,
       unlockBusy:false
+    },
+    feature:{
+      profileLookupEnabled:true,
+      channelSubscribers:null,
+      videoLikes:null,
+      videoComments:null,
+      videoCommentLikes:null,
+      rpcRecordView:null,
+      rpcToggleReaction:null,
+      rpcToggleSubscribe:null,
+      rpcToggleCommentLike:null
     }
   };
 
@@ -73,6 +84,8 @@
     sentinel:document.getElementById("mvFeedSentinel"),
     watchBack:document.getElementById("mvWatchBack"),
     player:document.getElementById("mvPlayer"),
+    seekBack:document.getElementById("mvSeekBack"),
+    seekForward:document.getElementById("mvSeekForward"),
     watchTitle:document.getElementById("mvWatchTitle"),
     watchMeta:document.getElementById("mvWatchMeta"),
     watchAvatar:document.getElementById("mvWatchAvatar"),
@@ -144,6 +157,42 @@
     pushUnique(key, value, limit){ const val = util.safe(value); if(!val) return; const list = store.read(key, []); const next = [val].concat(list.filter(item => util.safe(item) !== val)).slice(0, limit || 50); store.write(key, next); }
   };
   let razorpaySdkPromise = null;
+
+  function errorCode(err){
+    return util.safe(err?.code).toUpperCase();
+  }
+
+  function isMissingRelationError(err, relationName){
+    const code = errorCode(err);
+    const message = util.safe(err?.message).toLowerCase();
+    if(code === "PGRST205" || code === "42P01") return true;
+    if(message.includes("could not find the table")) return true;
+    if(relationName && message.includes(`public.${String(relationName).toLowerCase()}`)){
+      return true;
+    }
+    return false;
+  }
+
+  function isMissingFunctionError(err, fnName){
+    const code = errorCode(err);
+    const message = util.safe(err?.message).toLowerCase();
+    if(code === "PGRST202" || code === "42883") return true;
+    if(message.includes("could not find the function")) return true;
+    if(fnName && message.includes(String(fnName).toLowerCase())) return true;
+    return false;
+  }
+
+  function isMissingColumnError(err, columnName){
+    const code = errorCode(err);
+    const message = util.safe(err?.message).toLowerCase();
+    const details = util.safe(err?.details).toLowerCase();
+    if(code === "42703" || message.includes("column") && message.includes("does not exist")){
+      if(!columnName) return true;
+      const key = String(columnName).toLowerCase();
+      return message.includes(key) || details.includes(key);
+    }
+    return false;
+  }
 
   function normalizeBase(value){
     return util.safe(value).replace(/\/+$/g, "");
@@ -306,6 +355,89 @@
     dom.dislikeBtn.classList.toggle("active", state.activeReaction === "dislike");
   }
 
+  async function getReactionCountsCompat(videoId){
+    const id = util.safe(videoId);
+    if(!id) return { likes:0, dislikes:0 };
+
+    if(state.feature.videoLikes !== false){
+      const likeQuery = state.supa
+        .from("video_likes")
+        .select("type", { count:"exact", head:true })
+        .eq("video_id", id)
+        .eq("type", "like");
+      const dislikeQuery = state.supa
+        .from("video_likes")
+        .select("type", { count:"exact", head:true })
+        .eq("video_id", id)
+        .eq("type", "dislike");
+      const [{ count:likes, error:likeError }, { count:dislikes, error:dislikeError }] = await Promise.all([
+        likeQuery,
+        dislikeQuery
+      ]);
+      if(!likeError && !dislikeError){
+        state.feature.videoLikes = true;
+        return { likes:Math.max(0, util.num(likes)), dislikes:Math.max(0, util.num(dislikes)) };
+      }
+      if(isMissingRelationError(likeError, "video_likes") || isMissingRelationError(dislikeError, "video_likes")){
+        state.feature.videoLikes = false;
+      }
+    }
+
+    if(window.NOVA && typeof window.NOVA.getReactionCounts === "function"){
+      try{
+        const counts = await window.NOVA.getReactionCounts("video", id);
+        return {
+          likes:Math.max(0, util.num(counts?.likes)),
+          dislikes:Math.max(0, util.num(counts?.dislikes))
+        };
+      }catch(_){ }
+    }
+
+    const video = state.videos.get(id);
+    return {
+      likes:Math.max(0, util.num(video?.likes_count)),
+      dislikes:Math.max(0, util.num(video?.dislikes_count))
+    };
+  }
+
+  async function getUserReactionCompat(videoId, userId){
+    const vId = util.safe(videoId);
+    const uId = util.safe(userId);
+    if(!vId || !uId) return null;
+
+    if(state.feature.videoLikes !== false){
+      const { data, error } = await state.supa
+        .from("video_likes")
+        .select("type")
+        .eq("video_id", vId)
+        .eq("user_id", uId)
+        .limit(1)
+        .maybeSingle();
+      if(!error){
+        state.feature.videoLikes = true;
+        return util.safe(data?.type) || null;
+      }
+      if(isMissingRelationError(error, "video_likes")){
+        state.feature.videoLikes = false;
+      }
+    }
+
+    try{
+      const { data, error } = await state.supa
+        .from("reactions")
+        .select("reaction")
+        .eq("target_type", "video")
+        .eq("target_id", vId)
+        .eq("user_id", uId)
+        .limit(1)
+        .maybeSingle();
+      if(error) return null;
+      return util.safe(data?.reaction) || null;
+    }catch(_){
+      return null;
+    }
+  }
+
   function setUploadProgress(percent, text){
     const pct = Math.max(0, Math.min(100, util.num(percent)));
     dom.uploadProgress.style.width = pct + "%";
@@ -355,11 +487,14 @@
     }
 
     if(dom.monetizeUnlockBtn){
-      const showUnlock = m.followersReady && !m.unlocked;
-      dom.monetizeUnlockBtn.hidden = !showUnlock;
-      dom.monetizeUnlockBtn.disabled = !!m.unlockBusy || !!m.loading || !m.paymentReady;
+      dom.monetizeUnlockBtn.hidden = false;
+      dom.monetizeUnlockBtn.disabled = !!m.unlockBusy || !!m.loading || !m.followersReady || !!m.unlocked || !m.paymentReady;
       if(m.unlockBusy){
         dom.monetizeUnlockBtn.textContent = "Processing...";
+      }else if(m.unlocked){
+        dom.monetizeUnlockBtn.textContent = "Unlocked";
+      }else if(!m.followersReady){
+        dom.monetizeUnlockBtn.textContent = `Need ${MONETIZATION_MIN_FOLLOWERS} Followers`;
       }else if(!m.paymentReady){
         dom.monetizeUnlockBtn.textContent = "Payment unavailable";
       }else{
@@ -420,15 +555,26 @@
     async fetchProfiles(userIds){
       const ids = util.uniq(userIds);
       if(!ids.length) return;
+      if(!state.feature.profileLookupEnabled) return;
       const attempts = [
-        { idField:"user_id", select:"user_id,username,full_name,photo,channel_subscribers_count" },
-        { idField:"id", select:"id,username,full_name,photo,channel_subscribers_count" },
         { idField:"user_id", select:"user_id,username,full_name,photo" },
-        { idField:"id", select:"id,username,full_name,photo" }
+        { idField:"id", select:"id,username,full_name,photo" },
+        { idField:"user_id", select:"user_id,username,full_name,photo,channel_subscribers_count" },
+        { idField:"id", select:"id,username,full_name,photo,channel_subscribers_count" }
       ];
+      let success = false;
       for(const plan of attempts){
         const { data, error } = await state.supa.from("users").select(plan.select).in(plan.idField, ids).limit(500);
-        if(error) continue;
+        if(error){
+          if(isMissingRelationError(error, "users")){
+            state.feature.profileLookupEnabled = false;
+            return;
+          }
+          if(isMissingColumnError(error, "channel_subscribers_count")){
+            continue;
+          }
+          continue;
+        }
         (data || []).forEach(row => {
           const id = util.safe(row[plan.idField]);
           if(!id) return;
@@ -439,24 +585,36 @@
             subscribers:Math.max(0, util.num(row.channel_subscribers_count))
           });
         });
-        return;
+        success = true;
+        break;
+      }
+      if(!success){
+        state.feature.profileLookupEnabled = false;
       }
     },
 
     async searchChannelIds(term){
       const clean = util.clean(term);
       if(!clean) return [];
+      if(!state.feature.profileLookupEnabled) return [];
       const attempts = [
-        { idField:"user_id", select:"user_id,username,full_name" },
-        { idField:"id", select:"id,username,full_name" },
-        { idField:"user_id", select:"user_id,username" },
-        { idField:"id", select:"id,username" }
+        { idField:"user_id", select:"user_id,username,full_name", filter:`username.ilike.%${clean}%,full_name.ilike.%${clean}%` },
+        { idField:"id", select:"id,username,full_name", filter:`username.ilike.%${clean}%,full_name.ilike.%${clean}%` },
+        { idField:"user_id", select:"user_id,username", filter:`username.ilike.%${clean}%` },
+        { idField:"id", select:"id,username", filter:`username.ilike.%${clean}%` }
       ];
       for(const plan of attempts){
-        const { data, error } = await state.supa.from("users").select(plan.select).or("username.ilike.%" + clean + "%,full_name.ilike.%" + clean + "%").limit(40);
-        if(error) continue;
+        const { data, error } = await state.supa.from("users").select(plan.select).or(plan.filter).limit(40);
+        if(error){
+          if(isMissingRelationError(error, "users")){
+            state.feature.profileLookupEnabled = false;
+            return [];
+          }
+          continue;
+        }
         return util.uniq((data || []).map(row => row[plan.idField]));
       }
+      state.feature.profileLookupEnabled = false;
       return [];
     },
 
@@ -504,28 +662,81 @@
         }
       }catch(_){ }
 
-      try{
+      if(state.feature.channelSubscribers !== false){
+        try{
+          const subs = await state.supa
+            .from("channel_subscribers")
+            .select("subscriber_user_id", { count:"exact", head:true })
+            .eq("channel_id", id);
+          if(!subs.error){
+            state.feature.channelSubscribers = true;
+            best = Math.max(best, Math.max(0, util.num(subs.count)));
+          }else if(isMissingRelationError(subs.error, "channel_subscribers")){
+            state.feature.channelSubscribers = false;
+          }
+        }catch(_){ }
+      }
+
+      return best;
+    },
+
+    async getSubscriberCount(channelId){
+      const id = util.safe(channelId);
+      if(!id) return 0;
+
+      if(state.feature.channelSubscribers !== false){
         const subs = await state.supa
           .from("channel_subscribers")
           .select("subscriber_user_id", { count:"exact", head:true })
           .eq("channel_id", id);
         if(!subs.error){
-          best = Math.max(best, Math.max(0, util.num(subs.count)));
+          state.feature.channelSubscribers = true;
+          return Math.max(0, util.num(subs.count));
         }
-      }catch(_){ }
-
-      try{
-        const profile = await state.supa
-          .from("users")
-          .select("channel_subscribers_count")
-          .eq("user_id", id)
-          .maybeSingle();
-        if(!profile.error){
-          best = Math.max(best, Math.max(0, util.num(profile.data?.channel_subscribers_count)));
+        if(isMissingRelationError(subs.error, "channel_subscribers")){
+          state.feature.channelSubscribers = false;
         }
-      }catch(_){ }
+      }
 
-      return best;
+      const follows = await state.supa
+        .from("follows")
+        .select("follower_id", { count:"exact", head:true })
+        .eq("following_id", id);
+      if(!follows.error){
+        return Math.max(0, util.num(follows.count));
+      }
+      return 0;
+    },
+
+    async isSubscribed(channelId, userId){
+      const cId = util.safe(channelId);
+      const uId = util.safe(userId);
+      if(!cId || !uId) return false;
+
+      if(state.feature.channelSubscribers !== false){
+        const { data, error } = await state.supa
+          .from("channel_subscribers")
+          .select("subscriber_user_id")
+          .eq("channel_id", cId)
+          .eq("subscriber_user_id", uId)
+          .limit(1);
+        if(!error){
+          state.feature.channelSubscribers = true;
+          return Array.isArray(data) && data.length > 0;
+        }
+        if(isMissingRelationError(error, "channel_subscribers")){
+          state.feature.channelSubscribers = false;
+        }
+      }
+
+      const { data, error } = await state.supa
+        .from("follows")
+        .select("follower_id")
+        .eq("follower_id", uId)
+        .eq("following_id", cId)
+        .limit(1);
+      if(error) return false;
+      return Array.isArray(data) && data.length > 0;
     },
 
     async fetchMonetizationStatus(userId){
@@ -813,7 +1024,7 @@
       history.pushState({ mv:"watch", videoId:id }, "", url.pathname + url.search);
     }
 
-    await Promise.all([
+    await Promise.allSettled([
       loadReactionState(token),
       loadSubscribeState(token),
       loadComments(token),
@@ -833,21 +1044,15 @@
     if(!video) return;
 
     const user = await api.ensureAuth();
-    if(!user){
-      state.activeReaction = null;
-      setReactionButtons();
-      return;
-    }
+    state.activeReaction = user ? await getUserReactionCompat(video.id, user.id) : null;
 
-    const { data } = await state.supa
-      .from("video_likes")
-      .select("type")
-      .eq("video_id", video.id)
-      .eq("user_id", user.id)
-      .limit(1)
-      .maybeSingle();
-
-    state.activeReaction = util.safe(data?.type) || null;
+    const counts = await getReactionCountsCompat(video.id);
+    video.likes_count = Math.max(0, util.num(counts.likes));
+    video.dislikes_count = Math.max(0, util.num(counts.dislikes));
+    state.videos.set(video.id, video);
+    dom.likeCount.textContent = util.compact(video.likes_count);
+    dom.dislikeCount.textContent = util.compact(video.dislikes_count);
+    updateFeedCard(video.id);
     setReactionButtons();
   }
 
@@ -858,13 +1063,7 @@
 
     const user = await api.ensureAuth();
     const channelId = util.safe(video.user_id);
-
-    const { count } = await state.supa
-      .from("channel_subscribers")
-      .select("subscriber_user_id", { count:"exact", head:true })
-      .eq("channel_id", channelId);
-
-    state.channelSubscribers = Math.max(0, util.num(count));
+    state.channelSubscribers = await api.getSubscriberCount(channelId);
     const channel = getChannel(channelId);
     state.channels.set(channelId, {
       id:channelId,
@@ -891,14 +1090,7 @@
       return;
     }
 
-    const { data } = await state.supa
-      .from("channel_subscribers")
-      .select("subscriber_user_id")
-      .eq("channel_id", channelId)
-      .eq("subscriber_user_id", user.id)
-      .limit(1);
-
-    state.subscribed = Array.isArray(data) && data.length > 0;
+    state.subscribed = await api.isSubscribed(channelId, user.id);
     dom.subscribeBtn.disabled = false;
     dom.subscribeBtn.classList.toggle("active", state.subscribed);
     dom.subscribeBtn.textContent = state.subscribed ? "Subscribed" : "Subscribe";
@@ -910,15 +1102,34 @@
     const user = await api.ensureAuth();
     if(!user) return;
 
-    const { data, error } = await state.supa.rpc("video_record_view_rpc", {
-      p_video_id: video.id
-    });
-    if(error){
-      console.error("record_view_failed", error);
-      return;
+    if(state.feature.rpcRecordView !== false){
+      const { data, error } = await state.supa.rpc("video_record_view_rpc", {
+        p_video_id: video.id
+      });
+      if(!error){
+        state.feature.rpcRecordView = true;
+        video.views = Math.max(0, util.num(data?.views));
+        state.videos.set(video.id, video);
+        dom.watchMeta.textContent = util.compact(video.views) + " views . " + util.ago(video.created_at);
+        updateFeedCard(video.id);
+        return;
+      }
+      if(isMissingFunctionError(error, "video_record_view_rpc")){
+        state.feature.rpcRecordView = false;
+      }else{
+        console.error("record_view_failed", error);
+        return;
+      }
     }
 
-    video.views = Math.max(0, util.num(data?.views));
+    const nextViews = Math.max(0, util.num(video.views) + 1);
+    const { data } = await state.supa
+      .from("videos")
+      .update({ views:nextViews })
+      .eq("id", video.id)
+      .select("views")
+      .maybeSingle();
+    video.views = Math.max(0, util.num(data?.views || nextViews));
     state.videos.set(video.id, video);
     dom.watchMeta.textContent = util.compact(video.views) + " views . " + util.ago(video.created_at);
     updateFeedCard(video.id);
@@ -933,17 +1144,37 @@
 
     state.reactionBusy = true;
     try{
-      const { data, error } = await state.supa.rpc("video_toggle_reaction_rpc", {
-        p_video_id: video.id,
-        p_type: type
-      });
-      if(error) throw error;
+      let handled = false;
+      if(state.feature.rpcToggleReaction !== false){
+        const { data, error } = await state.supa.rpc("video_toggle_reaction_rpc", {
+          p_video_id: video.id,
+          p_type: type
+        });
+        if(!error){
+          state.feature.rpcToggleReaction = true;
+          state.activeReaction = util.safe(data?.reaction) || null;
+          video.likes_count = Math.max(0, util.num(data?.likes_count));
+          video.dislikes_count = Math.max(0, util.num(data?.dislikes_count));
+          handled = true;
+        }else if(isMissingFunctionError(error, "video_toggle_reaction_rpc")){
+          state.feature.rpcToggleReaction = false;
+        }else{
+          throw error;
+        }
+      }
 
-      state.activeReaction = util.safe(data?.reaction) || null;
-      video.likes_count = Math.max(0, util.num(data?.likes_count));
-      video.dislikes_count = Math.max(0, util.num(data?.dislikes_count));
+      if(!handled){
+        if(!window.NOVA || typeof window.NOVA.toggleReaction !== "function"){
+          throw new Error("reaction_api_unavailable");
+        }
+        const res = await window.NOVA.toggleReaction("video", video.id, type);
+        state.activeReaction = util.safe(res?.reaction) || null;
+        const counts = await getReactionCountsCompat(video.id);
+        video.likes_count = Math.max(0, util.num(counts.likes));
+        video.dislikes_count = Math.max(0, util.num(counts.dislikes));
+      }
+
       state.videos.set(video.id, video);
-
       dom.likeCount.textContent = util.compact(video.likes_count);
       dom.dislikeCount.textContent = util.compact(video.dislikes_count);
       setReactionButtons();
@@ -966,13 +1197,33 @@
 
     state.subscribeBusy = true;
     try{
-      const { data, error } = await state.supa.rpc("video_toggle_subscribe_rpc", {
-        p_channel_id: video.user_id
-      });
-      if(error) throw error;
+      let handled = false;
+      if(state.feature.rpcToggleSubscribe !== false){
+        const { data, error } = await state.supa.rpc("video_toggle_subscribe_rpc", {
+          p_channel_id: video.user_id
+        });
+        if(!error){
+          state.feature.rpcToggleSubscribe = true;
+          state.subscribed = !!data?.subscribed;
+          state.channelSubscribers = Math.max(0, util.num(data?.subscribers_count));
+          handled = true;
+        }else if(isMissingFunctionError(error, "video_toggle_subscribe_rpc")){
+          state.feature.rpcToggleSubscribe = false;
+        }else{
+          throw error;
+        }
+      }
 
-      state.subscribed = !!data?.subscribed;
-      state.channelSubscribers = Math.max(0, util.num(data?.subscribers_count));
+      if(!handled){
+        if(window.NOVA && typeof window.NOVA.toggleFollow === "function"){
+          const result = await window.NOVA.toggleFollow(video.user_id);
+          if(result?.error) throw result.error;
+          state.subscribed = !!result?.following;
+          state.channelSubscribers = await api.getSubscriberCount(video.user_id);
+        }else{
+          throw new Error("subscribe_api_unavailable");
+        }
+      }
 
       const channel = getChannel(video.user_id);
       state.channels.set(video.user_id, {
@@ -998,23 +1249,63 @@
     const video = currentVideo();
     if(!video) return;
 
-    const { data, error } = await state.supa
-      .from("video_comments")
-      .select("id,video_id,user_id,parent_comment_id,comment_text,likes,created_at")
-      .eq("video_id", video.id)
-      .order("created_at", { ascending:true })
-      .limit(500);
+    let rows = [];
+    let compatMode = false;
 
-    if(error){
-      console.error("comments_load_failed", error);
-      dom.commentsList.innerHTML = "";
-      dom.commentsEmpty.classList.remove("mv-hidden");
-      dom.commentsEmpty.textContent = "Unable to load comments.";
-      dom.commentCount.textContent = "0";
-      return;
+    if(state.feature.videoComments !== false){
+      const { data, error } = await state.supa
+        .from("video_comments")
+        .select("id,video_id,user_id,parent_comment_id,comment_text,likes,created_at")
+        .eq("video_id", video.id)
+        .order("created_at", { ascending:true })
+        .limit(500);
+      if(!error){
+        state.feature.videoComments = true;
+        rows = Array.isArray(data) ? data : [];
+      }else if(isMissingRelationError(error, "video_comments")){
+        state.feature.videoComments = false;
+      }else{
+        console.error("comments_load_failed", error);
+        dom.commentsList.innerHTML = "";
+        dom.commentsEmpty.classList.remove("mv-hidden");
+        dom.commentsEmpty.textContent = "Unable to load comments.";
+        dom.commentCount.textContent = "0";
+        return;
+      }
     }
 
-    const rows = Array.isArray(data) ? data : [];
+    if(state.feature.videoComments === false){
+      if(!window.NOVA || typeof window.NOVA.getCommentThread !== "function"){
+        dom.commentsList.innerHTML = "";
+        dom.commentsEmpty.classList.remove("mv-hidden");
+        dom.commentsEmpty.textContent = "Comments are unavailable right now.";
+        dom.commentCount.textContent = "0";
+        return;
+      }
+      const thread = await window.NOVA.getCommentThread("video", video.id, {
+        limit:500,
+        ownerUserId:video.user_id
+      });
+      if(thread?.error){
+        console.error("comments_load_failed", thread.error);
+        dom.commentsList.innerHTML = "";
+        dom.commentsEmpty.classList.remove("mv-hidden");
+        dom.commentsEmpty.textContent = "Unable to load comments.";
+        dom.commentCount.textContent = "0";
+        return;
+      }
+      compatMode = true;
+      rows = (thread?.flat || []).map(item => ({
+        id:item?.rowId || item?.id || "",
+        video_id:video.id,
+        user_id:item?.user_id || "",
+        parent_comment_id:item?.parentRowId || null,
+        comment_text:item?.body || "",
+        likes:0,
+        created_at:item?.created_at || new Date().toISOString()
+      }));
+    }
+
     dom.commentCount.textContent = String(rows.length);
     if(!rows.length){
       dom.commentsList.innerHTML = "";
@@ -1028,13 +1319,18 @@
 
     const commentIds = rows.map(row => row.id).filter(Boolean);
     const liked = new Set();
-    if(state.me && commentIds.length){
-      const { data:likedRows } = await state.supa
+    if(!compatMode && state.me && commentIds.length && state.feature.videoCommentLikes !== false){
+      const { data:likedRows, error:likedError } = await state.supa
         .from("video_comment_likes")
         .select("comment_id")
         .eq("user_id", state.me.id)
         .in("comment_id", commentIds);
-      (likedRows || []).forEach(row => liked.add(util.safe(row.comment_id)));
+      if(!likedError && Array.isArray(likedRows)){
+        state.feature.videoCommentLikes = true;
+        likedRows.forEach(row => liked.add(util.safe(row.comment_id)));
+      }else if(isMissingRelationError(likedError, "video_comment_likes")){
+        state.feature.videoCommentLikes = false;
+      }
     }
 
     const byParent = new Map();
@@ -1059,7 +1355,7 @@
               '<div class="mv-comment-meta"><strong>' + util.esc(channel.name) + '</strong><span>' + util.esc(util.ago(row.created_at)) + '</span></div>' +
               '<p class="mv-comment-text">' + util.esc(row.comment_text) + '</p>' +
               '<div class="mv-comment-actions">' +
-                '<button type="button" data-action="like" class="' + (liked.has(rowId) ? "active" : "") + '">Like (' + util.compact(row.likes) + ')</button>' +
+                (compatMode ? '' : '<button type="button" data-action="like" class="' + (liked.has(rowId) ? "active" : "") + '">Like (' + util.compact(row.likes) + ')</button>') +
                 '<button type="button" data-action="reply">Reply</button>' +
                 (state.me && util.safe(state.me.id) === util.safe(row.user_id) ? '<button type="button" data-action="delete">Delete</button>' : '') +
               '</div>' +
@@ -1076,7 +1372,7 @@
               dom.commentInput.focus();
               return;
             }
-            if(action === "delete") return void deleteComment(rowId);
+            if(action === "delete") return void deleteComment(rowId, compatMode);
             if(action === "like") return void toggleCommentLike(rowId);
           });
         });
@@ -1110,15 +1406,44 @@
 
     state.commentBusy = true;
     try{
-      const payload = {
-        video_id:video.id,
-        user_id:user.id,
-        comment_text:text
-      };
-      if(state.replyParentId) payload.parent_comment_id = state.replyParentId;
+      if(state.feature.videoComments === false && window.NOVA){
+        let ok = false;
+        if(state.replyParentId && typeof window.NOVA.replyComment === "function"){
+          ok = await window.NOVA.replyComment("video", video.id, state.replyParentId, text);
+        }else if(typeof window.NOVA.addComment === "function"){
+          ok = await window.NOVA.addComment("video", video.id, text);
+        }
+        if(!ok){
+          throw new Error("comment_submit_failed");
+        }
+      }else{
+        const payload = {
+          video_id:video.id,
+          user_id:user.id,
+          comment_text:text
+        };
+        if(state.replyParentId) payload.parent_comment_id = state.replyParentId;
 
-      const { error } = await state.supa.from("video_comments").insert(payload);
-      if(error) throw error;
+        const { error } = await state.supa.from("video_comments").insert(payload);
+        if(error){
+          if(isMissingRelationError(error, "video_comments")){
+            state.feature.videoComments = false;
+            if(window.NOVA && typeof window.NOVA.addComment === "function"){
+              let ok = false;
+              if(state.replyParentId && typeof window.NOVA.replyComment === "function"){
+                ok = await window.NOVA.replyComment("video", video.id, state.replyParentId, text);
+              }else{
+                ok = await window.NOVA.addComment("video", video.id, text);
+              }
+              if(!ok) throw new Error("comment_submit_failed");
+            }else{
+              throw error;
+            }
+          }else{
+            throw error;
+          }
+        }
+      }
 
       dom.commentInput.value = "";
       resetReplyTarget();
@@ -1131,12 +1456,27 @@
     }
   }
 
-  async function deleteComment(commentId){
+  async function deleteComment(commentId, compatMode){
     const id = util.safe(commentId);
     if(!id) return;
 
     const user = await api.requireAuth();
     if(!user) return;
+    const useCompat = compatMode || state.feature.videoComments === false;
+
+    if(useCompat){
+      if(!window.NOVA || typeof window.NOVA.deleteCommentById !== "function"){
+        showToast("Delete is unavailable", true);
+        return;
+      }
+      const ok = await window.NOVA.deleteCommentById(id);
+      if(!ok){
+        showToast("Unable to delete comment", true);
+        return;
+      }
+      await loadComments(state.watchToken);
+      return;
+    }
 
     const { error } = await state.supa
       .from("video_comments")
@@ -1153,22 +1493,35 @@
   }
 
   async function toggleCommentLike(commentId){
+    if(state.feature.videoComments === false){
+      showToast("Comment likes are unavailable in this comment mode.", true);
+      return;
+    }
     const id = util.safe(commentId);
     if(!id) return;
 
     const user = await api.requireAuth();
     if(!user) return;
 
-    const { error } = await state.supa.rpc("video_toggle_comment_like_rpc", {
-      p_comment_id: id
-    });
-    if(error){
-      console.error("comment_like_failed", error);
-      showToast("Unable to update comment like", true);
-      return;
+    if(state.feature.rpcToggleCommentLike !== false){
+      const { error } = await state.supa.rpc("video_toggle_comment_like_rpc", {
+        p_comment_id: id
+      });
+      if(!error){
+        state.feature.rpcToggleCommentLike = true;
+        await loadComments(state.watchToken);
+        return;
+      }
+      if(isMissingFunctionError(error, "video_toggle_comment_like_rpc")){
+        state.feature.rpcToggleCommentLike = false;
+      }else{
+        console.error("comment_like_failed", error);
+        showToast("Unable to update comment like", true);
+        return;
+      }
     }
 
-    await loadComments(state.watchToken);
+    showToast("Comment likes are unavailable in this setup.", true);
   }
 
   async function loadRecommendations(token){
@@ -1188,9 +1541,16 @@
 
     try{
       if(video.category) addRows(await api.fetchVideos({ category:video.category, excludeId:video.id, limit:16 }));
-      const tags = util.tags(video.tags);
-      if(tags.length) addRows(await api.fetchVideos({ search:tags[0], excludeId:video.id, limit:16 }));
-      addRows(await api.fetchVideos({ excludeId:video.id, limit:18 }));
+      const tags = util.tags(video.tags).map(tag => util.safe(tag).toLowerCase());
+      const fallbackPool = await api.fetchVideos({ excludeId:video.id, limit:70 });
+      if(tags.length){
+        const matched = fallbackPool.filter(item => {
+          const itemTags = util.tags(item.tags).map(tag => util.safe(tag).toLowerCase());
+          return itemTags.some(tag => tags.includes(tag));
+        });
+        addRows(matched.slice(0, 18));
+      }
+      addRows(fallbackPool.slice(0, 24));
 
       rows.sort((a, b) => Math.max(0, util.num(b.views)) - Math.max(0, util.num(a.views)));
       const top = rows.slice(0, 10);
@@ -1682,6 +2042,9 @@
     const value = util.safe(term);
     state.searchTerm = value;
     if(value) store.pushUnique(SEARCH_HISTORY_KEY, value, 12);
+    if(state.panel !== "feed"){
+      setPanel("feed", true);
+    }
     await loadFeed(true);
   }
 
@@ -1760,6 +2123,20 @@
       setPanel("feed", true);
       try{ dom.player.pause(); }catch(_){ }
     });
+    if(dom.seekBack){
+      dom.seekBack.addEventListener("click", () => {
+        const current = Math.max(0, util.num(dom.player.currentTime));
+        dom.player.currentTime = Math.max(0, current - 10);
+      });
+    }
+    if(dom.seekForward){
+      dom.seekForward.addEventListener("click", () => {
+        const current = Math.max(0, util.num(dom.player.currentTime));
+        const total = Math.max(0, util.num(dom.player.duration));
+        const next = current + 10;
+        dom.player.currentTime = total > 0 ? Math.min(total, next) : next;
+      });
+    }
 
     dom.likeBtn.addEventListener("click", () => toggleReaction("like"));
     dom.dislikeBtn.addEventListener("click", () => toggleReaction("dislike"));
@@ -1800,7 +2177,9 @@
       dom.searchInput.value = "";
       dom.suggestBox.classList.add("mv-hidden");
       state.searchTerm = "";
-      await runSearch("");
+      if(state.panel === "feed"){
+        await runSearch("");
+      }
     });
 
     dom.searchInput.addEventListener("focus", () => {
@@ -1812,7 +2191,11 @@
       clearTimeout(state.suggestDebounce);
       clearTimeout(state.searchDebounce);
       state.suggestDebounce = setTimeout(() => renderSuggestions(dom.searchInput.value), 180);
-      state.searchDebounce = setTimeout(() => runSearch(dom.searchInput.value), 300);
+      state.searchDebounce = setTimeout(() => {
+        if(state.panel === "feed"){
+          runSearch(dom.searchInput.value);
+        }
+      }, 300);
     });
 
     document.addEventListener("click", (event) => {

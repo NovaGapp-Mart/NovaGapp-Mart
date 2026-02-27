@@ -28,15 +28,18 @@
     <button type="button" class="mv-side-btn" data-panel="dashboard">Creator Dashboard <span>&rsaquo;</span></button>
   </aside>
   <main class="mv-main">
-    <section class="mv-view active" id="mvFeedView">
-      <div class="mv-search-wrap">
-        <form class="mv-search-form" id="mvSearchForm">
-          <input type="search" class="mv-search-input" id="mvSearchInput" placeholder="Search videos, tags, channels">
-          <button type="submit" class="mv-search-btn">Search</button>
-          <button type="button" class="mv-clear-btn" id="mvSearchClear">Clear</button>
-        </form>
-        <div id="mvSuggestBox" class="mv-suggest mv-hidden"></div>
+    <div class="mv-search-wrap mv-search-global">
+      <div class="mv-search-tools">
+        <button type="button" class="mv-clear-btn" id="mvSearchClear">Clear</button>
       </div>
+      <form class="mv-search-form" id="mvSearchForm">
+        <input type="search" class="mv-search-input" id="mvSearchInput" placeholder="Search videos, tags, channels">
+        <button type="submit" class="mv-search-btn">Search</button>
+      </form>
+      <div id="mvSuggestBox" class="mv-suggest mv-hidden"></div>
+    </div>
+
+    <section class="mv-view active" id="mvFeedView">
       <div id="mvFeedGrid" class="mv-grid"></div>
       <div id="mvFeedEmpty" class="mv-empty mv-hidden">No videos available yet.</div>
       <div id="mvFeedSentinel" class="mv-sentinel"></div>
@@ -49,6 +52,10 @@
           <div class="mv-player-wrap">
             <video id="mvPlayer" class="mv-player" controls playsinline></video>
           </div>
+          <div class="mv-player-tools">
+            <button type="button" class="mv-action-btn mv-seek-btn" id="mvSeekBack">⏪ 10s</button>
+            <button type="button" class="mv-action-btn mv-seek-btn" id="mvSeekForward">10s ⏩</button>
+          </div>
           <h1 id="mvWatchTitle" class="mv-watch-title"></h1>
           <p id="mvWatchMeta" class="mv-watch-sub"></p>
           <div class="mv-channel-row">
@@ -60,10 +67,10 @@
             <button type="button" class="mv-subscribe-btn" id="mvSubscribeBtn">Subscribe</button>
           </div>
           <div class="mv-action-row">
-            <button type="button" class="mv-action-btn" id="mvLikeBtn"><span>Like</span><span id="mvLikeCount">0</span></button>
-            <button type="button" class="mv-action-btn" id="mvDislikeBtn"><span>Dislike</span><span id="mvDislikeCount">0</span></button>
-            <button type="button" class="mv-action-btn" id="mvShareBtn">Share</button>
-            <button type="button" class="mv-action-btn" id="mvSaveBtn">Save</button>
+            <button type="button" class="mv-action-btn" id="mvLikeBtn"><span class="mv-action-emoji">👍</span><span>Like</span><span id="mvLikeCount">0</span></button>
+            <button type="button" class="mv-action-btn" id="mvDislikeBtn"><span class="mv-action-emoji">👎</span><span>Dislike</span><span id="mvDislikeCount">0</span></button>
+            <button type="button" class="mv-action-btn" id="mvShareBtn"><span class="mv-action-emoji">↗️</span><span>Share</span></button>
+            <button type="button" class="mv-action-btn" id="mvSaveBtn"><span class="mv-action-emoji">🔖</span><span>Save</span></button>
           </div>
           <div class="mv-desc-box">
             <p id="mvDescText" class="mv-desc-text clamp"></p>
@@ -152,7 +159,7 @@
               </div>
               <div class="mv-monetize-meta">
                 <small id="mvMonetizeHint" class="mv-monetize-hint">Monetization needs 5000 followers and a one-time $10 unlock payment.</small>
-                <button type="button" class="mv-upload-btn mv-upload-btn-secondary" id="mvMonetizeUnlockBtn" hidden>Pay $10 to Unlock</button>
+                <button type="button" class="mv-upload-btn mv-upload-btn-secondary" id="mvMonetizeUnlockBtn">Pay $10 to Unlock</button>
               </div>
             </div>
           </div>
