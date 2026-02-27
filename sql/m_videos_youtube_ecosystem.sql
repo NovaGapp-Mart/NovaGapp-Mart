@@ -248,8 +248,8 @@ as $$
 declare
   v_actor uuid := auth.uid();
   v_existing text;
-  v_like integer := 0;
-  v_dislike integer := 0;
+  v_like bigint := 0;
+  v_dislike bigint := 0;
   v_reaction text := null;
 begin
   if v_actor is null then
@@ -351,10 +351,10 @@ begin
     insert into public.video_view_events(video_id, viewer_user_id, viewed_at)
     values (p_video_id, v_actor, now());
 
-    update public.videos
-    set views = views + 1
-    where id = p_video_id
-    returning views into v_views;
+    update public.videos as vv
+    set views = vv.views + 1
+    where vv.id = p_video_id
+    returning vv.views into v_views;
 
     if v_monetized then
       select revenue_per_1000_views
@@ -375,9 +375,9 @@ begin
     );
   end if;
 
-  select views into v_views
-  from public.videos
-  where id = p_video_id;
+  select vv.views into v_views
+  from public.videos vv
+  where vv.id = p_video_id;
 
   return jsonb_build_object(
     'ok', true,

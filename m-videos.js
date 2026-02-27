@@ -58,15 +58,15 @@
     },
     feature:{
       profileLookupEnabled:true,
-      channelSubscribers:null,
-      videoLikes:null,
-      videoComments:null,
-      videoCommentLikes:null,
-      channelMembers:null,
-      rpcRecordView:null,
-      rpcToggleReaction:null,
-      rpcToggleSubscribe:null,
-      rpcToggleCommentLike:null
+      channelSubscribers:false,
+      videoLikes:false,
+      videoComments:false,
+      videoCommentLikes:false,
+      channelMembers:false,
+      rpcRecordView:false,
+      rpcToggleReaction:false,
+      rpcToggleSubscribe:false,
+      rpcToggleCommentLike:false
     }
   };
 
@@ -103,11 +103,9 @@
     dislikeCount:document.getElementById("mvDislikeCount"),
     shareBtn:document.getElementById("mvShareBtn"),
     shareCount:document.getElementById("mvShareCount"),
-    followBtn:document.getElementById("mvFollowBtn"),
-    followLabel:document.getElementById("mvFollowLabel"),
-    followCount:document.getElementById("mvFollowCount"),
+    commentBtn:document.getElementById("mvCommentBtn"),
+    commentActionCount:document.getElementById("mvCommentActionCount"),
     memberBtn:document.getElementById("mvMemberBtn"),
-    memberLabel:document.getElementById("mvMemberLabel"),
     memberCount:document.getElementById("mvMemberCount"),
     saveBtn:document.getElementById("mvSaveBtn"),
     descText:document.getElementById("mvDescText"),
@@ -225,6 +223,25 @@
     if(message.includes("could not find the function")) return true;
     if(message === "not found" || details.includes("not found")) return true;
     if(fnName && message.includes(String(fnName).toLowerCase())) return true;
+    return false;
+  }
+
+  function isBrokenRpcError(err){
+    const code = errorCode(err);
+    const message = util.safe(err?.message).toLowerCase();
+    const details = util.safe(err?.details).toLowerCase();
+    if(code === "42702" || code === "42804" || code === "42P13"){
+      return true;
+    }
+    if(message.includes("ambiguous") || details.includes("ambiguous")){
+      return true;
+    }
+    if(message.includes("structure of query does not match function result type")){
+      return true;
+    }
+    if(details.includes("does not match expected type")){
+      return true;
+    }
     return false;
   }
 
@@ -409,33 +426,30 @@
     const followerCount = Math.max(0, util.num(state.channelSubscribers));
     const memberCount = Math.max(0, util.num(state.channelMembers || followerCount));
     const shareCount = Math.max(0, util.num(state.shareCount));
-
-    if(dom.followCount){
-      dom.followCount.textContent = util.compact(followerCount);
-    }
-    if(dom.followLabel){
-      if(selfChannel) dom.followLabel.textContent = "Your Channel";
-      else dom.followLabel.textContent = state.subscribed ? "Following" : "Follow";
-    }
-    if(dom.followBtn){
-      dom.followBtn.classList.toggle("active", !!state.subscribed || selfChannel);
-      dom.followBtn.disabled = !!state.subscribeBusy || selfChannel;
-    }
+    const memberText = selfChannel ? "Owner" : (state.memberJoined ? "Member" : "Join");
 
     if(dom.memberCount){
       dom.memberCount.textContent = util.compact(memberCount);
     }
-    if(dom.memberLabel){
-      if(selfChannel) dom.memberLabel.textContent = "Owner";
-      else dom.memberLabel.textContent = state.memberJoined ? "Member" : "Join";
-    }
     if(dom.memberBtn){
       dom.memberBtn.classList.toggle("active", !!state.memberJoined || selfChannel);
       dom.memberBtn.disabled = !!state.memberBusy || selfChannel;
+      dom.memberBtn.innerHTML = memberText + ' <span id="mvMemberCount">' + util.esc(util.compact(memberCount)) + "</span>";
+      dom.memberCount = dom.memberBtn.querySelector("#mvMemberCount");
     }
 
     if(dom.shareCount){
       dom.shareCount.textContent = util.compact(shareCount);
+    }
+    if(dom.subscribeBtn){
+      dom.subscribeBtn.classList.toggle("active", !!state.subscribed || selfChannel);
+      dom.subscribeBtn.disabled = !!state.subscribeBusy || selfChannel;
+      dom.subscribeBtn.textContent = selfChannel ? "Your Channel" : (state.subscribed ? "Following" : "Follow");
+    }
+    if(dom.watchChannelSub){
+      const followerText = util.compact(followerCount) + " followers";
+      const memberMeta = util.compact(memberCount) + " members";
+      dom.watchChannelSub.textContent = followerText + " . " + memberMeta;
     }
   }
 
@@ -1183,9 +1197,11 @@
     dom.watchMeta.textContent = util.compact(video.views) + " views . " + util.ago(video.created_at);
     dom.watchAvatar.innerHTML = avatarHtml(channel);
     dom.watchChannelName.textContent = channel.name;
-    dom.watchChannelSub.textContent = util.compact(channel.subscribers) + " subscribers";
+    dom.watchChannelSub.textContent = util.compact(channel.subscribers) + " followers . " + util.compact(channel.subscribers) + " members";
     dom.likeCount.textContent = util.compact(video.likes_count);
     dom.dislikeCount.textContent = util.compact(video.dislikes_count);
+    dom.commentCount.textContent = "0";
+    if(dom.commentActionCount) dom.commentActionCount.textContent = "0";
     state.shareCount = 0;
     state.channelSubscribers = Math.max(0, util.num(channel.subscribers));
     state.channelMembers = Math.max(0, util.num(channel.subscribers));
@@ -1255,34 +1271,19 @@
       subscribers:state.channelSubscribers
     });
 
-    dom.watchChannelSub.textContent = util.compact(state.channelSubscribers) + " subscribers";
-    if(!dom.subscribeBtn){
-      renderActionMetrics();
-      return;
-    }
-
     if(!user){
       state.subscribed = false;
-      dom.subscribeBtn.disabled = false;
-      dom.subscribeBtn.classList.remove("active");
-      dom.subscribeBtn.textContent = "Follow";
       renderActionMetrics();
       return;
     }
 
     if(util.safe(user.id) === channelId){
-      dom.subscribeBtn.disabled = true;
-      dom.subscribeBtn.classList.add("active");
-      dom.subscribeBtn.textContent = "Your Channel";
       state.subscribed = false;
       renderActionMetrics();
       return;
     }
 
     state.subscribed = await api.isSubscribed(channelId, user.id);
-    dom.subscribeBtn.disabled = false;
-    dom.subscribeBtn.classList.toggle("active", state.subscribed);
-    dom.subscribeBtn.textContent = state.subscribed ? "Following" : "Follow";
     renderActionMetrics();
   }
 
@@ -1322,6 +1323,8 @@
         return;
       }
       if(isMissingFunctionError(error, "video_record_view_rpc")){
+        state.feature.rpcRecordView = false;
+      }else if(isBrokenRpcError(error)){
         state.feature.rpcRecordView = false;
       }else{
         console.error("record_view_failed", error);
@@ -1394,6 +1397,8 @@
           handled = true;
         }else if(isMissingFunctionError(error, "video_toggle_reaction_rpc")){
           state.feature.rpcToggleReaction = false;
+        }else if(isBrokenRpcError(error)){
+          state.feature.rpcToggleReaction = false;
         }else{
           throw error;
         }
@@ -1446,6 +1451,8 @@
           handled = true;
         }else if(isMissingFunctionError(error, "video_toggle_subscribe_rpc")){
           state.feature.rpcToggleSubscribe = false;
+        }else if(isBrokenRpcError(error)){
+          state.feature.rpcToggleSubscribe = false;
         }else{
           throw error;
         }
@@ -1474,10 +1481,6 @@
         avatar:channel.avatar,
         subscribers:state.channelSubscribers
       });
-
-      dom.subscribeBtn.classList.toggle("active", state.subscribed);
-      dom.subscribeBtn.textContent = state.subscribed ? "Following" : "Follow";
-      dom.watchChannelSub.textContent = util.compact(state.channelSubscribers) + " subscribers";
       renderActionMetrics();
     }catch(err){
       console.error("toggle_subscribe_failed", err);
@@ -1580,6 +1583,7 @@
         dom.commentsEmpty.classList.remove("mv-hidden");
         dom.commentsEmpty.textContent = "Unable to load comments.";
         dom.commentCount.textContent = "0";
+        if(dom.commentActionCount) dom.commentActionCount.textContent = "0";
         return;
       }
     }
@@ -1590,6 +1594,7 @@
         dom.commentsEmpty.classList.remove("mv-hidden");
         dom.commentsEmpty.textContent = "Comments are unavailable right now.";
         dom.commentCount.textContent = "0";
+        if(dom.commentActionCount) dom.commentActionCount.textContent = "0";
         return;
       }
       const thread = await window.NOVA.getCommentThread("video", video.id, {
@@ -1602,6 +1607,7 @@
         dom.commentsEmpty.classList.remove("mv-hidden");
         dom.commentsEmpty.textContent = "Unable to load comments.";
         dom.commentCount.textContent = "0";
+        if(dom.commentActionCount) dom.commentActionCount.textContent = "0";
         return;
       }
       compatMode = true;
@@ -1617,6 +1623,9 @@
     }
 
     dom.commentCount.textContent = String(rows.length);
+    if(dom.commentActionCount){
+      dom.commentActionCount.textContent = util.compact(rows.length);
+    }
     if(!rows.length){
       dom.commentsList.innerHTML = "";
       dom.commentsEmpty.classList.remove("mv-hidden");
@@ -1885,7 +1894,27 @@
       });
     }catch(err){
       console.error("recommend_failed", err);
-      dom.recommendList.innerHTML = '<div class="mv-empty">Unable to load recommendations.</div>';
+      const fallback = Array.from(state.videos.values())
+        .filter(item => item && item.id && item.id !== video.id)
+        .sort((a, b) => Math.max(0, util.num(b.views)) - Math.max(0, util.num(a.views)))
+        .slice(0, 10);
+      if(!fallback.length){
+        dom.recommendList.innerHTML = '<div class="mv-empty">Unable to load recommendations.</div>';
+        return;
+      }
+      dom.recommendList.innerHTML = "";
+      await api.fetchProfiles(fallback.map(item => item.user_id));
+      fallback.forEach(item => {
+        const channel = getChannel(item.user_id);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "mv-rec-item";
+        button.innerHTML =
+          '<div class="mv-rec-thumb"><img src="' + util.esc(item.thumbnail_url || "Images/no-image.jpg") + '" alt="' + util.esc(item.title) + '"></div>' +
+          '<div class="mv-rec-body"><p class="mv-rec-title">' + util.esc(item.title) + '</p><p class="mv-rec-sub">' + util.esc(channel.name + " . " + util.compact(item.views) + " views") + '</p></div>';
+        button.addEventListener("click", () => openVideo(item.id, true, true));
+        dom.recommendList.appendChild(button);
+      });
     }
   }
 
@@ -2289,50 +2318,55 @@
       }
     });
 
-    channel.on("postgres_changes", { event:"*", schema:"public", table:"video_likes" }, (payload) => {
-      const id = util.safe(payload.new?.video_id || payload.old?.video_id);
-      if(!id) return;
-      schedule("likes_" + id, () => refreshVideo(id), 120);
-      if(id === state.activeVideoId) schedule("reaction_state", () => loadReactionState(state.watchToken), 180);
-    });
+    if(state.feature.videoLikes !== false){
+      channel.on("postgres_changes", { event:"*", schema:"public", table:"video_likes" }, (payload) => {
+        const id = util.safe(payload.new?.video_id || payload.old?.video_id);
+        if(!id) return;
+        schedule("likes_" + id, () => refreshVideo(id), 120);
+        if(id === state.activeVideoId) schedule("reaction_state", () => loadReactionState(state.watchToken), 180);
+      });
+    }
 
-    channel.on("postgres_changes", { event:"*", schema:"public", table:"video_comments" }, (payload) => {
-      const id = util.safe(payload.new?.video_id || payload.old?.video_id);
-      if(!id || id !== state.activeVideoId) return;
-      schedule("comments", () => loadComments(state.watchToken), 140);
-    });
+    if(state.feature.videoComments !== false){
+      channel.on("postgres_changes", { event:"*", schema:"public", table:"video_comments" }, (payload) => {
+        const id = util.safe(payload.new?.video_id || payload.old?.video_id);
+        if(!id || id !== state.activeVideoId) return;
+        schedule("comments", () => loadComments(state.watchToken), 140);
+      });
+    }
 
-    channel.on("postgres_changes", { event:"*", schema:"public", table:"channel_subscribers" }, (payload) => {
-      const channelId = util.safe(payload.new?.channel_id || payload.old?.channel_id);
-      if(!channelId) return;
-      schedule("subs_" + channelId, async () => {
-        const { count } = await state.supa
-          .from("channel_subscribers")
-          .select("subscriber_user_id", { count:"exact", head:true })
-          .eq("channel_id", channelId);
+    if(state.feature.channelSubscribers !== false){
+      channel.on("postgres_changes", { event:"*", schema:"public", table:"channel_subscribers" }, (payload) => {
+        const channelId = util.safe(payload.new?.channel_id || payload.old?.channel_id);
+        if(!channelId) return;
+        schedule("subs_" + channelId, async () => {
+          const { count } = await state.supa
+            .from("channel_subscribers")
+            .select("subscriber_user_id", { count:"exact", head:true })
+            .eq("channel_id", channelId);
 
-        const channelRow = getChannel(channelId);
-        const nextSubscribers = Math.max(0, util.num(count));
-        state.channels.set(channelId, {
-          id:channelId,
-          name:channelRow.name,
-          avatar:channelRow.avatar,
-          subscribers:nextSubscribers
-        });
+          const channelRow = getChannel(channelId);
+          const nextSubscribers = Math.max(0, util.num(count));
+          state.channels.set(channelId, {
+            id:channelId,
+            name:channelRow.name,
+            avatar:channelRow.avatar,
+            subscribers:nextSubscribers
+          });
 
-        if(currentVideo() && util.safe(currentVideo().user_id) === channelId){
-          state.channelSubscribers = nextSubscribers;
-          if(state.feature.channelMembers === false){
-            state.channelMembers = nextSubscribers;
+          if(currentVideo() && util.safe(currentVideo().user_id) === channelId){
+            state.channelSubscribers = nextSubscribers;
+            if(state.feature.channelMembers === false){
+              state.channelMembers = nextSubscribers;
+            }
+            renderActionMetrics();
           }
-          dom.watchChannelSub.textContent = util.compact(nextSubscribers) + " subscribers";
-          renderActionMetrics();
+        }, 180);
+        if(state.me && util.safe(state.me.id) === channelId){
+          schedule("monetization_subs", () => refreshMonetizationStatus(), 260);
         }
-      }, 180);
-      if(state.me && util.safe(state.me.id) === channelId){
-        schedule("monetization_subs", () => refreshMonetizationStatus(), 260);
-      }
-    });
+      });
+    }
 
     channel.on("postgres_changes", { event:"*", schema:"public", table:"follows" }, (payload) => {
       const followingId = util.safe(payload.new?.following_id || payload.old?.following_id);
@@ -2342,17 +2376,19 @@
       }
     });
 
-    channel.on("postgres_changes", { event:"*", schema:"public", table:"channel_members" }, (payload) => {
-      const channelId = util.safe(payload.new?.channel_id || payload.old?.channel_id);
-      if(!channelId) return;
-      schedule("members_" + channelId, async () => {
-        const nextMembers = await api.getMemberCount(channelId);
-        if(currentVideo() && util.safe(currentVideo().user_id) === channelId){
-          state.channelMembers = Math.max(0, util.num(nextMembers));
-          renderActionMetrics();
-        }
-      }, 200);
-    });
+    if(state.feature.channelMembers !== false){
+      channel.on("postgres_changes", { event:"*", schema:"public", table:"channel_members" }, (payload) => {
+        const channelId = util.safe(payload.new?.channel_id || payload.old?.channel_id);
+        if(!channelId) return;
+        schedule("members_" + channelId, async () => {
+          const nextMembers = await api.getMemberCount(channelId);
+          if(currentVideo() && util.safe(currentVideo().user_id) === channelId){
+            state.channelMembers = Math.max(0, util.num(nextMembers));
+            renderActionMetrics();
+          }
+        }, 200);
+      });
+    }
 
     channel.on("postgres_changes", { event:"*", schema:"public", table:"video_earnings" }, (payload) => {
       const userId = util.safe(payload.new?.user_id || payload.old?.user_id);
@@ -2469,9 +2505,6 @@
     dom.likeBtn.addEventListener("click", () => toggleReaction("like"));
     dom.dislikeBtn.addEventListener("click", () => toggleReaction("dislike"));
     dom.subscribeBtn.addEventListener("click", toggleSubscribe);
-    if(dom.followBtn){
-      dom.followBtn.addEventListener("click", toggleSubscribe);
-    }
     if(dom.memberBtn){
       dom.memberBtn.addEventListener("click", toggleMember);
     }
@@ -2479,6 +2512,16 @@
       const video = currentVideo();
       if(video) shareVideo(video.id);
     });
+    if(dom.commentBtn){
+      dom.commentBtn.addEventListener("click", () => {
+        if(dom.commentInput && typeof dom.commentInput.focus === "function"){
+          dom.commentInput.focus();
+        }
+        if(dom.commentForm && typeof dom.commentForm.scrollIntoView === "function"){
+          dom.commentForm.scrollIntoView({ behavior:"smooth", block:"center" });
+        }
+      });
+    }
     if(dom.saveBtn){
       dom.saveBtn.addEventListener("click", () => {
         const video = currentVideo();

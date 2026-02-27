@@ -460,9 +460,11 @@ body.mv-body{
   border:1px solid var(--mv-border);
   border-radius:12px;
   padding:10px;
+  flex-wrap:wrap;
 }
 .mv-channel-meta{
   min-width:0;
+  flex:1;
 }
 .mv-channel-name{
   margin:0;
@@ -478,7 +480,6 @@ body.mv-body{
   color:var(--mv-sub);
 }
 .mv-subscribe-btn{
-  margin-left:auto;
   border:none;
   border-radius:999px;
   padding:10px 14px;
@@ -487,6 +488,18 @@ body.mv-body{
   background:var(--mv-text);
   color:var(--mv-card);
   cursor:pointer;
+}
+.mv-subscribe-btn#mvSubscribeBtn{
+  margin-left:auto;
+}
+.mv-member-btn{
+  background:var(--mv-card);
+  color:var(--mv-text);
+  border:1px solid var(--mv-border);
+}
+.mv-member-btn.active{
+  background:var(--mv-muted);
+  border-color:rgba(255,106,0,.45);
 }
 .mv-subscribe-btn.active{
   background:var(--mv-muted);
@@ -1108,6 +1121,17 @@ body.mv-body{
   .mv-action-btn{
     width:100%;
     justify-content:space-between;
+  }
+  .mv-channel-row{
+    gap:8px;
+  }
+  .mv-subscribe-btn{
+    width:calc(50% - 4px);
+    margin-left:0 !important;
+    justify-content:center;
+    display:flex;
+    align-items:center;
+    gap:6px;
   }
   .mv-rec-thumb{
     width:120px;
