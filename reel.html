@@ -548,6 +548,8 @@ const feedUserId = params.get("uid") || "";
 const focusReelId = params.get("focus") || "";
 let focusApplied = false;
 let userAudioUnlocked = false;
+let playbackSyncQueued = false;
+let playbackPreferredReel = null;
 
 function randomInt(maxExclusive){
   const max = Math.max(1, Number(maxExclusive) || 1);
@@ -559,15 +561,93 @@ function randomInt(maxExclusive){
   return Math.floor(Math.random() * max);
 }
 
+function getMostVisibleReel(){
+  const reels = Array.from(reelWrapper.querySelectorAll(".reel"));
+  if(!reels.length) return null;
+  const viewport = reelWrapper.getBoundingClientRect();
+  const viewportCenter = viewport.top + (viewport.height / 2);
+  let bestReel = null;
+  let bestRatio = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  reels.forEach(reel => {
+    const rect = reel.getBoundingClientRect();
+    const overlap = Math.min(rect.bottom, viewport.bottom) - Math.max(rect.top, viewport.top);
+    if(overlap <= 0) return;
+
+    const ratio = overlap / Math.max(1, rect.height);
+    const center = rect.top + (rect.height / 2);
+    const distance = Math.abs(center - viewportCenter);
+
+    if(ratio > bestRatio || (Math.abs(ratio - bestRatio) < 0.0001 && distance < bestDistance)){
+      bestRatio = ratio;
+      bestDistance = distance;
+      bestReel = reel;
+    }
+  });
+
+  return bestReel;
+}
+
+function setVideoMutedState(video, muted){
+  if(!(video instanceof HTMLVideoElement)) return;
+  const shouldMute = !!muted;
+  video.muted = shouldMute;
+  video.volume = shouldMute ? 0 : 1;
+  if(shouldMute){
+    video.setAttribute("muted", "");
+  }else{
+    video.removeAttribute("muted");
+  }
+}
+
+function enforceSingleActiveReelPlayback(preferredReel){
+  const activeReel = preferredReel || getMostVisibleReel();
+  reelWrapper.querySelectorAll(".reel video").forEach(video => {
+    if(!(video instanceof HTMLVideoElement)) return;
+    const ownerReel = video.closest(".reel");
+    const isActive = !!activeReel && ownerReel === activeReel;
+
+    if(!isActive){
+      setVideoMutedState(video, true);
+      if(!video.paused){
+        video.pause();
+      }
+      return;
+    }
+
+    if(video.dataset.userPaused === "1"){
+      if(!video.paused){
+        video.pause();
+      }
+      return;
+    }
+
+    setVideoMutedState(video, !userAudioUnlocked);
+    video.play().catch(() => {
+      setVideoMutedState(video, true);
+      video.play().catch(() => {});
+    });
+  });
+}
+
+function scheduleActivePlaybackSync(preferredReel){
+  if(preferredReel){
+    playbackPreferredReel = preferredReel;
+  }
+  if(playbackSyncQueued) return;
+  playbackSyncQueued = true;
+  requestAnimationFrame(() => {
+    playbackSyncQueued = false;
+    const reel = playbackPreferredReel || getMostVisibleReel();
+    playbackPreferredReel = null;
+    enforceSingleActiveReelPlayback(reel);
+  });
+}
+
 function unlockReelAudio(){
   userAudioUnlocked = true;
-  reelWrapper.querySelectorAll(".reel video").forEach((video) => {
-    if(!(video instanceof HTMLVideoElement)) return;
-    if(video.dataset.userPaused === "1") return;
-    video.muted = false;
-    video.volume = 1;
-    video.play().catch(() => {});
-  });
+  scheduleActivePlaybackSync();
 }
 
 document.addEventListener("pointerdown", unlockReelAudio, { once:true, passive:true });
@@ -1139,32 +1219,12 @@ async function markReelView(reelEl){
 
 const observer = new IntersectionObserver(entries => {
   entries.forEach(entry => {
-    const video = entry.target.querySelector("video");
-    if(!video) return;
     if(entry.isIntersecting){
       markReelView(entry.target);
-      if(video.dataset.userPaused !== "1"){
-        if(userAudioUnlocked){
-          video.muted = false;
-          video.volume = 1;
-          video.play().catch(() => {
-            video.muted = true;
-            video.setAttribute("muted", "");
-            video.volume = 0;
-            video.play().catch(() => {});
-          });
-        }else{
-          video.muted = true;
-          video.setAttribute("muted", "");
-          video.volume = 0;
-          video.play().catch(()=>{});
-        }
-      }
-    }else{
-      video.pause();
     }
   });
-},{ threshold:0.6 });
+  scheduleActivePlaybackSync();
+},{ threshold:[0.35, 0.6, 0.85] });
 
 async function getFollowerCount(userId){
   const key = String(userId || "");
@@ -1275,6 +1335,16 @@ async function loadMore(){
   }
 
   if(!data || !data.length){
+    if(!searchMode && renderedIds.size){
+      page = 0;
+      done = false;
+      boostedOwnReelIds.clear();
+      renderedIds.clear();
+      loading = false;
+      await sleep(40);
+      loadMore();
+      return;
+    }
     done = true;
     loading = false;
     return;
@@ -1391,6 +1461,7 @@ async function renderReel(item, options){
   if(focusReelId && String(item.id) === String(focusReelId)){
     focusReelElement(reel);
   }
+  scheduleActivePlaybackSync();
 
   const videoEl = reel.querySelector("video");
   if(videoEl){
@@ -1554,17 +1625,19 @@ async function renderReel(item, options){
     if(videoEl.muted){
       userAudioUnlocked = true;
       videoEl.dataset.userPaused = "0";
-      videoEl.muted = false;
-      videoEl.volume = 1;
-      videoEl.play().catch(()=>{});
+      setVideoMutedState(videoEl, false);
+      videoEl.play().catch(() => {});
+      scheduleActivePlaybackSync(reel);
       return;
     }
     if(videoEl.paused){
       videoEl.dataset.userPaused = "0";
-      videoEl.play().catch(()=>{});
+      videoEl.play().catch(() => {});
+      scheduleActivePlaybackSync(reel);
     }else{
       videoEl.dataset.userPaused = "1";
       videoEl.pause();
+      scheduleActivePlaybackSync();
     }
   }
 
@@ -1747,6 +1820,9 @@ const scrollObserver = new IntersectionObserver(entries => {
   }
 },{ root: reelWrapper, rootMargin:"200px" });
 scrollObserver.observe(sentinel);
+reelWrapper.addEventListener("scroll", () => {
+  scheduleActivePlaybackSync();
+}, { passive:true });
 
 function renderCachedUpload(){
   try{
