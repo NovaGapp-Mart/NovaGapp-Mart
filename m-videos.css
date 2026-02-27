@@ -31,6 +31,9 @@ body.mv-body{
   min-height:100vh;
   padding-bottom:calc(72px + env(safe-area-inset-bottom, 0px));
 }
+.mv-body button{
+  width:auto;
+}
 .mv-topbar{
   position:sticky;
   top:0;
