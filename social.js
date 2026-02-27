@@ -1065,11 +1065,29 @@
   let shareStorageMode = "";
   let shareStorageModePromise = null;
 
+  function getSupabaseStatus(error){
+    const direct = Number(error?.status);
+    if(Number.isFinite(direct) && direct > 0) return direct;
+    const nested = Number(error?.response?.status);
+    if(Number.isFinite(nested) && nested > 0) return nested;
+    return 0;
+  }
+
   function isMissingRelation(error, relationName){
     const text = getSupabaseErrorText(error).toLowerCase();
+    const status = getSupabaseStatus(error);
     const relation = String(relationName || "").toLowerCase();
-    if(!text || !relation) return false;
-    return text.includes("does not exist") && text.includes(relation);
+    if(status === 404) return true;
+    if(!text){
+      return false;
+    }
+    if(!relation){
+      return text.includes("does not exist") || text.includes("could not find the table") || text.includes("not found");
+    }
+    if(text.includes("could not find the table") && text.includes(relation)) return true;
+    if(text.includes("does not exist") && text.includes(relation)) return true;
+    if(text.includes("not found") && text.includes(relation)) return true;
+    return false;
   }
 
   async function detectShareStorageMode(){
@@ -1383,6 +1401,111 @@
     const encoded = encodeCommentEvent(payload);
     return insertCommentCompat(user.id, targetType, targetId, encoded);
   }
+
+  const VIDEO_VIEW_CACHE_KEY = "__NOVA_VIDEO_VIEW_CACHE__";
+  const VIDEO_VIEW_MIN_REPEAT_MS = 10 * 60 * 1000;
+
+  function shouldTrackVideoViewLocally(videoId, viewerId){
+    const vId = String(videoId || "").trim();
+    const uId = String(viewerId || "").trim();
+    if(!vId || !uId) return false;
+    const key = `${vId}:${uId}`;
+    const now = Date.now();
+    let store = {};
+    try{
+      store = JSON.parse(localStorage.getItem(VIDEO_VIEW_CACHE_KEY) || "{}") || {};
+    }catch(_){
+      store = {};
+    }
+    const last = Number(store[key] || 0);
+    if(Number.isFinite(last) && last > 0 && now - last < VIDEO_VIEW_MIN_REPEAT_MS){
+      return false;
+    }
+    store[key] = now;
+    const cutoff = now - (2 * 24 * 60 * 60 * 1000);
+    Object.keys(store).forEach(entryKey => {
+      const ts = Number(store[entryKey] || 0);
+      if(!Number.isFinite(ts) || ts < cutoff){
+        delete store[entryKey];
+      }
+    });
+    try{
+      localStorage.setItem(VIDEO_VIEW_CACHE_KEY, JSON.stringify(store));
+    }catch(_){ }
+    return true;
+  }
+
+  async function readVideoViewCountFromCommentEvents(videoId){
+    const cleanId = String(videoId || "").trim();
+    if(!cleanId){
+      return { count:0, error:new Error("video_id_required") };
+    }
+    const { data, error } = await fetchCommentRowsCompat("video", cleanId, 5000);
+    if(error){
+      return { count:0, error };
+    }
+
+    let totalEvents = 0;
+    const viewers = new Set();
+    (data || []).forEach(row => {
+      const evt = parseCommentEvent(extractCommentBody(row));
+      if(!evt || evt.kind !== "video_view") return;
+      totalEvents += 1;
+      const viewerId = String(evt.viewerId || evt.userId || row?.user_id || "").trim();
+      if(viewerId) viewers.add(viewerId);
+    });
+    const count = viewers.size || totalEvents;
+    return { count:Math.max(0, Number(count || 0)), error:null };
+  }
+
+  window.NOVA.getVideoViewCount = async function(videoId){
+    const result = await readVideoViewCountFromCommentEvents(videoId);
+    if(result.error){
+      return 0;
+    }
+    return Math.max(0, Number(result.count || 0));
+  };
+
+  window.NOVA.trackVideoView = async function(videoId){
+    const cleanId = String(videoId || "").trim();
+    if(!cleanId){
+      return { ok:false, error:new Error("video_id_required"), counted:false, count:0, views:0 };
+    }
+    const user = await window.NOVA.requireUser();
+    const viewerId = String(user?.id || "").trim();
+    if(!viewerId){
+      return { ok:false, error:new Error("auth_required"), counted:false, count:0, views:0 };
+    }
+
+    let counted = false;
+    if(shouldTrackVideoViewLocally(cleanId, viewerId)){
+      const inserted = await addCommentEvent("video", cleanId, {
+        v: 1,
+        kind: "video_view",
+        viewerId
+      });
+      if(!inserted.ok){
+        const fallbackCount = await readVideoViewCountFromCommentEvents(cleanId);
+        return {
+          ok:false,
+          error:inserted.error || new Error("video_view_insert_failed"),
+          counted:false,
+          count:Math.max(0, Number(fallbackCount.count || 0)),
+          views:Math.max(0, Number(fallbackCount.count || 0))
+        };
+      }
+      counted = true;
+    }
+
+    const next = await readVideoViewCountFromCommentEvents(cleanId);
+    return {
+      ok:!next.error,
+      error:next.error || null,
+      counted,
+      count:Math.max(0, Number(next.count || 0)),
+      views:Math.max(0, Number(next.count || 0))
+    };
+  };
 
   async function readShareCountFromCommentEvents(targetType, targetId){
     const { data, error } = await fetchCommentRowsCompat(targetType, targetId, 5000);

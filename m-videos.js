@@ -32,8 +32,12 @@
     activeReaction:null,
     subscribed:false,
     channelSubscribers:0,
+    channelMembers:0,
+    memberJoined:false,
+    shareCount:0,
     reactionBusy:false,
     subscribeBusy:false,
+    memberBusy:false,
     commentBusy:false,
     replyParentId:"",
     watchToken:0,
@@ -58,6 +62,7 @@
       videoLikes:null,
       videoComments:null,
       videoCommentLikes:null,
+      channelMembers:null,
       rpcRecordView:null,
       rpcToggleReaction:null,
       rpcToggleSubscribe:null,
@@ -97,6 +102,13 @@
     likeCount:document.getElementById("mvLikeCount"),
     dislikeCount:document.getElementById("mvDislikeCount"),
     shareBtn:document.getElementById("mvShareBtn"),
+    shareCount:document.getElementById("mvShareCount"),
+    followBtn:document.getElementById("mvFollowBtn"),
+    followLabel:document.getElementById("mvFollowLabel"),
+    followCount:document.getElementById("mvFollowCount"),
+    memberBtn:document.getElementById("mvMemberBtn"),
+    memberLabel:document.getElementById("mvMemberLabel"),
+    memberCount:document.getElementById("mvMemberCount"),
     saveBtn:document.getElementById("mvSaveBtn"),
     descText:document.getElementById("mvDescText"),
     descToggle:document.getElementById("mvDescToggle"),
@@ -162,12 +174,42 @@
     return util.safe(err?.code).toUpperCase();
   }
 
+  function errorStatus(err){
+    const direct = Number(err?.status);
+    if(Number.isFinite(direct) && direct > 0) return direct;
+    const nested = Number(err?.response?.status);
+    if(Number.isFinite(nested) && nested > 0) return nested;
+    return 0;
+  }
+
   function isMissingRelationError(err, relationName){
     const code = errorCode(err);
+    const status = errorStatus(err);
     const message = util.safe(err?.message).toLowerCase();
+    const details = util.safe(err?.details).toLowerCase();
+    if(status === 404) return true;
     if(code === "PGRST205" || code === "42P01") return true;
     if(message.includes("could not find the table")) return true;
-    if(relationName && message.includes(`public.${String(relationName).toLowerCase()}`)){
+    if(message.includes("relation") && message.includes("does not exist")) return true;
+    if(message === "not found" || details.includes("not found")) return true;
+    if(relationName){
+      const relation = String(relationName).toLowerCase();
+      if(message.includes(`public.${relation}`) || details.includes(`public.${relation}`)){
+        return true;
+      }
+      if(message.includes(relation) && (message.includes("not found") || message.includes("does not exist"))){
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function isNoRowsError(err){
+    const code = errorCode(err);
+    const status = errorStatus(err);
+    const message = util.safe(err?.message).toLowerCase();
+    if(code === "PGRST116") return true;
+    if(status === 406 && (message.includes("results contain 0 rows") || message.includes("json object requested"))){
       return true;
     }
     return false;
@@ -175,9 +217,13 @@
 
   function isMissingFunctionError(err, fnName){
     const code = errorCode(err);
+    const status = errorStatus(err);
     const message = util.safe(err?.message).toLowerCase();
+    const details = util.safe(err?.details).toLowerCase();
+    if(status === 404) return true;
     if(code === "PGRST202" || code === "42883") return true;
     if(message.includes("could not find the function")) return true;
+    if(message === "not found" || details.includes("not found")) return true;
     if(fnName && message.includes(String(fnName).toLowerCase())) return true;
     return false;
   }
@@ -338,6 +384,7 @@
   }
 
   function setSaveButton(){
+    if(!dom.saveBtn) return;
     const video = currentVideo();
     if(!video){
       dom.saveBtn.textContent = "Save";
@@ -353,6 +400,43 @@
   function setReactionButtons(){
     dom.likeBtn.classList.toggle("active", state.activeReaction === "like");
     dom.dislikeBtn.classList.toggle("active", state.activeReaction === "dislike");
+  }
+
+  function renderActionMetrics(){
+    const video = currentVideo();
+    const channelId = util.safe(video?.user_id);
+    const selfChannel = !!(state.me && channelId && util.safe(state.me.id) === channelId);
+    const followerCount = Math.max(0, util.num(state.channelSubscribers));
+    const memberCount = Math.max(0, util.num(state.channelMembers || followerCount));
+    const shareCount = Math.max(0, util.num(state.shareCount));
+
+    if(dom.followCount){
+      dom.followCount.textContent = util.compact(followerCount);
+    }
+    if(dom.followLabel){
+      if(selfChannel) dom.followLabel.textContent = "Your Channel";
+      else dom.followLabel.textContent = state.subscribed ? "Following" : "Follow";
+    }
+    if(dom.followBtn){
+      dom.followBtn.classList.toggle("active", !!state.subscribed || selfChannel);
+      dom.followBtn.disabled = !!state.subscribeBusy || selfChannel;
+    }
+
+    if(dom.memberCount){
+      dom.memberCount.textContent = util.compact(memberCount);
+    }
+    if(dom.memberLabel){
+      if(selfChannel) dom.memberLabel.textContent = "Owner";
+      else dom.memberLabel.textContent = state.memberJoined ? "Member" : "Join";
+    }
+    if(dom.memberBtn){
+      dom.memberBtn.classList.toggle("active", !!state.memberJoined || selfChannel);
+      dom.memberBtn.disabled = !!state.memberBusy || selfChannel;
+    }
+
+    if(dom.shareCount){
+      dom.shareCount.textContent = util.compact(shareCount);
+    }
   }
 
   async function getReactionCountsCompat(videoId){
@@ -739,6 +823,50 @@
       return Array.isArray(data) && data.length > 0;
     },
 
+    async getMemberCount(channelId){
+      const id = util.safe(channelId);
+      if(!id) return 0;
+
+      if(state.feature.channelMembers !== false){
+        const members = await state.supa
+          .from("channel_members")
+          .select("member_user_id", { count:"exact", head:true })
+          .eq("channel_id", id);
+        if(!members.error){
+          state.feature.channelMembers = true;
+          return Math.max(0, util.num(members.count));
+        }
+        if(isMissingRelationError(members.error, "channel_members")){
+          state.feature.channelMembers = false;
+        }
+      }
+      return api.getSubscriberCount(id);
+    },
+
+    async isMember(channelId, userId){
+      const cId = util.safe(channelId);
+      const uId = util.safe(userId);
+      if(!cId || !uId) return false;
+
+      if(state.feature.channelMembers !== false){
+        const { data, error } = await state.supa
+          .from("channel_members")
+          .select("member_user_id")
+          .eq("channel_id", cId)
+          .eq("member_user_id", uId)
+          .limit(1);
+        if(!error){
+          state.feature.channelMembers = true;
+          return Array.isArray(data) && data.length > 0;
+        }
+        if(isMissingRelationError(error, "channel_members")){
+          state.feature.channelMembers = false;
+        }
+      }
+
+      return api.isSubscribed(cId, uId);
+    },
+
     async fetchMonetizationStatus(userId){
       const id = util.safe(userId);
       if(!id){
@@ -959,26 +1087,74 @@
     }
   }
 
+  async function refreshShareCount(videoId){
+    const id = util.safe(videoId);
+    if(!id){
+      state.shareCount = 0;
+      renderActionMetrics();
+      return 0;
+    }
+
+    let count = 0;
+    if(window.NOVA && typeof window.NOVA.getShareCount === "function"){
+      try{
+        count = Math.max(0, util.num(await window.NOVA.getShareCount("video", id)));
+      }catch(_){ }
+    }
+    state.shareCount = count;
+    if(state.activeVideoId === id){
+      renderActionMetrics();
+    }
+    return count;
+  }
+
   async function shareVideo(videoId){
     const id = util.safe(videoId);
     if(!id) return;
     const video = state.videos.get(id);
     const url = new URL("m-videos.html", location.href);
     url.searchParams.set("v", id);
+
+    let tracked = false;
+    let channel = "copy";
     try{
       if(navigator.share){
         await navigator.share({ title:video ? video.title : "NOVAGAPP Video", url:url.href });
-        return;
+        tracked = true;
+        channel = "native";
       }
     }catch(_){ }
-    try{
-      if(navigator.clipboard && navigator.clipboard.writeText){
-        await navigator.clipboard.writeText(url.href);
-        showToast("Video link copied");
-        return;
-      }
-    }catch(_){ }
-    window.prompt("Copy this link", url.href);
+
+    if(!tracked){
+      try{
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          await navigator.clipboard.writeText(url.href);
+          showToast("Video link copied");
+          tracked = true;
+          channel = "copy";
+        }
+      }catch(_){ }
+    }
+
+    if(!tracked){
+      window.prompt("Copy this link", url.href);
+      return;
+    }
+
+    const user = await api.ensureAuth();
+    if(user && window.NOVA && typeof window.NOVA.trackShare === "function"){
+      try{
+        await window.NOVA.trackShare("video", id, channel);
+      }catch(_){ }
+    }
+    await refreshShareCount(id);
+  }
+
+  async function loadShareState(token){
+    if(token !== state.watchToken) return;
+    const video = currentVideo();
+    if(!video) return;
+    await refreshShareCount(video.id);
   }
 
   async function openVideo(videoId, pushState, autoplay){
@@ -1010,6 +1186,11 @@
     dom.watchChannelSub.textContent = util.compact(channel.subscribers) + " subscribers";
     dom.likeCount.textContent = util.compact(video.likes_count);
     dom.dislikeCount.textContent = util.compact(video.dislikes_count);
+    state.shareCount = 0;
+    state.channelSubscribers = Math.max(0, util.num(channel.subscribers));
+    state.channelMembers = Math.max(0, util.num(channel.subscribers));
+    state.memberJoined = false;
+    renderActionMetrics();
     dom.descText.textContent = video.description || "No description available.";
     dom.descText.classList.add("clamp");
     dom.descToggle.textContent = "Show more";
@@ -1027,6 +1208,8 @@
     await Promise.allSettled([
       loadReactionState(token),
       loadSubscribeState(token),
+      loadMemberState(token),
+      loadShareState(token),
       loadComments(token),
       loadRecommendations(token)
     ]);
@@ -1073,12 +1256,17 @@
     });
 
     dom.watchChannelSub.textContent = util.compact(state.channelSubscribers) + " subscribers";
+    if(!dom.subscribeBtn){
+      renderActionMetrics();
+      return;
+    }
 
     if(!user){
       state.subscribed = false;
       dom.subscribeBtn.disabled = false;
       dom.subscribeBtn.classList.remove("active");
-      dom.subscribeBtn.textContent = "Subscribe";
+      dom.subscribeBtn.textContent = "Follow";
+      renderActionMetrics();
       return;
     }
 
@@ -1087,13 +1275,32 @@
       dom.subscribeBtn.classList.add("active");
       dom.subscribeBtn.textContent = "Your Channel";
       state.subscribed = false;
+      renderActionMetrics();
       return;
     }
 
     state.subscribed = await api.isSubscribed(channelId, user.id);
     dom.subscribeBtn.disabled = false;
     dom.subscribeBtn.classList.toggle("active", state.subscribed);
-    dom.subscribeBtn.textContent = state.subscribed ? "Subscribed" : "Subscribe";
+    dom.subscribeBtn.textContent = state.subscribed ? "Following" : "Follow";
+    renderActionMetrics();
+  }
+
+  async function loadMemberState(token){
+    if(token !== state.watchToken) return;
+    const video = currentVideo();
+    if(!video) return;
+
+    const channelId = util.safe(video.user_id);
+    const user = await api.ensureAuth();
+    state.channelMembers = await api.getMemberCount(channelId);
+    if(!user || util.safe(user.id) === channelId){
+      state.memberJoined = false;
+      renderActionMetrics();
+      return;
+    }
+    state.memberJoined = await api.isMember(channelId, user.id);
+    renderActionMetrics();
   }
 
   async function recordView(){
@@ -1122,13 +1329,42 @@
       }
     }
 
+    if(window.NOVA && typeof window.NOVA.trackVideoView === "function"){
+      try{
+        const tracked = await window.NOVA.trackVideoView(video.id);
+        const trackedCount = Math.max(0, util.num(tracked?.views || tracked?.count));
+        if(trackedCount > 0){
+          video.views = Math.max(Math.max(0, util.num(video.views)), trackedCount);
+        }else{
+          video.views = Math.max(0, util.num(video.views) + 1);
+        }
+        state.videos.set(video.id, video);
+        dom.watchMeta.textContent = util.compact(video.views) + " views . " + util.ago(video.created_at);
+        updateFeedCard(video.id);
+        return;
+      }catch(err){
+        console.error("record_view_compat_failed", err);
+      }
+    }
+
+    if(util.safe(user.id) !== util.safe(video.user_id)){
+      return;
+    }
+
     const nextViews = Math.max(0, util.num(video.views) + 1);
-    const { data } = await state.supa
+    const { data, error } = await state.supa
       .from("videos")
       .update({ views:nextViews })
       .eq("id", video.id)
       .select("views")
       .maybeSingle();
+    if(error){
+      if(isNoRowsError(error) || errorStatus(error) === 406){
+        return;
+      }
+      console.error("record_view_patch_failed", error);
+      return;
+    }
     video.views = Math.max(0, util.num(data?.views || nextViews));
     state.videos.set(video.id, video);
     dom.watchMeta.textContent = util.compact(video.views) + " views . " + util.ago(video.created_at);
@@ -1196,6 +1432,7 @@
     if(util.safe(user.id) === util.safe(video.user_id)) return;
 
     state.subscribeBusy = true;
+    renderActionMetrics();
     try{
       let handled = false;
       if(state.feature.rpcToggleSubscribe !== false){
@@ -1225,6 +1462,11 @@
         }
       }
 
+      if(state.feature.channelMembers === false){
+        state.channelMembers = Math.max(0, util.num(state.channelSubscribers));
+        state.memberJoined = state.subscribed;
+      }
+
       const channel = getChannel(video.user_id);
       state.channels.set(video.user_id, {
         id:video.user_id,
@@ -1234,13 +1476,81 @@
       });
 
       dom.subscribeBtn.classList.toggle("active", state.subscribed);
-      dom.subscribeBtn.textContent = state.subscribed ? "Subscribed" : "Subscribe";
+      dom.subscribeBtn.textContent = state.subscribed ? "Following" : "Follow";
       dom.watchChannelSub.textContent = util.compact(state.channelSubscribers) + " subscribers";
+      renderActionMetrics();
     }catch(err){
       console.error("toggle_subscribe_failed", err);
       showToast("Unable to update subscription", true);
     }finally{
       state.subscribeBusy = false;
+      renderActionMetrics();
+    }
+  }
+
+  async function toggleMember(){
+    const video = currentVideo();
+    if(!video || state.memberBusy) return;
+
+    const user = await api.requireAuth();
+    if(!user) return;
+    const channelId = util.safe(video.user_id);
+    if(!channelId || util.safe(user.id) === channelId){
+      return;
+    }
+
+    state.memberBusy = true;
+    renderActionMetrics();
+    try{
+      let nextJoined = state.memberJoined;
+      let handled = false;
+
+      if(state.feature.channelMembers !== false){
+        if(nextJoined){
+          const { error } = await state.supa
+            .from("channel_members")
+            .delete()
+            .eq("channel_id", channelId)
+            .eq("member_user_id", user.id);
+          if(!error){
+            state.feature.channelMembers = true;
+            nextJoined = false;
+            handled = true;
+          }else if(isMissingRelationError(error, "channel_members")){
+            state.feature.channelMembers = false;
+          }else{
+            throw error;
+          }
+        }else{
+          const { error } = await state.supa
+            .from("channel_members")
+            .insert({ channel_id:channelId, member_user_id:user.id });
+          if(!error || errorCode(error) === "23505"){
+            state.feature.channelMembers = true;
+            nextJoined = true;
+            handled = true;
+          }else if(isMissingRelationError(error, "channel_members")){
+            state.feature.channelMembers = false;
+          }else{
+            throw error;
+          }
+        }
+      }
+
+      if(!handled){
+        await toggleSubscribe();
+        nextJoined = state.subscribed;
+      }
+
+      state.memberJoined = !!nextJoined;
+      state.channelMembers = await api.getMemberCount(channelId);
+      renderActionMetrics();
+    }catch(err){
+      console.error("toggle_member_failed", err);
+      showToast("Unable to update membership", true);
+    }finally{
+      state.memberBusy = false;
+      renderActionMetrics();
     }
   }
 
@@ -2002,15 +2312,21 @@
           .eq("channel_id", channelId);
 
         const channelRow = getChannel(channelId);
+        const nextSubscribers = Math.max(0, util.num(count));
         state.channels.set(channelId, {
           id:channelId,
           name:channelRow.name,
           avatar:channelRow.avatar,
-          subscribers:Math.max(0, util.num(count))
+          subscribers:nextSubscribers
         });
 
         if(currentVideo() && util.safe(currentVideo().user_id) === channelId){
-          dom.watchChannelSub.textContent = util.compact(Math.max(0, util.num(count))) + " subscribers";
+          state.channelSubscribers = nextSubscribers;
+          if(state.feature.channelMembers === false){
+            state.channelMembers = nextSubscribers;
+          }
+          dom.watchChannelSub.textContent = util.compact(nextSubscribers) + " subscribers";
+          renderActionMetrics();
         }
       }, 180);
       if(state.me && util.safe(state.me.id) === channelId){
@@ -2024,6 +2340,18 @@
       if(state.me && util.safe(state.me.id) === followingId){
         schedule("monetization_follows", () => refreshMonetizationStatus(), 260);
       }
+    });
+
+    channel.on("postgres_changes", { event:"*", schema:"public", table:"channel_members" }, (payload) => {
+      const channelId = util.safe(payload.new?.channel_id || payload.old?.channel_id);
+      if(!channelId) return;
+      schedule("members_" + channelId, async () => {
+        const nextMembers = await api.getMemberCount(channelId);
+        if(currentVideo() && util.safe(currentVideo().user_id) === channelId){
+          state.channelMembers = Math.max(0, util.num(nextMembers));
+          renderActionMetrics();
+        }
+      }, 200);
     });
 
     channel.on("postgres_changes", { event:"*", schema:"public", table:"video_earnings" }, (payload) => {
@@ -2141,17 +2469,25 @@
     dom.likeBtn.addEventListener("click", () => toggleReaction("like"));
     dom.dislikeBtn.addEventListener("click", () => toggleReaction("dislike"));
     dom.subscribeBtn.addEventListener("click", toggleSubscribe);
+    if(dom.followBtn){
+      dom.followBtn.addEventListener("click", toggleSubscribe);
+    }
+    if(dom.memberBtn){
+      dom.memberBtn.addEventListener("click", toggleMember);
+    }
     dom.shareBtn.addEventListener("click", () => {
       const video = currentVideo();
       if(video) shareVideo(video.id);
     });
-    dom.saveBtn.addEventListener("click", () => {
-      const video = currentVideo();
-      if(!video) return;
-      store.pushUnique(WATCH_LATER_KEY, video.id, 100);
-      setSaveButton();
-      showToast("Saved to Watch Later");
-    });
+    if(dom.saveBtn){
+      dom.saveBtn.addEventListener("click", () => {
+        const video = currentVideo();
+        if(!video) return;
+        store.pushUnique(WATCH_LATER_KEY, video.id, 100);
+        setSaveButton();
+        showToast("Saved to Watch Later");
+      });
+    }
 
     dom.descToggle.addEventListener("click", () => {
       const clamped = dom.descText.classList.contains("clamp");
