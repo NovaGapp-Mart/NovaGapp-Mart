@@ -78,6 +78,13 @@ create table if not exists public.channel_members (
   constraint channel_members_no_self check (channel_id <> member_user_id)
 );
 
+create table if not exists public.channel_membership_plans (
+  channel_id uuid primary key references auth.users(id) on delete cascade,
+  join_fee_inr integer not null default 0 check (join_fee_inr >= 0),
+  currency text not null default 'INR',
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.video_earnings (
   id bigserial primary key,
   video_id uuid not null references public.videos(id) on delete cascade,
@@ -112,6 +119,7 @@ create index if not exists idx_video_comments_video on public.video_comments(vid
 create index if not exists idx_video_comments_parent on public.video_comments(parent_comment_id);
 create index if not exists idx_channel_subscribers_channel on public.channel_subscribers(channel_id);
 create index if not exists idx_channel_members_channel on public.channel_members(channel_id);
+create index if not exists idx_channel_membership_plans_fee on public.channel_membership_plans(join_fee_inr);
 create index if not exists idx_video_earnings_user on public.video_earnings(user_id, created_at desc);
 create index if not exists idx_video_view_events_user_video on public.video_view_events(viewer_user_id, video_id, viewed_at desc);
 
@@ -576,6 +584,7 @@ alter table public.video_likes enable row level security;
 alter table public.video_comments enable row level security;
 alter table public.channel_subscribers enable row level security;
 alter table public.channel_members enable row level security;
+alter table public.channel_membership_plans enable row level security;
 alter table public.video_earnings enable row level security;
 alter table public.video_view_events enable row level security;
 alter table public.video_comment_likes enable row level security;
@@ -623,6 +632,13 @@ create policy channel_members_insert_own on public.channel_members
 create policy channel_members_delete_own on public.channel_members
   for delete using (auth.uid() = member_user_id);
 
+drop policy if exists channel_membership_plans_read_public on public.channel_membership_plans;
+drop policy if exists channel_membership_plans_upsert_own on public.channel_membership_plans;
+create policy channel_membership_plans_read_public on public.channel_membership_plans
+  for select using (true);
+create policy channel_membership_plans_upsert_own on public.channel_membership_plans
+  for all using (auth.uid() = channel_id) with check (auth.uid() = channel_id);
+
 drop policy if exists video_earnings_select_own on public.video_earnings;
 create policy video_earnings_select_own on public.video_earnings
   for select using (auth.uid() = user_id);
@@ -643,6 +659,8 @@ grant insert, delete on public.video_comments to authenticated;
 grant select on public.channel_subscribers to anon, authenticated;
 grant select on public.channel_members to anon, authenticated;
 grant insert, delete on public.channel_members to authenticated;
+grant select on public.channel_membership_plans to anon, authenticated;
+grant insert, update on public.channel_membership_plans to authenticated;
 grant select on public.video_earnings to authenticated;
 grant select on public.video_view_events to authenticated;
 grant select on public.video_comment_likes to anon, authenticated;
@@ -672,6 +690,11 @@ begin
   end;
   begin
     alter publication supabase_realtime add table public.channel_members;
+  exception when duplicate_object then null;
+  when undefined_object then null;
+  end;
+  begin
+    alter publication supabase_realtime add table public.channel_membership_plans;
   exception when duplicate_object then null;
   when undefined_object then null;
   end;

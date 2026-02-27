@@ -33,8 +33,11 @@
     subscribed:false,
     channelSubscribers:0,
     channelMembers:0,
+    channelMembershipFeeInr:0,
     memberJoined:false,
     shareCount:0,
+    commentsOpen:false,
+    descriptionOpen:false,
     reactionBusy:false,
     subscribeBusy:false,
     memberBusy:false,
@@ -63,6 +66,7 @@
       videoComments:false,
       videoCommentLikes:false,
       channelMembers:false,
+      channelMembershipPlans:true,
       rpcRecordView:false,
       rpcToggleReaction:false,
       rpcToggleSubscribe:false,
@@ -89,6 +93,8 @@
     sentinel:document.getElementById("mvFeedSentinel"),
     watchBack:document.getElementById("mvWatchBack"),
     player:document.getElementById("mvPlayer"),
+    playerPoster:document.getElementById("mvPlayerPoster"),
+    playerLoading:document.getElementById("mvPlayerLoading"),
     seekBack:document.getElementById("mvSeekBack"),
     seekForward:document.getElementById("mvSeekForward"),
     watchTitle:document.getElementById("mvWatchTitle"),
@@ -108,8 +114,12 @@
     memberBtn:document.getElementById("mvMemberBtn"),
     memberCount:document.getElementById("mvMemberCount"),
     saveBtn:document.getElementById("mvSaveBtn"),
+    descTab:document.getElementById("mvDescTab"),
+    descPanel:document.getElementById("mvDescPanel"),
     descText:document.getElementById("mvDescText"),
-    descToggle:document.getElementById("mvDescToggle"),
+    commentsTab:document.getElementById("mvCommentsTab"),
+    commentsPanel:document.getElementById("mvCommentsPanel"),
+    commentsClose:document.getElementById("mvCommentsClose"),
     commentCount:document.getElementById("mvCommentCount"),
     commentForm:document.getElementById("mvCommentForm"),
     commentInput:document.getElementById("mvCommentInput"),
@@ -167,6 +177,47 @@
     pushUnique(key, value, limit){ const val = util.safe(value); if(!val) return; const list = store.read(key, []); const next = [val].concat(list.filter(item => util.safe(item) !== val)).slice(0, limit || 50); store.write(key, next); }
   };
   let razorpaySdkPromise = null;
+
+  function shuffleRows(list){
+    const arr = Array.isArray(list) ? list.slice() : [];
+    for(let i = arr.length - 1; i > 0; i -= 1){
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = arr[i];
+      arr[i] = arr[j];
+      arr[j] = tmp;
+    }
+    return arr;
+  }
+
+  function setDescriptionOpen(open){
+    const next = !!open;
+    state.descriptionOpen = next;
+    if(dom.descPanel) dom.descPanel.classList.toggle("mv-hidden", !next);
+    if(dom.descTab){
+      dom.descTab.classList.toggle("active", next);
+      dom.descTab.setAttribute("aria-expanded", next ? "true" : "false");
+    }
+  }
+
+  function setCommentsOpen(open, focusInput){
+    const next = !!open;
+    state.commentsOpen = next;
+    if(dom.commentsPanel) dom.commentsPanel.classList.toggle("mv-hidden", !next);
+    if(dom.commentsTab){
+      dom.commentsTab.classList.toggle("active", next);
+      dom.commentsTab.setAttribute("aria-expanded", next ? "true" : "false");
+    }
+    if(next && focusInput && dom.commentInput && typeof dom.commentInput.focus === "function"){
+      dom.commentInput.focus();
+    }
+  }
+
+  function setPlayerLoading(showLoading, keepPoster){
+    const loading = !!showLoading;
+    const posterVisible = !!keepPoster;
+    if(dom.playerLoading) dom.playerLoading.classList.toggle("mv-hidden", !loading);
+    if(dom.playerPoster) dom.playerPoster.classList.toggle("mv-hidden", !posterVisible);
+  }
 
   function errorCode(err){
     return util.safe(err?.code).toUpperCase();
@@ -424,16 +475,21 @@
     const channelId = util.safe(video?.user_id);
     const selfChannel = !!(state.me && channelId && util.safe(state.me.id) === channelId);
     const followerCount = Math.max(0, util.num(state.channelSubscribers));
-    const memberCount = Math.max(0, util.num(state.channelMembers || followerCount));
+    const memberCount = Math.max(0, util.num(state.channelMembers));
+    const feeInr = Math.max(0, Math.floor(util.num(state.channelMembershipFeeInr)));
+    const feeText = "INR " + String(feeInr);
     const shareCount = Math.max(0, util.num(state.shareCount));
-    const memberText = selfChannel ? "Owner" : (state.memberJoined ? "Member" : "Join");
+    const memberText = selfChannel
+      ? ("Set Fee " + (feeInr > 0 ? feeText : "Free"))
+      : (state.memberJoined ? "Member" : (feeInr > 0 ? ("Join " + feeText) : "Join Free"));
 
     if(dom.memberCount){
       dom.memberCount.textContent = util.compact(memberCount);
     }
     if(dom.memberBtn){
-      dom.memberBtn.classList.toggle("active", !!state.memberJoined || selfChannel);
-      dom.memberBtn.disabled = !!state.memberBusy || selfChannel;
+      dom.memberBtn.classList.toggle("active", !!state.memberJoined || selfChannel || feeInr > 0);
+      dom.memberBtn.disabled = !!state.memberBusy;
+      dom.memberBtn.title = selfChannel ? "Set membership join fee" : (feeInr > 0 ? ("Pay " + feeText + " to join") : "Join this creator");
       dom.memberBtn.innerHTML = memberText + ' <span id="mvMemberCount">' + util.esc(util.compact(memberCount)) + "</span>";
       dom.memberCount = dom.memberBtn.querySelector("#mvMemberCount");
     }
@@ -881,6 +937,47 @@
       return api.isSubscribed(cId, uId);
     },
 
+    async getMembershipFee(channelId){
+      const id = util.safe(channelId);
+      if(!id) return 0;
+      if(state.feature.channelMembershipPlans === false){
+        return 0;
+      }
+
+      const { data, error } = await state.supa
+        .from("channel_membership_plans")
+        .select("join_fee_inr")
+        .eq("channel_id", id)
+        .maybeSingle();
+      if(error){
+        if(isMissingRelationError(error, "channel_membership_plans")){
+          state.feature.channelMembershipPlans = false;
+          return 0;
+        }
+        throw error;
+      }
+      state.feature.channelMembershipPlans = true;
+      return Math.max(0, Math.floor(util.num(data?.join_fee_inr)));
+    },
+
+    async setMembershipFee(channelId, feeInr){
+      const id = util.safe(channelId);
+      const fee = Math.max(0, Math.floor(util.num(feeInr)));
+      if(!id) throw new Error("channel_id_required");
+      const payload = { channel_id:id, join_fee_inr:fee, currency:"INR", updated_at:new Date().toISOString() };
+      const { error } = await state.supa
+        .from("channel_membership_plans")
+        .upsert(payload, { onConflict:"channel_id" });
+      if(error){
+        if(isMissingRelationError(error, "channel_membership_plans")){
+          state.feature.channelMembershipPlans = false;
+        }
+        throw error;
+      }
+      state.feature.channelMembershipPlans = true;
+      return fee;
+    },
+
     async fetchMonetizationStatus(userId){
       const id = util.safe(userId);
       if(!id){
@@ -904,6 +1001,24 @@
 
     async verifyMonetizationPayment(payload){
       return fetchApiJson("/api/videos/monetization/verify", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json", Accept:"application/json" },
+        body:JSON.stringify(payload || {}),
+        credentials:"omit"
+      });
+    },
+
+    async createMembershipOrder(payload){
+      return fetchApiJson("/api/payment/razorpay/order", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json", Accept:"application/json" },
+        body:JSON.stringify(payload || {}),
+        credentials:"omit"
+      });
+    },
+
+    async verifyMembershipPayment(payload){
+      return fetchApiJson("/api/payment/razorpay/verify", {
         method:"POST",
         headers:{ "Content-Type":"application/json", Accept:"application/json" },
         body:JSON.stringify(payload || {}),
@@ -1192,7 +1307,15 @@
     await api.fetchProfiles([video.user_id]);
     const channel = getChannel(video.user_id);
 
+    const posterUrl = util.safe(video.thumbnail_url) || "Images/no-image.jpg";
+    if(dom.playerPoster){
+      dom.playerPoster.src = posterUrl;
+      dom.playerPoster.alt = util.safe(video.title) || "Video thumbnail";
+    }
+    setPlayerLoading(true, true);
+    dom.player.poster = posterUrl;
     dom.player.src = video.video_url;
+    try{ dom.player.load(); }catch(_){ }
     dom.watchTitle.textContent = video.title;
     dom.watchMeta.textContent = util.compact(video.views) + " views . " + util.ago(video.created_at);
     dom.watchAvatar.innerHTML = avatarHtml(channel);
@@ -1205,12 +1328,12 @@
     state.shareCount = 0;
     state.channelSubscribers = Math.max(0, util.num(channel.subscribers));
     state.channelMembers = Math.max(0, util.num(channel.subscribers));
+    state.channelMembershipFeeInr = 0;
     state.memberJoined = false;
     renderActionMetrics();
     dom.descText.textContent = video.description || "No description available.";
-    dom.descText.classList.add("clamp");
-    dom.descToggle.textContent = "Show more";
-    dom.descToggle.hidden = (video.description || "").length < 160;
+    setDescriptionOpen(false);
+    setCommentsOpen(false, false);
     setSaveButton();
     setPanel("watch", false);
 
@@ -1294,6 +1417,12 @@
 
     const channelId = util.safe(video.user_id);
     const user = await api.ensureAuth();
+    try{
+      state.channelMembershipFeeInr = await api.getMembershipFee(channelId);
+    }catch(err){
+      console.error("membership_fee_load_failed", err);
+      state.channelMembershipFeeInr = 0;
+    }
     state.channelMembers = await api.getMemberCount(channelId);
     if(!user || util.safe(user.id) === channelId){
       state.memberJoined = false;
@@ -1491,6 +1620,113 @@
     }
   }
 
+  async function payMembershipFee(options){
+    const opts = options || {};
+    const amountInr = Math.max(0, Math.floor(util.num(opts.amountInr)));
+    if(amountInr <= 0) return true;
+
+    const user = opts.user || null;
+    const channelId = util.safe(opts.channelId);
+    if(!user || !user.id || !channelId){
+      showToast("Login required before payment.", true);
+      return false;
+    }
+
+    let orderPayload = null;
+    try{
+      orderPayload = await api.createMembershipOrder({
+        amount_paise:amountInr * 100,
+        currency:"INR",
+        user_id:user.id,
+        user_name:util.safe(user.full_name || user.name || user.username || user.email || "member"),
+        notes:{
+          feature:"channel_membership",
+          channel_id:channelId,
+          channel_name:util.safe(opts.channelName || "").slice(0, 40)
+        }
+      });
+    }catch(err){
+      console.error("membership_order_failed", err);
+      showToast("Membership payment service unavailable.", true);
+      return false;
+    }
+
+    const order = orderPayload?.order || null;
+    const keyId = util.safe(order?.key_id);
+    const orderId = util.safe(order?.razorpay_order_id);
+    const amountPaise = Math.round(util.num(order?.amount_paise));
+    if(!keyId || !orderId || amountPaise < 100){
+      showToast("Unable to create membership payment order.", true);
+      return false;
+    }
+
+    try{
+      await ensureRazorpaySdk();
+    }catch(err){
+      console.error("membership_sdk_failed", err);
+      showToast("Payment SDK failed to load.", true);
+      return false;
+    }
+
+    try{
+      await new Promise((resolve, reject) => {
+        let completed = false;
+        const finish = (fn, value) => {
+          if(completed) return;
+          completed = true;
+          fn(value);
+        };
+
+        const rzp = new window.Razorpay({
+          key:keyId,
+          order_id:orderId,
+          amount:amountPaise,
+          currency:"INR",
+          name:"NOVAGAPP Membership",
+          description:`Channel membership (INR ${amountInr})`,
+          handler:async function(res){
+            try{
+              const verifyPayload = await api.verifyMembershipPayment({
+                razorpay_order_id:util.safe(res?.razorpay_order_id || orderId),
+                razorpay_payment_id:util.safe(res?.razorpay_payment_id),
+                razorpay_signature:util.safe(res?.razorpay_signature)
+              });
+              if(!verifyPayload?.verified){
+                throw new Error(util.safe(verifyPayload?.message || "payment_verify_failed"));
+              }
+              finish(resolve, true);
+            }catch(err){
+              finish(reject, err);
+            }
+          },
+          modal:{
+            ondismiss:function(){
+              finish(reject, new Error("payment_cancelled"));
+            }
+          },
+          prefill:{
+            name:util.safe(user.full_name || user.name || user.username || ""),
+            email:util.safe(user.email || "")
+          },
+          theme:{ color:"#ff6a00" }
+        });
+        rzp.on("payment.failed", function(payload){
+          const reason = util.safe(payload?.error?.description) || "payment_failed";
+          finish(reject, new Error(reason));
+        });
+        rzp.open();
+      });
+      showToast("Payment verified. Joining...");
+      return true;
+    }catch(err){
+      if(util.safe(err?.message) !== "payment_cancelled"){
+        console.error("membership_payment_failed", err);
+        showToast(util.safe(err?.message) || "Payment failed.", true);
+      }
+      return false;
+    }
+  }
+
   async function toggleMember(){
     const video = currentVideo();
     if(!video || state.memberBusy) return;
@@ -1498,7 +1734,36 @@
     const user = await api.requireAuth();
     if(!user) return;
     const channelId = util.safe(video.user_id);
-    if(!channelId || util.safe(user.id) === channelId){
+    if(!channelId){
+      return;
+    }
+    const selfChannel = util.safe(user.id) === channelId;
+
+    if(selfChannel){
+      if(state.feature.channelMembershipPlans === false){
+        showToast("Membership fee table is not configured.", true);
+        return;
+      }
+      const raw = window.prompt("Set join fee in INR (0 for free)", String(Math.max(0, Math.floor(util.num(state.channelMembershipFeeInr)))));
+      if(raw === null) return;
+      const parsed = Number(raw);
+      if(!Number.isFinite(parsed) || parsed < 0){
+        showToast("Enter a valid INR amount.", true);
+        return;
+      }
+      state.memberBusy = true;
+      renderActionMetrics();
+      try{
+        const savedFee = await api.setMembershipFee(channelId, Math.floor(parsed));
+        state.channelMembershipFeeInr = savedFee;
+        showToast("Membership fee updated.");
+      }catch(err){
+        console.error("membership_fee_update_failed", err);
+        showToast("Unable to update membership fee.", true);
+      }finally{
+        state.memberBusy = false;
+        renderActionMetrics();
+      }
       return;
     }
 
@@ -1507,6 +1772,19 @@
     try{
       let nextJoined = state.memberJoined;
       let handled = false;
+      const feeInr = Math.max(0, Math.floor(util.num(state.channelMembershipFeeInr)));
+
+      if(!nextJoined && feeInr > 0){
+        const paid = await payMembershipFee({
+          amountInr:feeInr,
+          channelId,
+          channelName:getChannel(channelId).name,
+          user
+        });
+        if(!paid){
+          return;
+        }
+      }
 
       if(state.feature.channelMembers !== false){
         if(nextJoined){
@@ -1849,72 +2127,48 @@
     if(!video) return;
 
     const seen = new Set([video.id]);
-    const rows = [];
+    const pool = [];
     const addRows = (list) => {
       (list || []).forEach(row => {
         if(!row || !row.id || seen.has(row.id)) return;
         seen.add(row.id);
-        rows.push(row);
+        pool.push(row);
+      });
+    };
+    const renderRows = async (list) => {
+      dom.recommendList.innerHTML = "";
+      if(!list.length){
+        dom.recommendList.innerHTML = '<div class="mv-empty">No recommendations available.</div>';
+        return;
+      }
+      await api.fetchProfiles(list.map(item => item.user_id));
+      list.forEach(item => {
+        const channel = getChannel(item.user_id);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "mv-rec-item";
+        button.innerHTML =
+          '<div class="mv-rec-thumb"><img src="' + util.esc(item.thumbnail_url || "Images/no-image.jpg") + '" alt="' + util.esc(item.title) + '"></div>' +
+          '<div class="mv-rec-body"><p class="mv-rec-title">' + util.esc(item.title) + '</p><p class="mv-rec-sub">' + util.esc(channel.name + " . " + util.compact(item.views) + " views") + '</p></div>';
+        button.addEventListener("click", () => openVideo(item.id, true, true));
+        dom.recommendList.appendChild(button);
       });
     };
 
     try{
-      if(video.category) addRows(await api.fetchVideos({ category:video.category, excludeId:video.id, limit:16 }));
-      const tags = util.tags(video.tags).map(tag => util.safe(tag).toLowerCase());
-      const fallbackPool = await api.fetchVideos({ excludeId:video.id, limit:70 });
-      if(tags.length){
-        const matched = fallbackPool.filter(item => {
-          const itemTags = util.tags(item.tags).map(tag => util.safe(tag).toLowerCase());
-          return itemTags.some(tag => tags.includes(tag));
-        });
-        addRows(matched.slice(0, 18));
-      }
-      addRows(fallbackPool.slice(0, 24));
-
-      rows.sort((a, b) => Math.max(0, util.num(b.views)) - Math.max(0, util.num(a.views)));
-      const top = rows.slice(0, 10);
-      await api.fetchProfiles(top.map(item => item.user_id));
-
-      dom.recommendList.innerHTML = "";
-      if(!top.length){
-        dom.recommendList.innerHTML = '<div class="mv-empty">No recommendations available.</div>';
-        return;
-      }
-
-      top.forEach(item => {
-        const channel = getChannel(item.user_id);
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "mv-rec-item";
-        button.innerHTML =
-          '<div class="mv-rec-thumb"><img src="' + util.esc(item.thumbnail_url || "Images/no-image.jpg") + '" alt="' + util.esc(item.title) + '"></div>' +
-          '<div class="mv-rec-body"><p class="mv-rec-title">' + util.esc(item.title) + '</p><p class="mv-rec-sub">' + util.esc(channel.name + " . " + util.compact(item.views) + " views") + '</p></div>';
-        button.addEventListener("click", () => openVideo(item.id, true, true));
-        dom.recommendList.appendChild(button);
-      });
+      addRows(await api.fetchVideos({ excludeId:video.id, limit:140 }));
+      addRows(Array.from(state.videos.values()));
+      await renderRows(shuffleRows(pool).slice(0, 10));
     }catch(err){
       console.error("recommend_failed", err);
-      const fallback = Array.from(state.videos.values())
-        .filter(item => item && item.id && item.id !== video.id)
-        .sort((a, b) => Math.max(0, util.num(b.views)) - Math.max(0, util.num(a.views)))
-        .slice(0, 10);
+      const fallback = shuffleRows(
+        Array.from(state.videos.values()).filter(item => item && item.id && item.id !== video.id)
+      ).slice(0, 10);
       if(!fallback.length){
         dom.recommendList.innerHTML = '<div class="mv-empty">Unable to load recommendations.</div>';
         return;
       }
-      dom.recommendList.innerHTML = "";
-      await api.fetchProfiles(fallback.map(item => item.user_id));
-      fallback.forEach(item => {
-        const channel = getChannel(item.user_id);
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "mv-rec-item";
-        button.innerHTML =
-          '<div class="mv-rec-thumb"><img src="' + util.esc(item.thumbnail_url || "Images/no-image.jpg") + '" alt="' + util.esc(item.title) + '"></div>' +
-          '<div class="mv-rec-body"><p class="mv-rec-title">' + util.esc(item.title) + '</p><p class="mv-rec-sub">' + util.esc(channel.name + " . " + util.compact(item.views) + " views") + '</p></div>';
-        button.addEventListener("click", () => openVideo(item.id, true, true));
-        dom.recommendList.appendChild(button);
-      });
+      await renderRows(fallback);
     }
   }
 
@@ -2487,6 +2741,14 @@
       setPanel("feed", true);
       try{ dom.player.pause(); }catch(_){ }
     });
+    dom.player.addEventListener("loadstart", () => setPlayerLoading(true, true));
+    dom.player.addEventListener("waiting", () => setPlayerLoading(true, util.num(dom.player.currentTime) < 0.2));
+    dom.player.addEventListener("stalled", () => setPlayerLoading(true, util.num(dom.player.currentTime) < 0.2));
+    dom.player.addEventListener("canplay", () => {
+      if(dom.playerLoading) dom.playerLoading.classList.add("mv-hidden");
+    });
+    dom.player.addEventListener("playing", () => setPlayerLoading(false, false));
+    dom.player.addEventListener("error", () => setPlayerLoading(false, true));
     if(dom.seekBack){
       dom.seekBack.addEventListener("click", () => {
         const current = Math.max(0, util.num(dom.player.currentTime));
@@ -2514,9 +2776,7 @@
     });
     if(dom.commentBtn){
       dom.commentBtn.addEventListener("click", () => {
-        if(dom.commentInput && typeof dom.commentInput.focus === "function"){
-          dom.commentInput.focus();
-        }
+        setCommentsOpen(true, true);
         if(dom.commentForm && typeof dom.commentForm.scrollIntoView === "function"){
           dom.commentForm.scrollIntoView({ behavior:"smooth", block:"center" });
         }
@@ -2532,16 +2792,15 @@
       });
     }
 
-    dom.descToggle.addEventListener("click", () => {
-      const clamped = dom.descText.classList.contains("clamp");
-      if(clamped){
-        dom.descText.classList.remove("clamp");
-        dom.descToggle.textContent = "Show less";
-      }else{
-        dom.descText.classList.add("clamp");
-        dom.descToggle.textContent = "Show more";
-      }
-    });
+    if(dom.descTab){
+      dom.descTab.addEventListener("click", () => setDescriptionOpen(!state.descriptionOpen));
+    }
+    if(dom.commentsTab){
+      dom.commentsTab.addEventListener("click", () => setCommentsOpen(!state.commentsOpen, false));
+    }
+    if(dom.commentsClose){
+      dom.commentsClose.addEventListener("click", () => setCommentsOpen(false, false));
+    }
 
     dom.commentForm.addEventListener("submit", submitComment);
     dom.replyCancel.addEventListener("click", resetReplyTarget);

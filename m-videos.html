@@ -52,6 +52,8 @@
         <div class="mv-watch-main">
           <button type="button" class="mv-watch-back" id="mvWatchBack">Back to Feed</button>
           <div class="mv-player-wrap">
+            <img id="mvPlayerPoster" class="mv-player-poster" src="Images/no-image.jpg" alt="Video thumbnail">
+            <div class="mv-player-loading" id="mvPlayerLoading"><span></span></div>
             <video id="mvPlayer" class="mv-player" controls playsinline></video>
           </div>
           <div class="mv-player-tools">
@@ -75,14 +77,22 @@
             <button type="button" class="mv-subscribe-btn" id="mvSubscribeBtn">Follow</button>
             <button type="button" class="mv-subscribe-btn mv-member-btn" id="mvMemberBtn">Join <span id="mvMemberCount">0</span></button>
           </div>
-          <div class="mv-desc-box">
-            <p id="mvDescText" class="mv-desc-text clamp"></p>
-            <button type="button" class="mv-desc-toggle" id="mvDescToggle">Show more</button>
+          <button type="button" class="mv-fold-tab" id="mvDescTab" aria-expanded="false">
+            <span class="mv-fold-arrow">^</span>
+            <span>Description</span>
+          </button>
+          <div class="mv-desc-box mv-hidden" id="mvDescPanel">
+            <p id="mvDescText" class="mv-desc-text"></p>
           </div>
-          <section class="mv-comments">
+          <button type="button" class="mv-fold-tab mv-comments-tab" id="mvCommentsTab" aria-expanded="false">
+            <span class="mv-fold-arrow">^</span>
+            <span>Comments</span>
+            <strong id="mvCommentCount">0</strong>
+          </button>
+          <section class="mv-comments mv-hidden" id="mvCommentsPanel">
             <div class="mv-comments-head">
               <h3>Comments</h3>
-              <strong id="mvCommentCount">0</strong>
+              <button type="button" class="mv-comments-close" id="mvCommentsClose">Hide</button>
             </div>
             <form class="mv-comment-form" id="mvCommentForm">
               <div class="mv-replying" id="mvReplying" hidden>
