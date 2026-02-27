@@ -17,6 +17,7 @@
   <img src="Images/logo.png" class="logo" alt="NOVAGAPP">
   <div class="company-name">NOVAGAPP Videos</div>
   <div class="mv-top-actions">
+    <button type="button" class="mv-top-btn" id="mvOpenChannel">My Channel</button>
     <button type="button" class="mv-top-btn" id="mvOpenUpload">Upload</button>
     <button type="button" class="mv-top-btn" id="mvOpenDashboard">Dashboard</button>
   </div>
@@ -24,6 +25,7 @@
 <div class="mv-shell">
   <aside class="mv-sidebar" aria-label="Video Sections">
     <button type="button" class="mv-side-btn active" data-panel="feed">Home <span>&rsaquo;</span></button>
+    <button type="button" class="mv-side-btn" id="mvOpenChannelSide">My Channel <span>&rsaquo;</span></button>
     <button type="button" class="mv-side-btn" data-panel="upload">Upload Video <span>&rsaquo;</span></button>
     <button type="button" class="mv-side-btn" data-panel="dashboard">Creator Dashboard <span>&rsaquo;</span></button>
   </aside>
@@ -69,10 +71,10 @@
             <button type="button" class="mv-action-btn" id="mvCommentBtn"><span class="mv-action-icon"><svg viewBox="0 0 24 24"><path d="M21 4H3a2 2 0 0 0-2 2v14l4-4h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"></path></svg></span><span>Comment</span><span class="mv-action-count" id="mvCommentActionCount">0</span></button>
           </div>
           <div class="mv-channel-row">
-            <div class="mv-avatar" id="mvWatchAvatar">U</div>
+            <div class="mv-avatar mv-channel-link" id="mvWatchAvatar">U</div>
             <div class="mv-channel-meta">
-              <p class="mv-channel-name" id="mvWatchChannelName">User</p>
-              <p class="mv-channel-sub" id="mvWatchChannelSub">0 subscribers</p>
+              <p class="mv-channel-name mv-channel-link" id="mvWatchChannelName">User</p>
+              <p class="mv-channel-sub mv-channel-link" id="mvWatchChannelSub">0 subscribers</p>
             </div>
             <button type="button" class="mv-subscribe-btn" id="mvSubscribeBtn">Follow</button>
             <button type="button" class="mv-subscribe-btn mv-member-btn" id="mvMemberBtn">Join <span id="mvMemberCount">0</span></button>

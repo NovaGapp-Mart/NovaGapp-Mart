@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>NOVAGAPP Channel</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="m-channel.css">
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="global.js"></script>
+<script src="public-config.js"></script>
+<script src="social.js"></script>
+</head>
+<body class="mc-body">
+<header class="top mc-topbar">
+  <img src="Images/logo.png" class="logo" alt="NOVAGAPP">
+  <div class="company-name">Channel</div>
+  <div class="mc-top-actions">
+    <button type="button" class="mc-top-btn" id="mcBackToVideos">Back</button>
+    <button type="button" class="mc-top-btn" id="mcOpenUpload">Upload</button>
+  </div>
+</header>
+
+<main class="mc-shell">
+  <section class="mc-channel-card">
+    <div class="mc-avatar" id="mcAvatar">U</div>
+    <div class="mc-channel-copy">
+      <h1 id="mcName">Channel</h1>
+      <p id="mcMeta">0 followers . 0 members . Free join</p>
+      <p id="mcOwnerNote" class="mc-owner-note mc-hidden">Owner mode: you can edit or delete your uploaded videos here.</p>
+    </div>
+    <div class="mc-owner-actions mc-hidden" id="mcOwnerActions">
+      <button type="button" id="mcOpenUploadInline">Upload Video</button>
+    </div>
+  </section>
+
+  <section class="mc-list-wrap">
+    <div class="mc-list-head">
+      <h2>Uploaded Videos</h2>
+      <button type="button" id="mcRefreshBtn">Refresh</button>
+    </div>
+    <div id="mcVideoList" class="mc-video-list"></div>
+    <div id="mcEmpty" class="mc-empty mc-hidden">No uploaded videos yet.</div>
+  </section>
+</main>
+
+<div id="mcToast" class="mc-toast"></div>
+<script src="m-channel.js"></script>
+</body>
+</html>

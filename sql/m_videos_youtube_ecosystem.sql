@@ -666,6 +666,86 @@ grant select on public.video_view_events to authenticated;
 grant select on public.video_comment_likes to anon, authenticated;
 grant select on public.video_monetization_config to anon, authenticated;
 
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values
+  (
+    'long_videos',
+    'long_videos',
+    true,
+    1073741824,
+    array['video/mp4','video/webm','video/quicktime','video/x-matroska','video/ogg','video/mpeg']::text[]
+  ),
+  (
+    'thumbnails',
+    'thumbnails',
+    true,
+    8388608,
+    array['image/jpeg','image/png','image/webp']::text[]
+  )
+on conflict (id) do update
+set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists long_videos_public_read on storage.objects;
+drop policy if exists long_videos_owner_insert on storage.objects;
+drop policy if exists long_videos_owner_update on storage.objects;
+drop policy if exists long_videos_owner_delete on storage.objects;
+create policy long_videos_public_read on storage.objects
+  for select using (bucket_id = 'long_videos');
+create policy long_videos_owner_insert on storage.objects
+  for insert to authenticated
+  with check (
+    bucket_id = 'long_videos'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+create policy long_videos_owner_update on storage.objects
+  for update to authenticated
+  using (
+    bucket_id = 'long_videos'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  )
+  with check (
+    bucket_id = 'long_videos'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+create policy long_videos_owner_delete on storage.objects
+  for delete to authenticated
+  using (
+    bucket_id = 'long_videos'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists thumbnails_public_read on storage.objects;
+drop policy if exists thumbnails_owner_insert on storage.objects;
+drop policy if exists thumbnails_owner_update on storage.objects;
+drop policy if exists thumbnails_owner_delete on storage.objects;
+create policy thumbnails_public_read on storage.objects
+  for select using (bucket_id = 'thumbnails');
+create policy thumbnails_owner_insert on storage.objects
+  for insert to authenticated
+  with check (
+    bucket_id = 'thumbnails'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+create policy thumbnails_owner_update on storage.objects
+  for update to authenticated
+  using (
+    bucket_id = 'thumbnails'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  )
+  with check (
+    bucket_id = 'thumbnails'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+create policy thumbnails_owner_delete on storage.objects
+  for delete to authenticated
+  using (
+    bucket_id = 'thumbnails'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
 do $$
 begin
   begin

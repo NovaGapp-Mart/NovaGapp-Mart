@@ -7,6 +7,7 @@
   const QUEUE_KEY = "mv_queue_v1";
   const MAX_VIDEO_SIZE = 600 * 1024 * 1024;
   const MAX_THUMB_SIZE = 8 * 1024 * 1024;
+  const UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
   const VIDEO_SELECT = "id,user_id,title,description,video_url,thumbnail_url,views,likes_count,dislikes_count,monetized,created_at,category,tags,duration_seconds";
   const VIDEO_MIME_TYPES = new Set(["video/mp4","video/webm","video/quicktime","video/x-matroska","video/ogg","video/mpeg"]);
   const THUMB_MIME_TYPES = new Set(["image/jpeg","image/png","image/webp"]);
@@ -82,6 +83,8 @@
       dashboard:document.getElementById("mvDashboardView")
     },
     sideButtons:Array.from(document.querySelectorAll("[data-panel]")),
+    openChannelSide:document.getElementById("mvOpenChannelSide"),
+    openChannelTop:document.getElementById("mvOpenChannel"),
     openUpload:document.getElementById("mvOpenUpload"),
     openDashboard:document.getElementById("mvOpenDashboard"),
     searchForm:document.getElementById("mvSearchForm"),
@@ -428,6 +431,21 @@
   }
 
   function currentVideo(){ return state.activeVideoId ? state.videos.get(state.activeVideoId) || null : null; }
+
+  function openChannelPage(channelId){
+    const id = util.safe(channelId);
+    const url = new URL("m-channel.html", location.href);
+    if(id){
+      url.searchParams.set("uid", id);
+    }
+    location.href = url.pathname + url.search;
+  }
+
+  async function openMyChannel(){
+    const user = await api.requireAuth();
+    if(!user || !user.id) return;
+    openChannelPage(user.id);
+  }
 
   function getChannel(userId){
     const id = util.safe(userId);
@@ -1113,10 +1131,10 @@
         '</div>' +
       '</button>' +
       '<div class="mv-card-meta">' +
-        '<div class="mv-avatar" data-avatar>' + avatarHtml(channel) + '</div>' +
+        '<div class="mv-avatar mv-channel-link" data-avatar data-channel-open="1">' + avatarHtml(channel) + '</div>' +
         '<div class="mv-card-copy">' +
           '<h3 class="mv-card-title" data-title>' + util.esc(item.title) + '</h3>' +
-          '<p class="mv-card-channel" data-channel>' + util.esc(channel.name) + '</p>' +
+          '<p class="mv-card-channel mv-channel-link" data-channel data-channel-open="1">' + util.esc(channel.name) + '</p>' +
           '<p class="mv-card-stats" data-stats>' + util.esc(util.compact(item.views) + " views . " + util.ago(item.created_at)) + '</p>' +
         '</div>' +
         '<div class="mv-menu-wrap">' +
@@ -1132,6 +1150,13 @@
 
     const menu = card.querySelector("[data-menu='1']");
     card.querySelector("[data-open='1']").addEventListener("click", () => openVideo(item.id, true, true));
+    card.querySelectorAll("[data-channel-open='1']").forEach(node => {
+      node.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openChannelPage(item.user_id);
+      });
+    });
     card.querySelector("[data-menu-btn='1']").addEventListener("click", (event) => {
       event.stopPropagation();
       const visible = !menu.classList.contains("show");
@@ -1321,6 +1346,9 @@
     dom.watchAvatar.innerHTML = avatarHtml(channel);
     dom.watchChannelName.textContent = channel.name;
     dom.watchChannelSub.textContent = util.compact(channel.subscribers) + " followers . " + util.compact(channel.subscribers) + " members";
+    dom.watchAvatar.dataset.channelId = util.safe(video.user_id);
+    dom.watchChannelName.dataset.channelId = util.safe(video.user_id);
+    dom.watchChannelSub.dataset.channelId = util.safe(video.user_id);
     dom.likeCount.textContent = util.compact(video.likes_count);
     dom.dislikeCount.textContent = util.compact(video.dislikes_count);
     dom.commentCount.textContent = "0";
@@ -1949,7 +1977,7 @@
           '<div class="mv-comment-row">' +
             '<div class="mv-avatar">' + avatarHtml(channel) + '</div>' +
             '<div class="mv-comment-body">' +
-              '<div class="mv-comment-meta"><strong>' + util.esc(channel.name) + '</strong><span>' + util.esc(util.ago(row.created_at)) + '</span></div>' +
+              '<div class="mv-comment-meta"><strong class="mv-channel-link" data-comment-channel="1">' + util.esc(channel.name) + '</strong><span>' + util.esc(util.ago(row.created_at)) + '</span></div>' +
               '<p class="mv-comment-text">' + util.esc(row.comment_text) + '</p>' +
               '<div class="mv-comment-actions">' +
                 (compatMode ? '' : '<button type="button" data-action="like" class="' + (liked.has(rowId) ? "active" : "") + '">Like (' + util.compact(row.likes) + ')</button>') +
@@ -1958,6 +1986,11 @@
               '</div>' +
             '</div>' +
           '</div>';
+
+        const channelOpenNode = node.querySelector("[data-comment-channel='1']");
+        if(channelOpenNode){
+          channelOpenNode.addEventListener("click", () => openChannelPage(row.user_id));
+        }
 
         node.querySelectorAll("[data-action]").forEach(btn => {
           btn.addEventListener("click", async () => {
@@ -2419,6 +2452,48 @@
     return false;
   }
 
+  function bytesToMb(bytes){
+    return Math.max(0, Math.round(util.num(bytes) / 1024 / 1024));
+  }
+
+  function withTimeout(promise, timeoutMs, label){
+    const ms = Math.max(30000, util.num(timeoutMs) || UPLOAD_TIMEOUT_MS);
+    let timer = 0;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error((label || "upload") + "_timeout")), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  }
+
+  function explainUploadError(err){
+    const text = util.safe(err?.message || err?.error_description || err?.details).toLowerCase();
+    if(text.includes("maximum allowed size") || text.includes("object exceeded") || text.includes("payload too large")){
+      return "Video size is larger than storage bucket limit. Increase long_videos bucket size limit in Supabase.";
+    }
+    if(text.includes("upload_timeout") || text.includes("timeout")){
+      return "Upload timed out. Check internet speed and retry with a smaller video.";
+    }
+    if(text.includes("network") || text.includes("failed to fetch") || text.includes("connection")){
+      return "Network issue during upload. Retry after stable internet.";
+    }
+    if(text.includes("permission") || text.includes("row level security") || text.includes("not allowed")){
+      return "Upload blocked by storage policy. Update Supabase storage policies for long_videos bucket.";
+    }
+    return "Upload failed. Check storage bucket limit and policies.";
+  }
+
+  async function getBucketSizeLimit(bucket){
+    const name = util.safe(bucket);
+    if(!name || !state.supa || !state.supa.storage) return 0;
+    try{
+      const { data, error } = await state.supa.storage.getBucket(name);
+      if(error || !data) return 0;
+      return Math.max(0, util.num(data.file_size_limit || data.fileSizeLimit || 0));
+    }catch(_){
+      return 0;
+    }
+  }
+
   async function insertVideoWithAdaptiveTags(basePayload, tagList){
     const tags = Array.isArray(tagList) ? tagList : [];
     const firstPayload = { ...basePayload, tags };
@@ -2464,6 +2539,21 @@
     const thumbError = validateThumb(state.uploadThumbFile);
     if(thumbError) return void showToast(thumbError, true);
 
+    const [videoBucketLimit, thumbBucketLimit] = await Promise.all([
+      getBucketSizeLimit("long_videos"),
+      state.uploadThumbFile ? getBucketSizeLimit("thumbnails") : Promise.resolve(0)
+    ]);
+    if(videoBucketLimit > 0 && util.num(state.uploadVideoFile.size) > videoBucketLimit){
+      const fileMb = bytesToMb(state.uploadVideoFile.size);
+      const limitMb = bytesToMb(videoBucketLimit);
+      return void showToast(`Selected video is ${fileMb}MB but bucket limit is ${limitMb}MB. Increase long_videos limit.`, true);
+    }
+    if(state.uploadThumbFile && thumbBucketLimit > 0 && util.num(state.uploadThumbFile.size) > thumbBucketLimit){
+      const fileMb = bytesToMb(state.uploadThumbFile.size);
+      const limitMb = bytesToMb(thumbBucketLimit);
+      return void showToast(`Selected thumbnail is ${fileMb}MB but bucket limit is ${limitMb}MB.`, true);
+    }
+
     dom.uploadSubmit.disabled = true;
     try{
       setUploadProgress(8, "Reading video metadata...");
@@ -2471,13 +2561,21 @@
 
       setUploadProgress(30, "Uploading video...");
       const videoPath = window.NOVA.makePath(user.id, state.uploadVideoFile);
-      const videoUrl = await window.NOVA.uploadToBucket("long_videos", state.uploadVideoFile, videoPath);
+      const videoUrl = await withTimeout(
+        window.NOVA.uploadToBucket("long_videos", state.uploadVideoFile, videoPath),
+        UPLOAD_TIMEOUT_MS,
+        "video_upload"
+      );
 
       let thumbUrl = "";
       if(state.uploadThumbFile){
         setUploadProgress(58, "Uploading thumbnail...");
         const thumbPath = window.NOVA.makePath(user.id, state.uploadThumbFile);
-        thumbUrl = await window.NOVA.uploadToBucket("thumbnails", state.uploadThumbFile, thumbPath);
+        thumbUrl = await withTimeout(
+          window.NOVA.uploadToBucket("thumbnails", state.uploadThumbFile, thumbPath),
+          Math.max(120000, Math.floor(UPLOAD_TIMEOUT_MS / 2)),
+          "thumbnail_upload"
+        );
       }
 
       setUploadProgress(82, "Saving video record...");
@@ -2507,7 +2605,7 @@
     }catch(err){
       console.error("upload_failed", err);
       setUploadProgress(0, "Upload failed.");
-      showToast("Upload failed. Check SQL + storage policies.", true);
+      showToast(explainUploadError(err), true);
     }finally{
       dom.uploadSubmit.disabled = false;
     }
@@ -2736,10 +2834,23 @@
     dom.openUpload.addEventListener("click", () => setPanel("upload", true));
     dom.openDashboard.addEventListener("click", () => setPanel("dashboard", true));
     dom.sideButtons.forEach(btn => btn.addEventListener("click", () => setPanel(btn.getAttribute("data-panel"), true)));
+    if(dom.openChannelTop){
+      dom.openChannelTop.addEventListener("click", openMyChannel);
+    }
+    if(dom.openChannelSide){
+      dom.openChannelSide.addEventListener("click", openMyChannel);
+    }
 
     dom.watchBack.addEventListener("click", () => {
       setPanel("feed", true);
       try{ dom.player.pause(); }catch(_){ }
+    });
+    [dom.watchAvatar, dom.watchChannelName, dom.watchChannelSub].forEach(node => {
+      if(!node) return;
+      node.addEventListener("click", () => {
+        const channelId = util.safe(node.dataset.channelId || currentVideo()?.user_id);
+        if(channelId) openChannelPage(channelId);
+      });
     });
     dom.player.addEventListener("loadstart", () => setPlayerLoading(true, true));
     dom.player.addEventListener("waiting", () => setPlayerLoading(true, util.num(dom.player.currentTime) < 0.2));

@@ -47,6 +47,8 @@ body.mv-body{
 .mv-top-actions{
   display:flex;
   gap:8px;
+  flex-wrap:wrap;
+  justify-content:flex-end;
 }
 .mv-top-btn{
   border:none;
@@ -518,6 +520,12 @@ body.mv-body{
   margin:2px 0 0;
   font-size:12px;
   color:var(--mv-sub);
+}
+.mv-channel-link{
+  cursor:pointer;
+}
+.mv-channel-link:hover{
+  opacity:.88;
 }
 .mv-subscribe-btn{
   border:none;
