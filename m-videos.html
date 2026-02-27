@@ -1,14 +1,191 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MVideos Redirect</title>
-<script>
-location.replace("m-video.html" + (location.search || "") + (location.hash || ""));
-</script>
-<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9977276800228616"
-     crossorigin="anonymous"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>NOVAGAPP Videos</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="m-videos.css">
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="global.js"></script>
+<script src="public-config.js"></script>
+<script src="social.js"></script>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9977276800228616" crossorigin="anonymous"></script>
 </head>
-<body></body>
+<body class="mv-body">
+<header class="top mv-topbar">
+  <img src="Images/logo.png" class="logo" alt="NOVAGAPP">
+  <div class="company-name">NOVAGAPP Videos</div>
+  <div class="mv-top-actions">
+    <button type="button" class="mv-top-btn" id="mvOpenUpload">Upload</button>
+    <button type="button" class="mv-top-btn" id="mvOpenDashboard">Dashboard</button>
+  </div>
+</header>
+<div class="mv-shell">
+  <aside class="mv-sidebar" aria-label="Video Sections">
+    <button type="button" class="mv-side-btn active" data-panel="feed">Home <span>&rsaquo;</span></button>
+    <button type="button" class="mv-side-btn" data-panel="upload">Upload Video <span>&rsaquo;</span></button>
+    <button type="button" class="mv-side-btn" data-panel="dashboard">Creator Dashboard <span>&rsaquo;</span></button>
+  </aside>
+  <main class="mv-main">
+    <section class="mv-view active" id="mvFeedView">
+      <div class="mv-search-wrap">
+        <form class="mv-search-form" id="mvSearchForm">
+          <input type="search" class="mv-search-input" id="mvSearchInput" placeholder="Search videos, tags, channels">
+          <button type="submit" class="mv-search-btn">Search</button>
+          <button type="button" class="mv-clear-btn" id="mvSearchClear">Clear</button>
+        </form>
+        <div id="mvSuggestBox" class="mv-suggest mv-hidden"></div>
+      </div>
+      <div id="mvFeedGrid" class="mv-grid"></div>
+      <div id="mvFeedEmpty" class="mv-empty mv-hidden">No videos available yet.</div>
+      <div id="mvFeedSentinel" class="mv-sentinel"></div>
+    </section>
+
+    <section class="mv-view" id="mvWatchView">
+      <div class="mv-watch-layout">
+        <div class="mv-watch-main">
+          <button type="button" class="mv-watch-back" id="mvWatchBack">Back to Feed</button>
+          <div class="mv-player-wrap">
+            <video id="mvPlayer" class="mv-player" controls playsinline></video>
+          </div>
+          <h1 id="mvWatchTitle" class="mv-watch-title"></h1>
+          <p id="mvWatchMeta" class="mv-watch-sub"></p>
+          <div class="mv-channel-row">
+            <div class="mv-avatar" id="mvWatchAvatar">U</div>
+            <div class="mv-channel-meta">
+              <p class="mv-channel-name" id="mvWatchChannelName">User</p>
+              <p class="mv-channel-sub" id="mvWatchChannelSub">0 subscribers</p>
+            </div>
+            <button type="button" class="mv-subscribe-btn" id="mvSubscribeBtn">Subscribe</button>
+          </div>
+          <div class="mv-action-row">
+            <button type="button" class="mv-action-btn" id="mvLikeBtn"><span>Like</span><span id="mvLikeCount">0</span></button>
+            <button type="button" class="mv-action-btn" id="mvDislikeBtn"><span>Dislike</span><span id="mvDislikeCount">0</span></button>
+            <button type="button" class="mv-action-btn" id="mvShareBtn">Share</button>
+            <button type="button" class="mv-action-btn" id="mvSaveBtn">Save</button>
+          </div>
+          <div class="mv-desc-box">
+            <p id="mvDescText" class="mv-desc-text clamp"></p>
+            <button type="button" class="mv-desc-toggle" id="mvDescToggle">Show more</button>
+          </div>
+          <section class="mv-comments">
+            <div class="mv-comments-head">
+              <h3>Comments</h3>
+              <strong id="mvCommentCount">0</strong>
+            </div>
+            <form class="mv-comment-form" id="mvCommentForm">
+              <div class="mv-replying" id="mvReplying" hidden>
+                <span id="mvReplyingText"></span>
+                <button type="button" id="mvReplyCancel">Cancel</button>
+              </div>
+              <textarea id="mvCommentInput" class="mv-comment-input" placeholder="Add a comment"></textarea>
+              <button type="submit" class="mv-comment-submit">Comment</button>
+            </form>
+            <div id="mvCommentsEmpty" class="mv-empty mv-hidden">No comments yet.</div>
+            <div id="mvCommentsList" class="mv-comment-list"></div>
+          </section>
+        </div>
+        <aside class="mv-recommend">
+          <h4>Recommended</h4>
+          <div id="mvRecommendList" class="mv-rec-list"></div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="mv-view" id="mvUploadView">
+      <div class="mv-upload">
+        <h2>Upload Video</h2>
+        <form id="mvUploadForm">
+          <div class="mv-form-grid">
+            <div class="mv-field full">
+              <label class="mv-label">Video File</label>
+              <div class="mv-drop" id="mvVideoDrop">
+                <strong>Drag and drop video here</strong><br>
+                <small id="mvVideoFileName">Supported: MP4, WEBM, MOV, MKV (max 600MB)</small>
+              </div>
+              <input type="file" id="mvVideoFileInput" accept="video/mp4,video/webm,video/quicktime,video/x-matroska,video/ogg,video/mpeg" hidden>
+            </div>
+            <div class="mv-field full">
+              <label class="mv-label">Thumbnail</label>
+              <div class="mv-drop" id="mvThumbDrop">
+                <strong>Drag and drop thumbnail here</strong><br>
+                <small id="mvThumbFileName">Supported: JPG, PNG, WEBP (max 8MB)</small>
+              </div>
+              <input type="file" id="mvThumbFileInput" accept="image/jpeg,image/png,image/webp" hidden>
+              <div class="mv-thumb-preview mv-hidden" id="mvThumbPreviewWrap">
+                <img id="mvThumbPreview" alt="Thumbnail preview">
+              </div>
+            </div>
+            <div class="mv-field full">
+              <label class="mv-label" for="mvUploadTitle">Title</label>
+              <input type="text" id="mvUploadTitle" class="mv-input" maxlength="120" required>
+            </div>
+            <div class="mv-field full">
+              <label class="mv-label" for="mvUploadDescription">Description</label>
+              <textarea id="mvUploadDescription" class="mv-textarea" maxlength="4000"></textarea>
+            </div>
+            <div class="mv-field">
+              <label class="mv-label" for="mvUploadTags">Tags (comma separated)</label>
+              <input type="text" id="mvUploadTags" class="mv-input" placeholder="music, live, tutorial">
+            </div>
+            <div class="mv-field">
+              <label class="mv-label" for="mvUploadCategory">Category</label>
+              <select id="mvUploadCategory" class="mv-select">
+                <option value="General">General</option>
+                <option value="Music">Music</option>
+                <option value="Gaming">Gaming</option>
+                <option value="Education">Education</option>
+                <option value="News">News</option>
+                <option value="Sports">Sports</option>
+                <option value="Entertainment">Entertainment</option>
+              </select>
+            </div>
+            <div class="mv-field full">
+              <label class="mv-label">Monetization</label>
+              <div class="mv-switch-row">
+                <span>Enable monetization for this video</span>
+                <label class="mv-switch">
+                  <input type="checkbox" id="mvUploadMonetized">
+                  <span class="mv-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="mv-upload-actions">
+            <button type="submit" class="mv-upload-btn" id="mvUploadSubmit">Upload</button>
+            <div class="mv-progress"><div class="mv-progress-bar" id="mvUploadProgress"></div></div>
+          </div>
+          <div class="mv-status" id="mvUploadStatus">Ready to upload.</div>
+        </form>
+      </div>
+    </section>
+
+    <section class="mv-view" id="mvDashboardView">
+      <div class="mv-dashboard">
+        <h2>Creator Earnings Dashboard</h2>
+        <div class="mv-dashboard-grid">
+          <div class="mv-metric"><small>Total Views</small><strong id="mvDashViews">0</strong></div>
+          <div class="mv-metric"><small>Total Revenue</small><strong id="mvDashRevenue">$0.00</strong></div>
+          <div class="mv-metric"><small>RPM</small><strong id="mvDashRpm">$0.00</strong></div>
+          <div class="mv-metric"><small>Estimated Monthly</small><strong id="mvDashMonthly">$0.00</strong></div>
+        </div>
+        <button type="button" class="mv-dashboard-refresh" id="mvDashRefresh">Refresh Dashboard</button>
+      </div>
+    </section>
+  </main>
+</div>
+<nav class="mv-footer-nav" aria-label="Main Navigation">
+  <button type="button" class="mv-footer-btn" data-go="index.html"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3l-10-9-10 9h3v8z"></path></svg><span>Home</span></button>
+  <button type="button" class="mv-footer-btn" data-go="find.html"><svg viewBox="0 0 24 24"><path d="M21 21l-5.2-5.2a7 7 0 1 0-1.8 1.8L21 21z"></path></svg><span>Search</span></button>
+  <button type="button" class="mv-footer-btn active"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg><span>Videos</span></button>
+  <button type="button" class="mv-footer-btn" data-go="reel.html"><svg viewBox="0 0 24 24"><path d="M17 10.5v-7l-12 9 12 9v-7l7 4v-12z"></path></svg><span>Reel</span></button>
+  <button type="button" class="mv-footer-btn" data-go="post.html"><svg viewBox="0 0 24 24"><path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14z"></path></svg><span>Post</span></button>
+  <button type="button" class="mv-footer-btn" data-go="m-subcription.html"><img src="Images/subscription.png" class="mv-footer-sub" alt="Subscription"><span>Subscription</span></button>
+  <button type="button" class="mv-footer-btn" data-go="chat.html"><svg viewBox="0 0 24 24"><path d="M21 6h-18v12h4v4l4-4h10z"></path></svg><span>Chat</span></button>
+  <button type="button" class="mv-footer-btn" data-go="m-account.html"><svg viewBox="0 0 24 24"><path d="M12 12a5 5 0 0 0 5-5A5 5 0 0 0 7 7a5 5 0 0 0 5 5zm0 2c-4.42 0-8 1.79-8 4v2h16v-2c0-2.21-3.58-4-8-4z"></path></svg><span>Account</span></button>
+</nav>
+<div id="mvToast" class="mv-toast"></div>
+<script src="m-videos.js"></script>
+</body>
 </html>
