@@ -53,6 +53,10 @@ const MANUAL_JSON_PATH = path.join(MANUAL_DIR, "requests.json");
 const AUTOMATION_EVENTS_DIR = path.join(UPLOADS_DIR, "automation-events");
 const ACCOUNT_SYNC_LOG_PATH = path.join(AUTOMATION_EVENTS_DIR, "account-sync.ndjson");
 const MEDIA_EVENT_LOG_PATH = path.join(AUTOMATION_EVENTS_DIR, "media-events.ndjson");
+const VIDEOS_MONETIZATION_DIR = path.join(UPLOADS_DIR, "videos-monetization");
+const VIDEOS_MONETIZATION_STATE_PATH = path.join(VIDEOS_MONETIZATION_DIR, "state.json");
+const VIDEO_MONETIZATION_UNLOCK_USD = 10;
+const VIDEO_MONETIZATION_MIN_FOLLOWERS = 5000;
 const FREE_PLAN_DAILY_LIMIT = 2;
 const PRO_PLAN_DAILY_LIMIT = 20;
 const TRYON_PRICE_PER_IMAGE_USD = 1;
@@ -195,6 +199,33 @@ async function readManualRequests(){
 async function writeManualRequests(items){
   await ensureDir(MANUAL_DIR);
   await fs.writeFile(MANUAL_JSON_PATH, JSON.stringify(items, null, 2), "utf8");
+}
+
+function normalizeVideoMonetizationState(raw){
+  const next = raw && typeof raw === "object" ? raw : {};
+  next.version = Math.max(1, Number(next.version) || 1);
+  if(!next.users || typeof next.users !== "object"){
+    next.users = {};
+  }
+  if(!next.orders || typeof next.orders !== "object"){
+    next.orders = {};
+  }
+  return next;
+}
+
+async function readVideoMonetizationState(){
+  try{
+    const raw = await fs.readFile(VIDEOS_MONETIZATION_STATE_PATH, "utf8");
+    return normalizeVideoMonetizationState(raw ? JSON.parse(raw) : {});
+  }catch(_){
+    return normalizeVideoMonetizationState({});
+  }
+}
+
+async function writeVideoMonetizationState(state){
+  await ensureDir(VIDEOS_MONETIZATION_DIR);
+  const next = normalizeVideoMonetizationState(state);
+  await fs.writeFile(VIDEOS_MONETIZATION_STATE_PATH, JSON.stringify(next, null, 2), "utf8");
 }
 
 function inferExtFromMime(mime){
@@ -1668,6 +1699,291 @@ app.post("/api/payment/razorpay/verify", async (req, res) => {
       ok: false,
       error: "shop_order_verify_failed",
       message: String(err?.message || "Unable to verify payment.")
+    });
+  }
+});
+
+app.options("/api/videos/monetization/status", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.sendStatus(204);
+});
+
+app.get("/api/videos/monetization/status", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const userId = sanitizeUserId(req.query?.user_id);
+  const paymentReady = isContestRazorpayConfigured();
+
+  if(!userId){
+    return res.status(400).json({
+      ok:false,
+      error:"user_id_required",
+      unlocked:false,
+      payment_ready: paymentReady,
+      min_followers_required: VIDEO_MONETIZATION_MIN_FOLLOWERS,
+      unlock_amount_usd: VIDEO_MONETIZATION_UNLOCK_USD
+    });
+  }
+
+  try{
+    const state = await readVideoMonetizationState();
+    const userState = state?.users?.[userId] && typeof state.users[userId] === "object"
+      ? state.users[userId]
+      : null;
+    const unlocked = !!userState?.unlocked;
+    const statusMessage = unlocked
+      ? "Monetization already unlocked for this account."
+      : "Complete 5000 followers and one-time $10 unlock payment.";
+
+    return res.json({
+      ok:true,
+      user_id:userId,
+      unlocked,
+      payment_ready: paymentReady,
+      key_id: paymentReady ? CONTEST_RAZORPAY_KEY_ID : "",
+      min_followers_required: VIDEO_MONETIZATION_MIN_FOLLOWERS,
+      unlock_amount_usd: VIDEO_MONETIZATION_UNLOCK_USD,
+      paid_at: userState?.paid_at || null,
+      followers_count_at_unlock: safeNumber(userState?.followers_count_at_unlock),
+      payment_currency: String(userState?.payment_currency || "INR").trim().toUpperCase(),
+      payment_amount_paise: safeNumber(userState?.payment_amount_paise),
+      status_message: statusMessage
+    });
+  }catch(err){
+    console.error("video_monetization_status_error:", err?.stack || err);
+    return res.status(500).json({
+      ok:false,
+      error:"video_monetization_status_failed",
+      message:String(err?.message || "Unable to load monetization status.")
+    });
+  }
+});
+
+app.options("/api/videos/monetization/order", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.sendStatus(204);
+});
+
+app.post("/api/videos/monetization/order", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  if(!isContestRazorpayConfigured()){
+    return res.status(503).json({
+      ok:false,
+      error:"razorpay_not_configured",
+      issue:getContestRazorpayConfigIssue(),
+      mode:getContestRazorpayMode(),
+      message:getContestRazorpaySetupMessage()
+    });
+  }
+
+  const userId = sanitizeUserId(req.body?.user_id);
+  if(!userId){
+    return res.status(400).json({ ok:false, error:"user_id_required" });
+  }
+
+  const followersCount = Math.max(0, Math.floor(safeNumber(req.body?.followers_count)));
+  if(followersCount < VIDEO_MONETIZATION_MIN_FOLLOWERS){
+    return res.status(403).json({
+      ok:false,
+      error:"followers_requirement_not_met",
+      min_followers_required: VIDEO_MONETIZATION_MIN_FOLLOWERS,
+      followers_count: followersCount,
+      message:`Need at least ${VIDEO_MONETIZATION_MIN_FOLLOWERS} followers for monetization unlock.`
+    });
+  }
+
+  try{
+    const state = await readVideoMonetizationState();
+    const existing = state?.users?.[userId] && typeof state.users[userId] === "object"
+      ? state.users[userId]
+      : null;
+    if(existing?.unlocked){
+      return res.json({
+        ok:true,
+        already_unlocked:true,
+        unlocked:true,
+        user_id:userId,
+        paid_at:existing.paid_at || null
+      });
+    }
+
+    const usdInrRate = await getUsdInrRateSafe();
+    const amountPaise = Math.max(100, Math.round(VIDEO_MONETIZATION_UNLOCK_USD * usdInrRate * 100));
+    const receipt = `vmu_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`.slice(0, 40);
+    const notes = {
+      feature: "video_monetization_unlock",
+      app_user_id: userId,
+      unlock_usd: String(VIDEO_MONETIZATION_UNLOCK_USD),
+      followers_count: String(followersCount)
+    };
+
+    const razorpayOrder = await createContestRazorpayOrder({
+      amount_paise: amountPaise,
+      receipt,
+      notes
+    });
+
+    const nowIso = new Date().toISOString();
+    state.version = Math.max(1, Math.floor(safeNumber(state.version))) + 1;
+    state.orders[razorpayOrder.id] = {
+      user_id:userId,
+      receipt,
+      status:String(razorpayOrder.status || "created").trim().toLowerCase() || "created",
+      followers_count:followersCount,
+      amount_usd:VIDEO_MONETIZATION_UNLOCK_USD,
+      amount_inr_paise:Math.round(safeNumber(razorpayOrder.amount) || amountPaise),
+      usd_inr_rate:usdInrRate,
+      currency:String(razorpayOrder.currency || "INR").trim().toUpperCase() || "INR",
+      payment_id:"",
+      created_at:nowIso,
+      updated_at:nowIso
+    };
+    await writeVideoMonetizationState(state);
+
+    return res.json({
+      ok:true,
+      unlocked:false,
+      order:{
+        key_id:CONTEST_RAZORPAY_KEY_ID,
+        razorpay_order_id:razorpayOrder.id,
+        amount_paise:Math.round(safeNumber(razorpayOrder.amount) || amountPaise),
+        currency:String(razorpayOrder.currency || "INR").trim().toUpperCase() || "INR",
+        receipt:razorpayOrder.receipt || receipt,
+        status:String(razorpayOrder.status || "created").trim().toLowerCase() || "created",
+        unlock_amount_usd:VIDEO_MONETIZATION_UNLOCK_USD
+      }
+    });
+  }catch(err){
+    console.error("video_monetization_order_error:", err?.stack || err);
+    return res.status(500).json({
+      ok:false,
+      error:"video_monetization_order_failed",
+      message:String(err?.message || "Unable to create monetization order.")
+    });
+  }
+});
+
+app.options("/api/videos/monetization/verify", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.sendStatus(204);
+});
+
+app.post("/api/videos/monetization/verify", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  if(!isContestRazorpayConfigured()){
+    return res.status(503).json({
+      ok:false,
+      error:"razorpay_not_configured",
+      issue:getContestRazorpayConfigIssue(),
+      mode:getContestRazorpayMode(),
+      message:getContestRazorpaySetupMessage()
+    });
+  }
+
+  const userId = sanitizeUserId(req.body?.user_id);
+  const orderId = String(req.body?.razorpay_order_id || "").trim();
+  const paymentId = String(req.body?.razorpay_payment_id || "").trim();
+  const signature = String(req.body?.razorpay_signature || "").trim();
+  if(!userId || !orderId || !paymentId || !signature){
+    return res.status(400).json({ ok:false, error:"payment_fields_required" });
+  }
+  if(!verifyContestPaymentSignature(orderId, paymentId, signature)){
+    return res.status(400).json({ ok:false, error:"invalid_payment_signature" });
+  }
+
+  try{
+    const paymentSnapshot = await fetchRazorpayPaymentSnapshot(paymentId);
+    if(String(paymentSnapshot?.order_id || "").trim() !== orderId){
+      return res.status(400).json({ ok:false, error:"order_payment_mismatch" });
+    }
+    const paymentStatus = String(paymentSnapshot?.status || "").trim().toLowerCase();
+    const paymentCurrency = String(paymentSnapshot?.currency || "").trim().toUpperCase();
+    const paymentAmountPaise = Math.round(safeNumber(paymentSnapshot?.amount));
+    const paymentCaptured = Boolean(paymentSnapshot?.captured) || paymentStatus === "captured";
+    if(!paymentStatus || !isRazorpayPaymentStatusAcceptable(paymentStatus) || !paymentCaptured){
+      return res.status(409).json({
+        ok:false,
+        error:"invalid_payment_status",
+        payment_status:paymentStatus
+      });
+    }
+    if(paymentCurrency && paymentCurrency !== "INR"){
+      return res.status(400).json({
+        ok:false,
+        error:"payment_currency_mismatch",
+        payment_currency:paymentCurrency
+      });
+    }
+
+    const state = await readVideoMonetizationState();
+    const order = state?.orders?.[orderId] && typeof state.orders[orderId] === "object"
+      ? state.orders[orderId]
+      : null;
+    if(!order){
+      return res.status(404).json({ ok:false, error:"order_not_found" });
+    }
+    if(sanitizeUserId(order.user_id) !== userId){
+      return res.status(403).json({ ok:false, error:"order_user_mismatch" });
+    }
+
+    const expectedAmountPaise = Math.round(safeNumber(order.amount_inr_paise));
+    if(expectedAmountPaise > 0 && paymentAmountPaise < expectedAmountPaise){
+      return res.status(400).json({
+        ok:false,
+        error:"payment_amount_mismatch",
+        payment_amount_paise:paymentAmountPaise,
+        expected_amount_paise:expectedAmountPaise
+      });
+    }
+
+    const nowIso = new Date().toISOString();
+    state.version = Math.max(1, Math.floor(safeNumber(state.version))) + 1;
+
+    order.payment_id = paymentId;
+    order.signature = signature;
+    order.status = "paid";
+    order.payment_status = paymentStatus || "captured";
+    order.payment_currency = paymentCurrency || "INR";
+    order.payment_amount_paise = paymentAmountPaise;
+    order.paid_at = nowIso;
+    order.updated_at = nowIso;
+
+    state.users[userId] = {
+      user_id:userId,
+      unlocked:true,
+      amount_usd:VIDEO_MONETIZATION_UNLOCK_USD,
+      payment_currency:paymentCurrency || "INR",
+      payment_amount_paise:paymentAmountPaise,
+      followers_count_at_unlock:Math.max(0, Math.floor(safeNumber(order.followers_count))),
+      razorpay_order_id:orderId,
+      razorpay_payment_id:paymentId,
+      payment_status:paymentStatus || "captured",
+      paid_at:nowIso,
+      updated_at:nowIso
+    };
+
+    await writeVideoMonetizationState(state);
+
+    return res.json({
+      ok:true,
+      verified:true,
+      unlocked:true,
+      user_id:userId,
+      paid_at:nowIso,
+      payment_currency:paymentCurrency || "INR",
+      payment_amount_paise:paymentAmountPaise
+    });
+  }catch(err){
+    console.error("video_monetization_verify_error:", err?.stack || err);
+    return res.status(500).json({
+      ok:false,
+      error:"video_monetization_verify_failed",
+      message:String(err?.message || "Unable to verify monetization payment.")
     });
   }
 });

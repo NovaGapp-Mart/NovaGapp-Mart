@@ -10,6 +10,9 @@
   const VIDEO_SELECT = "id,user_id,title,description,video_url,thumbnail_url,views,likes_count,dislikes_count,monetized,created_at,category,tags,duration_seconds";
   const VIDEO_MIME_TYPES = new Set(["video/mp4","video/webm","video/quicktime","video/x-matroska","video/ogg","video/mpeg"]);
   const THUMB_MIME_TYPES = new Set(["image/jpeg","image/png","image/webp"]);
+  const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
+  const MONETIZATION_MIN_FOLLOWERS = 5000;
+  const MONETIZATION_UNLOCK_USD = 10;
 
   const state = {
     supa:null,
@@ -38,7 +41,17 @@
     observer:null,
     timers:{},
     uploadVideoFile:null,
-    uploadThumbFile:null
+    uploadThumbFile:null,
+    monetization:{
+      followers:0,
+      followersReady:false,
+      unlocked:false,
+      paymentReady:false,
+      keyId:"",
+      statusMessage:"",
+      loading:false,
+      unlockBusy:false
+    }
   };
 
   const dom = {
@@ -89,6 +102,8 @@
     uploadTags:document.getElementById("mvUploadTags"),
     uploadCategory:document.getElementById("mvUploadCategory"),
     uploadMonetized:document.getElementById("mvUploadMonetized"),
+    monetizeHint:document.getElementById("mvMonetizeHint"),
+    monetizeUnlockBtn:document.getElementById("mvMonetizeUnlockBtn"),
     videoDrop:document.getElementById("mvVideoDrop"),
     thumbDrop:document.getElementById("mvThumbDrop"),
     videoFileInput:document.getElementById("mvVideoFileInput"),
@@ -128,6 +143,98 @@
     write(key, value){ try{ localStorage.setItem(key, JSON.stringify(value)); }catch(_){ } },
     pushUnique(key, value, limit){ const val = util.safe(value); if(!val) return; const list = store.read(key, []); const next = [val].concat(list.filter(item => util.safe(item) !== val)).slice(0, limit || 50); store.write(key, next); }
   };
+  let razorpaySdkPromise = null;
+
+  function normalizeBase(value){
+    return util.safe(value).replace(/\/+$/g, "");
+  }
+
+  function buildAutomationApiBases(){
+    const bases = [];
+    const push = (value) => {
+      const clean = normalizeBase(value);
+      if(!clean) return;
+      if(!/^https?:\/\//i.test(clean)) return;
+      if(!bases.includes(clean)) bases.push(clean);
+    };
+
+    try{
+      push(window.CONTEST_API_BASE);
+      push(window.API_BASE);
+      push(localStorage.getItem("contest_api_base"));
+      push(localStorage.getItem("api_base"));
+      push(sessionStorage.getItem("contest_api_base"));
+      push(sessionStorage.getItem("api_base"));
+    }catch(_){ }
+
+    if(/^https?:\/\//i.test(location.origin || "")){
+      push(location.origin);
+    }
+    push(DEFAULT_REMOTE_API_BASE);
+    return bases;
+  }
+
+  async function fetchApiJson(path, options){
+    const endpoint = util.safe(path);
+    if(!endpoint){
+      throw new Error("api_path_required");
+    }
+    const localFirst = [""].concat(buildAutomationApiBases());
+    let lastError = null;
+
+    for(const base of localFirst){
+      const url = base
+        ? `${base}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`
+        : endpoint;
+      let response = null;
+      try{
+        response = await fetch(url, options || {});
+      }catch(err){
+        lastError = err;
+        continue;
+      }
+
+      let payload = null;
+      try{
+        payload = await response.json();
+      }catch(_){
+        payload = null;
+      }
+
+      if(response.ok){
+        return payload || { ok:true };
+      }
+
+      if(response.status === 404 || response.status === 405){
+        lastError = new Error(`api_not_found_${response.status}`);
+        continue;
+      }
+
+      const message = util.safe(payload?.message || payload?.error) || `api_failed_${response.status}`;
+      const err = new Error(message);
+      err.status = response.status;
+      err.payload = payload || null;
+      throw err;
+    }
+
+    throw lastError || new Error("api_unreachable");
+  }
+
+  function ensureRazorpaySdk(){
+    if(window.Razorpay) return Promise.resolve(true);
+    if(razorpaySdkPromise) return razorpaySdkPromise;
+
+    razorpaySdkPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => reject(new Error("razorpay_sdk_load_failed"));
+      document.head.appendChild(script);
+    });
+
+    return razorpaySdkPromise;
+  }
 
   function normalizeVideo(row){
     const tagsRaw = Array.isArray(row?.tags) ? row.tags.join(", ") : util.safe(row?.tags);
@@ -203,6 +310,62 @@
     const pct = Math.max(0, Math.min(100, util.num(percent)));
     dom.uploadProgress.style.width = pct + "%";
     dom.uploadStatus.textContent = util.safe(text);
+  }
+
+  function isMonetizationAllowed(){
+    const m = state.monetization || {};
+    return !!(m.followersReady && m.unlocked);
+  }
+
+  function monetizationBlockedMessage(){
+    const m = state.monetization || {};
+    const followers = Math.max(0, util.num(m.followers));
+    if(followers < MONETIZATION_MIN_FOLLOWERS){
+      return `Monetization needs ${MONETIZATION_MIN_FOLLOWERS} followers. Current: ${followers}.`;
+    }
+    if(!m.unlocked){
+      return `Pay one-time $${MONETIZATION_UNLOCK_USD} unlock fee first.`;
+    }
+    return "Monetization is not enabled for this account yet.";
+  }
+
+  function renderMonetizationUi(){
+    const m = state.monetization || {};
+    const followers = Math.max(0, util.num(m.followers));
+    m.followersReady = followers >= MONETIZATION_MIN_FOLLOWERS;
+
+    const canMonetize = isMonetizationAllowed();
+    dom.uploadMonetized.disabled = !canMonetize;
+    if(!canMonetize){
+      dom.uploadMonetized.checked = false;
+    }
+
+    if(dom.monetizeHint){
+      let text = util.safe(m.statusMessage);
+      if(!text){
+        if(!m.followersReady){
+          text = `Followers: ${followers}/${MONETIZATION_MIN_FOLLOWERS}. Reach ${MONETIZATION_MIN_FOLLOWERS} to start monetization.`;
+        }else if(!m.unlocked){
+          text = `Followers done. Pay $${MONETIZATION_UNLOCK_USD} one-time to unlock monetization.`;
+        }else{
+          text = "Monetization unlocked. You can enable it for this upload.";
+        }
+      }
+      dom.monetizeHint.textContent = text;
+    }
+
+    if(dom.monetizeUnlockBtn){
+      const showUnlock = m.followersReady && !m.unlocked;
+      dom.monetizeUnlockBtn.hidden = !showUnlock;
+      dom.monetizeUnlockBtn.disabled = !!m.unlockBusy || !!m.loading || !m.paymentReady;
+      if(m.unlockBusy){
+        dom.monetizeUnlockBtn.textContent = "Processing...";
+      }else if(!m.paymentReady){
+        dom.monetizeUnlockBtn.textContent = "Payment unavailable";
+      }else{
+        dom.monetizeUnlockBtn.textContent = `Pay $${MONETIZATION_UNLOCK_USD} to Unlock`;
+      }
+    }
   }
 
   function resetReplyTarget(){
@@ -305,7 +468,7 @@
       if(Array.isArray(opts.userIds) && opts.userIds.length) query = query.in("user_id", opts.userIds.slice(0, 100));
       if(opts.search){
         const filter = util.clean(opts.search);
-        if(filter) query = query.or("title.ilike.%" + filter + "%,tags.ilike.%" + filter + "%,category.ilike.%" + filter + "%");
+        if(filter) query = query.or("title.ilike.%" + filter + "%,category.ilike.%" + filter + "%");
       }
       if(typeof opts.offset === "number" && typeof opts.limit === "number"){
         const from = Math.max(0, opts.offset);
@@ -324,6 +487,75 @@
       const { data, error } = await state.supa.from("videos").select(VIDEO_SELECT).eq("id", id).maybeSingle();
       if(error || !data) return null;
       return normalizeVideo(data);
+    },
+
+    async fetchFollowerCount(userId){
+      const id = util.safe(userId);
+      if(!id) return 0;
+
+      let best = 0;
+      try{
+        const follows = await state.supa
+          .from("follows")
+          .select("follower_id", { count:"exact", head:true })
+          .eq("following_id", id);
+        if(!follows.error){
+          best = Math.max(best, Math.max(0, util.num(follows.count)));
+        }
+      }catch(_){ }
+
+      try{
+        const subs = await state.supa
+          .from("channel_subscribers")
+          .select("subscriber_user_id", { count:"exact", head:true })
+          .eq("channel_id", id);
+        if(!subs.error){
+          best = Math.max(best, Math.max(0, util.num(subs.count)));
+        }
+      }catch(_){ }
+
+      try{
+        const profile = await state.supa
+          .from("users")
+          .select("channel_subscribers_count")
+          .eq("user_id", id)
+          .maybeSingle();
+        if(!profile.error){
+          best = Math.max(best, Math.max(0, util.num(profile.data?.channel_subscribers_count)));
+        }
+      }catch(_){ }
+
+      return best;
+    },
+
+    async fetchMonetizationStatus(userId){
+      const id = util.safe(userId);
+      if(!id){
+        return { ok:false, unlocked:false, payment_ready:false, status_message:"Login required." };
+      }
+      return fetchApiJson(`/api/videos/monetization/status?user_id=${encodeURIComponent(id)}`, {
+        method:"GET",
+        headers:{ Accept:"application/json" },
+        credentials:"omit"
+      });
+    },
+
+    async createMonetizationOrder(payload){
+      return fetchApiJson("/api/videos/monetization/order", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json", Accept:"application/json" },
+        body:JSON.stringify(payload || {}),
+        credentials:"omit"
+      });
+    },
+
+    async verifyMonetizationPayment(payload){
+      return fetchApiJson("/api/videos/monetization/verify", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json", Accept:"application/json" },
+        body:JSON.stringify(payload || {}),
+        credentials:"omit"
+      });
     }
   };
 
@@ -1006,6 +1238,155 @@
     dom.dashMonthly.textContent = util.money(data?.estimated_monthly_earnings);
   }
 
+  async function refreshMonetizationStatus(){
+    if(!state.supa){
+      return;
+    }
+    const user = await api.ensureAuth();
+    const m = state.monetization || {};
+    if(!user || !user.id){
+      m.followers = 0;
+      m.followersReady = false;
+      m.unlocked = false;
+      m.paymentReady = false;
+      m.keyId = "";
+      m.statusMessage = "Login required for monetization.";
+      renderMonetizationUi();
+      return;
+    }
+
+    m.loading = true;
+    m.statusMessage = "Checking monetization requirements...";
+    renderMonetizationUi();
+
+    try{
+      const followers = await api.fetchFollowerCount(user.id);
+      m.followers = Math.max(0, util.num(followers));
+
+      try{
+        const statusPayload = await api.fetchMonetizationStatus(user.id);
+        m.unlocked = !!statusPayload?.unlocked;
+        m.paymentReady = !!statusPayload?.payment_ready;
+        m.keyId = util.safe(statusPayload?.key_id || "");
+        m.statusMessage = util.safe(statusPayload?.status_message || "");
+      }catch(err){
+        console.error("monetization_status_failed", err);
+        m.unlocked = false;
+        m.paymentReady = false;
+        m.statusMessage = "Payment service unavailable right now.";
+      }
+    }finally{
+      m.loading = false;
+      renderMonetizationUi();
+    }
+  }
+
+  async function unlockMonetization(){
+    const user = await api.requireAuth();
+    if(!user || !user.id) return;
+
+    const m = state.monetization || {};
+    if(m.unlockBusy) return;
+
+    await refreshMonetizationStatus();
+    if(!m.followersReady){
+      showToast(monetizationBlockedMessage(), true);
+      return;
+    }
+    if(m.unlocked){
+      showToast("Monetization already unlocked.");
+      renderMonetizationUi();
+      return;
+    }
+    if(!m.paymentReady){
+      showToast("Payment is not configured right now.", true);
+      return;
+    }
+
+    m.unlockBusy = true;
+    m.statusMessage = "Creating payment order...";
+    renderMonetizationUi();
+
+    try{
+      const orderPayload = await api.createMonetizationOrder({
+        user_id: user.id,
+        followers_count: Math.max(0, util.num(m.followers))
+      });
+      const order = orderPayload?.order || null;
+      if(!order?.razorpay_order_id){
+        throw new Error(util.safe(orderPayload?.message) || "monetization_order_create_failed");
+      }
+
+      const paymentKey = util.safe(order.key_id || m.keyId);
+      if(!paymentKey){
+        throw new Error("payment_key_missing");
+      }
+
+      await ensureRazorpaySdk();
+
+      await new Promise((resolve, reject) => {
+        let done = false;
+        const finish = (fn, value) => {
+          if(done) return;
+          done = true;
+          fn(value);
+        };
+
+        const rzp = new window.Razorpay({
+          key: paymentKey,
+          order_id: order.razorpay_order_id,
+          amount: Number(order.amount_paise || 0),
+          currency: util.safe(order.currency || "INR") || "INR",
+          name: "NOVAGAPP",
+          description: `Video monetization unlock ($${MONETIZATION_UNLOCK_USD})`,
+          theme: { color:"#ff6a00" },
+          handler: async function(res){
+            try{
+              const verifyPayload = await api.verifyMonetizationPayment({
+                user_id: user.id,
+                razorpay_order_id: util.safe(res?.razorpay_order_id || order.razorpay_order_id),
+                razorpay_payment_id: util.safe(res?.razorpay_payment_id),
+                razorpay_signature: util.safe(res?.razorpay_signature)
+              });
+              if(!verifyPayload?.verified || !verifyPayload?.unlocked){
+                throw new Error(util.safe(verifyPayload?.message) || "monetization_verify_failed");
+              }
+              finish(resolve, true);
+            }catch(err){
+              finish(reject, err);
+            }
+          },
+          modal:{
+            ondismiss: function(){
+              finish(reject, new Error("payment_cancelled"));
+            }
+          }
+        });
+
+        rzp.on("payment.failed", function(payload){
+          const reason = util.safe(payload?.error?.description) || "payment_failed";
+          finish(reject, new Error(reason));
+        });
+        rzp.open();
+      });
+
+      m.unlocked = true;
+      m.statusMessage = "Monetization unlocked successfully.";
+      showToast("Monetization unlocked.");
+      await refreshMonetizationStatus();
+    }catch(err){
+      console.error("unlock_monetization_failed", err);
+      if(util.safe(err?.message) !== "payment_cancelled"){
+        showToast(util.safe(err?.message) || "Unable to unlock monetization", true);
+      }
+      m.statusMessage = "Monetization unlock not completed.";
+      renderMonetizationUi();
+    }finally{
+      m.unlockBusy = false;
+      renderMonetizationUi();
+    }
+  }
+
   function resetUpload(){
     state.uploadVideoFile = null;
     state.uploadThumbFile = null;
@@ -1015,6 +1396,7 @@
     dom.thumbPreviewWrap.classList.add("mv-hidden");
     dom.thumbPreview.removeAttribute("src");
     setUploadProgress(0, "Ready to upload.");
+    renderMonetizationUi();
   }
 
   function validateVideo(file){
@@ -1074,6 +1456,31 @@
     });
   }
 
+  function shouldRetryTagsAsText(error){
+    const code = util.safe(error?.code).toUpperCase();
+    const message = util.safe(error?.message).toLowerCase();
+    const details = util.safe(error?.details).toLowerCase();
+    if(code === "42804") return true;
+    if(message.includes("column") && message.includes("tags") && message.includes("type text")) return true;
+    if(details.includes("type text") && details.includes("tags")) return true;
+    return false;
+  }
+
+  async function insertVideoWithAdaptiveTags(basePayload, tagList){
+    const tags = Array.isArray(tagList) ? tagList : [];
+    const firstPayload = { ...basePayload, tags };
+    let result = await state.supa.from("videos").insert(firstPayload).select(VIDEO_SELECT).maybeSingle();
+    if(!result.error){
+      return result;
+    }
+    if(!shouldRetryTagsAsText(result.error)){
+      return result;
+    }
+    const fallbackPayload = { ...basePayload, tags: tags.join(", ") };
+    result = await state.supa.from("videos").insert(fallbackPayload).select(VIDEO_SELECT).maybeSingle();
+    return result;
+  }
+
   async function uploadVideo(event){
     event.preventDefault();
 
@@ -1082,11 +1489,21 @@
 
     const title = util.safe(dom.uploadTitle.value);
     const description = util.safe(dom.uploadDescription.value);
-    const tags = util.tags(dom.uploadTags.value).join(", ");
+    const tags = util.tags(dom.uploadTags.value);
     const category = util.safe(dom.uploadCategory.value) || "General";
-    const monetized = !!dom.uploadMonetized.checked;
+    const monetizedRequested = !!dom.uploadMonetized.checked;
+    let monetized = false;
 
     if(!title) return void showToast("Title is required", true);
+    if(monetizedRequested){
+      if(!isMonetizationAllowed()){
+        await refreshMonetizationStatus();
+      }
+      if(!isMonetizationAllowed()){
+        return void showToast(monetizationBlockedMessage(), true);
+      }
+      monetized = true;
+    }
 
     const videoError = validateVideo(state.uploadVideoFile);
     if(videoError) return void showToast(videoError, true);
@@ -1123,7 +1540,7 @@
         duration_seconds:Math.max(0, Math.round(util.num(meta?.duration)))
       };
 
-      const { data, error } = await state.supa.from("videos").insert(payload).select(VIDEO_SELECT).maybeSingle();
+      const { data, error } = await insertVideoWithAdaptiveTags(payload, tags);
       if(error) throw error;
 
       setUploadProgress(100, "Upload complete.");
@@ -1172,6 +1589,7 @@
     }
 
     if(next === "dashboard") loadDashboard();
+    if(next === "upload") refreshMonetizationStatus().catch(() => {});
   }
 
   function setupRealtime(){
@@ -1235,6 +1653,17 @@
           dom.watchChannelSub.textContent = util.compact(Math.max(0, util.num(count))) + " subscribers";
         }
       }, 180);
+      if(state.me && util.safe(state.me.id) === channelId){
+        schedule("monetization_subs", () => refreshMonetizationStatus(), 260);
+      }
+    });
+
+    channel.on("postgres_changes", { event:"*", schema:"public", table:"follows" }, (payload) => {
+      const followingId = util.safe(payload.new?.following_id || payload.old?.following_id);
+      if(!followingId) return;
+      if(state.me && util.safe(state.me.id) === followingId){
+        schedule("monetization_follows", () => refreshMonetizationStatus(), 260);
+      }
     });
 
     channel.on("postgres_changes", { event:"*", schema:"public", table:"video_earnings" }, (payload) => {
@@ -1410,6 +1839,9 @@
     });
 
     dom.uploadForm.addEventListener("submit", uploadVideo);
+    if(dom.monetizeUnlockBtn){
+      dom.monetizeUnlockBtn.addEventListener("click", unlockMonetization);
+    }
     dom.dashRefresh.addEventListener("click", loadDashboard);
 
     dom.footerButtons.forEach(btn => {
@@ -1441,6 +1873,7 @@
   async function init(){
     bindEvents();
     resetUpload();
+    renderMonetizationUi();
 
     state.supa = await api.waitForSupabase(10000);
     if(!state.supa){
@@ -1449,6 +1882,7 @@
     }
 
     await api.ensureAuth();
+    await refreshMonetizationStatus();
     setupRealtime();
 
     state.observer = new IntersectionObserver((entries) => {

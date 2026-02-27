@@ -826,6 +826,26 @@ body.mv-body{
   padding:10px 16px;
   cursor:pointer;
 }
+.mv-upload-btn:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+}
+.mv-upload-btn-secondary{
+  background:#0f172a;
+}
+.mv-monetize-meta{
+  margin-top:8px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
+}
+.mv-monetize-hint{
+  color:var(--mv-sub);
+  font-size:12px;
+  line-height:1.35;
+}
 .mv-progress{
   flex:1;
   height:10px;
