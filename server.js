@@ -50,6 +50,9 @@ const PORT = Math.max(1, Number(process.env.PORT || 3000) || 3000);
 const UPLOADS_DIR = path.join(__dirname, "uploads");
 const MANUAL_DIR = path.join(UPLOADS_DIR, "manual-requests");
 const MANUAL_JSON_PATH = path.join(MANUAL_DIR, "requests.json");
+const AUTOMATION_EVENTS_DIR = path.join(UPLOADS_DIR, "automation-events");
+const ACCOUNT_SYNC_LOG_PATH = path.join(AUTOMATION_EVENTS_DIR, "account-sync.ndjson");
+const MEDIA_EVENT_LOG_PATH = path.join(AUTOMATION_EVENTS_DIR, "media-events.ndjson");
 const FREE_PLAN_DAILY_LIMIT = 2;
 const PRO_PLAN_DAILY_LIMIT = 20;
 const TRYON_PRICE_PER_IMAGE_USD = 1;
@@ -95,6 +98,84 @@ app.get("/api/public/config", (req, res) => {
     supabaseAnonKey: PUBLIC_SUPABASE_ANON_KEY,
     razorpayKeyId: PUBLIC_RAZORPAY_KEY_ID
   });
+});
+
+function compactText(value, maxLen){
+  const cap = Math.max(1, Number(maxLen) || 512);
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, cap);
+}
+
+function normalizeEmail(value){
+  return compactText(value, 254).toLowerCase();
+}
+
+async function appendNdjsonLine(filePath, payload){
+  await ensureDir(path.dirname(filePath));
+  const line = JSON.stringify(payload || {}) + "\n";
+  await fs.appendFile(filePath, line, "utf8");
+}
+
+app.options("/api/account/sync", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.sendStatus(204);
+});
+
+app.post("/api/account/sync", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  try{
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const userId = compactText(body.user_id || body.userId, 128);
+    if(!userId){
+      return res.status(400).json({ ok:false, error:"user_id_required" });
+    }
+
+    const record = {
+      user_id: userId,
+      email: normalizeEmail(body.email),
+      username: compactText(body.username, 64),
+      full_name: compactText(body.full_name || body.display_name, 120),
+      display_name: compactText(body.display_name || body.full_name, 120),
+      photo: compactText(body.photo || body.avatar_url, 700),
+      source: compactText(body.source || "social.js", 64),
+      ts: new Date().toISOString()
+    };
+
+    await appendNdjsonLine(ACCOUNT_SYNC_LOG_PATH, record);
+    return res.json({ ok:true, synced:true });
+  }catch(err){
+    console.error("account_sync_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"account_sync_failed" });
+  }
+});
+
+app.options("/api/media/events/upload", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.sendStatus(204);
+});
+
+app.post("/api/media/events/upload", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  try{
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const record = {
+      user_id: compactText(body.user_id || body.userId, 128),
+      target_type: compactText(body.target_type || body.targetType, 40),
+      target_id: compactText(body.target_id || body.targetId, 128),
+      media_url: compactText(body.media_url || body.url, 700),
+      kind: compactText(body.kind || body.type || "upload", 40),
+      source: compactText(body.source || "social.js", 64),
+      ts: new Date().toISOString()
+    };
+    await appendNdjsonLine(MEDIA_EVENT_LOG_PATH, record);
+    return res.json({ ok:true, accepted:true });
+  }catch(err){
+    console.error("media_event_upload_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"media_event_upload_failed" });
+  }
 });
 
 async function ensureDir(dir){

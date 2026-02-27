@@ -18,3 +18,6 @@ Thumbs.db
 __tmp_readmore_head.html
 __tmp_readmore_head_utf8.html
 __tmp_check_*.js
+
+# runtime logs
+uploads/automation-events/
