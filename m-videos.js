@@ -2452,10 +2452,6 @@
     return false;
   }
 
-  function bytesToMb(bytes){
-    return Math.max(0, Math.round(util.num(bytes) / 1024 / 1024));
-  }
-
   function withTimeout(promise, timeoutMs, label){
     const ms = Math.max(30000, util.num(timeoutMs) || UPLOAD_TIMEOUT_MS);
     let timer = 0;
@@ -2480,18 +2476,6 @@
       return "Upload blocked by storage policy. Update Supabase storage policies for long_videos bucket.";
     }
     return "Upload failed. Check storage bucket limit and policies.";
-  }
-
-  async function getBucketSizeLimit(bucket){
-    const name = util.safe(bucket);
-    if(!name || !state.supa || !state.supa.storage) return 0;
-    try{
-      const { data, error } = await state.supa.storage.getBucket(name);
-      if(error || !data) return 0;
-      return Math.max(0, util.num(data.file_size_limit || data.fileSizeLimit || 0));
-    }catch(_){
-      return 0;
-    }
   }
 
   async function insertVideoWithAdaptiveTags(basePayload, tagList){
@@ -2538,21 +2522,6 @@
 
     const thumbError = validateThumb(state.uploadThumbFile);
     if(thumbError) return void showToast(thumbError, true);
-
-    const [videoBucketLimit, thumbBucketLimit] = await Promise.all([
-      getBucketSizeLimit("long_videos"),
-      state.uploadThumbFile ? getBucketSizeLimit("thumbnails") : Promise.resolve(0)
-    ]);
-    if(videoBucketLimit > 0 && util.num(state.uploadVideoFile.size) > videoBucketLimit){
-      const fileMb = bytesToMb(state.uploadVideoFile.size);
-      const limitMb = bytesToMb(videoBucketLimit);
-      return void showToast(`Selected video is ${fileMb}MB but bucket limit is ${limitMb}MB. Increase long_videos limit.`, true);
-    }
-    if(state.uploadThumbFile && thumbBucketLimit > 0 && util.num(state.uploadThumbFile.size) > thumbBucketLimit){
-      const fileMb = bytesToMb(state.uploadThumbFile.size);
-      const limitMb = bytesToMb(thumbBucketLimit);
-      return void showToast(`Selected thumbnail is ${fileMb}MB but bucket limit is ${limitMb}MB.`, true);
-    }
 
     dom.uploadSubmit.disabled = true;
     try{
