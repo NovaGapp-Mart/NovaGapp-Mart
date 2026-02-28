@@ -139,6 +139,40 @@ const uploadVideoAssets = multer({
 app.use(express.json({ limit: "15mb" }));
 app.use(cors());
 app.use("/uploads", express.static(UPLOADS_DIR));
+app.get("/uploads/video-thumbs/:fileName", (req, res, next) => {
+  const fileName = path.basename(String(req.params?.fileName || "").trim());
+  if(!fileName){
+    next();
+    return;
+  }
+  if(!isVideoAssetSupabaseConfigured()){
+    next();
+    return;
+  }
+  const redirectUrl = buildSupabaseStoragePublicUrl(VIDEO_ASSET_SUPABASE_THUMB_BUCKET, fileName);
+  if(!redirectUrl){
+    next();
+    return;
+  }
+  return res.redirect(302, redirectUrl);
+});
+app.get("/uploads/videos/:fileName", (req, res, next) => {
+  const fileName = path.basename(String(req.params?.fileName || "").trim());
+  if(!fileName){
+    next();
+    return;
+  }
+  if(!isVideoAssetSupabaseConfigured()){
+    next();
+    return;
+  }
+  const redirectUrl = buildSupabaseStoragePublicUrl(VIDEO_ASSET_SUPABASE_VIDEO_BUCKET, fileName);
+  if(!redirectUrl){
+    next();
+    return;
+  }
+  return res.redirect(302, redirectUrl);
+});
 app.use(express.static(__dirname, {
   dotfiles: "deny",
   etag: true,
@@ -155,6 +189,25 @@ const PUBLIC_SUPABASE_ANON_KEY = String(
   process.env.CONTEST_SUPABASE_ANON_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   ""
+).trim();
+const VIDEO_ASSET_SUPABASE_URL = String(
+  process.env.SUPABASE_URL ||
+  process.env.CONTEST_SUPABASE_URL ||
+  ""
+).trim().replace(/\/+$/g, "");
+const VIDEO_ASSET_SUPABASE_KEY = String(
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.CONTEST_SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_KEY ||
+  process.env.CONTEST_SUPABASE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  ""
+).trim();
+const VIDEO_ASSET_SUPABASE_VIDEO_BUCKET = String(
+  process.env.VIDEO_UPLOAD_BUCKET || "long_videos"
+).trim();
+const VIDEO_ASSET_SUPABASE_THUMB_BUCKET = String(
+  process.env.VIDEO_THUMB_BUCKET || "thumbnails"
 ).trim();
 const PUBLIC_RAZORPAY_KEY_ID = String(
   process.env.RAZORPAY_KEY_ID ||
@@ -370,6 +423,69 @@ function buildAbsoluteServerUrl(req, relativePath){
   return `${proto}://${host}${rel.startsWith("/") ? rel : `/${rel}`}`;
 }
 
+function isVideoAssetSupabaseConfigured(){
+  return Boolean(VIDEO_ASSET_SUPABASE_URL && VIDEO_ASSET_SUPABASE_KEY);
+}
+
+function encodeSupabasePath(value){
+  const raw = String(value || "").trim().replace(/^\/+|\/+$/g, "");
+  if(!raw) return "";
+  return raw
+    .split("/")
+    .map(part => encodeURIComponent(part))
+    .join("/");
+}
+
+function buildVideoAssetObjectPath(fileName){
+  const fallbackExt = String(path.extname(fileName || "") || ".bin").toLowerCase().replace(/[^a-z0-9.]/g, "") || ".bin";
+  const fallback = `${Date.now()}_${crypto.randomBytes(4).toString("hex")}${fallbackExt}`;
+  const raw = path.basename(String(fileName || "").trim()) || fallback;
+  const ext = String(path.extname(raw || "") || "").toLowerCase().replace(/[^a-z0-9.]/g, "");
+  const base = String(path.basename(raw, ext || undefined) || "").replace(/[^a-z0-9_-]/gi, "_").slice(0, 80);
+  return `${base || `${Date.now()}_${crypto.randomBytes(4).toString("hex")}`}${ext || ".bin"}`;
+}
+
+function buildSupabaseStoragePublicUrl(bucket, objectPath){
+  const cleanBucket = String(bucket || "").trim();
+  const encodedPath = encodeSupabasePath(objectPath);
+  if(!VIDEO_ASSET_SUPABASE_URL || !cleanBucket || !encodedPath){
+    return "";
+  }
+  return `${VIDEO_ASSET_SUPABASE_URL}/storage/v1/object/public/${encodeURIComponent(cleanBucket)}/${encodedPath}`;
+}
+
+async function uploadLocalAssetToSupabase(bucket, objectPath, localFilePath, mimeType){
+  if(!isVideoAssetSupabaseConfigured()){
+    throw new Error("supabase_storage_not_configured");
+  }
+  const cleanBucket = String(bucket || "").trim();
+  const encodedPath = encodeSupabasePath(objectPath);
+  if(!cleanBucket || !encodedPath){
+    throw new Error("supabase_storage_invalid_path");
+  }
+  const uploadUrl = `${VIDEO_ASSET_SUPABASE_URL}/storage/v1/object/${encodeURIComponent(cleanBucket)}/${encodedPath}`;
+  const stream = fsNative.createReadStream(localFilePath);
+  const requestOptions = {
+    method: "POST",
+    headers: {
+      apikey: VIDEO_ASSET_SUPABASE_KEY,
+      Authorization: `Bearer ${VIDEO_ASSET_SUPABASE_KEY}`,
+      "Content-Type": String(mimeType || "application/octet-stream"),
+      "x-upsert": "false"
+    },
+    body: stream
+  };
+  if(global.fetch){
+    requestOptions.duplex = "half";
+  }
+  const res = await fetch(uploadUrl, requestOptions);
+  if(!res.ok){
+    const body = await res.text().catch(() => "");
+    throw new Error(`supabase_storage_upload_failed_${res.status}:${body.slice(0, 180)}`);
+  }
+  return buildSupabaseStoragePublicUrl(cleanBucket, objectPath);
+}
+
 function normalizeEmail(value){
   return compactText(value, 254).toLowerCase();
 }
@@ -485,25 +601,43 @@ app.post("/api/videos/upload-assets",
 
     try{
       if(!videoFile){
-        await cleanupUploadedFiles();
         return res.status(400).json({ ok:false, error:"video_file_required" });
       }
       if(Number(videoFile.size || 0) > VIDEO_ASSET_MAX_BYTES){
-        await cleanupUploadedFiles();
         return res.status(413).json({ ok:false, error:"video_asset_too_large", message:"Video file exceeds 4GB limit." });
       }
       if(thumbFile && Number(thumbFile.size || 0) > VIDEO_ASSET_MAX_THUMB_BYTES){
-        await cleanupUploadedFiles();
         return res.status(413).json({ ok:false, error:"thumbnail_too_large", message:"Thumbnail exceeds 20MB limit." });
       }
 
       const userId = sanitizeCallUserId(req.body?.user_id || req.body?.userId || "");
-      const videoRelPath = path.posix.join("uploads", "videos", path.basename(String(videoFile.filename || "")));
-      const thumbRelPath = thumbFile
-        ? path.posix.join("uploads", "video-thumbs", path.basename(String(thumbFile.filename || "")))
+      if(!isVideoAssetSupabaseConfigured()){
+        return res.status(503).json({
+          ok:false,
+          error:"supabase_storage_not_configured",
+          message:"Backend storage key missing. Set SUPABASE_SERVICE_ROLE_KEY."
+        });
+      }
+
+      const videoObjectPath = buildVideoAssetObjectPath(videoFile.filename || videoFile.originalname || "video.mp4");
+      const thumbObjectPath = thumbFile
+        ? buildVideoAssetObjectPath(thumbFile.filename || thumbFile.originalname || "thumbnail.jpg")
         : "";
-      const videoPublicUrl = buildAbsoluteServerUrl(req, "/" + videoRelPath);
-      const thumbPublicUrl = thumbRelPath ? buildAbsoluteServerUrl(req, "/" + thumbRelPath) : "";
+
+      const videoPublicUrl = await uploadLocalAssetToSupabase(
+        VIDEO_ASSET_SUPABASE_VIDEO_BUCKET,
+        videoObjectPath,
+        videoFile.path,
+        videoFile.mimetype
+      );
+      const thumbPublicUrl = thumbFile
+        ? await uploadLocalAssetToSupabase(
+          VIDEO_ASSET_SUPABASE_THUMB_BUCKET,
+          thumbObjectPath,
+          thumbFile.path,
+          thumbFile.mimetype
+        )
+        : "";
 
       if(userId){
         appendNdjsonLine(MEDIA_EVENT_LOG_PATH, {
@@ -519,14 +653,19 @@ app.post("/api/videos/upload-assets",
 
       return res.json({
         ok:true,
-        storage: "server_local",
+        storage: "supabase_storage",
         video_url: videoPublicUrl,
         thumbnail_url: thumbPublicUrl
       });
     }catch(err){
       console.error("video_asset_upload_error:", err?.stack || err);
+      return res.status(500).json({
+        ok:false,
+        error:"video_asset_upload_failed",
+        message: compactText(err?.message || "video_asset_upload_failed", 220)
+      });
+    }finally{
       await cleanupUploadedFiles();
-      return res.status(500).json({ ok:false, error:"video_asset_upload_failed" });
     }
   }
 );
