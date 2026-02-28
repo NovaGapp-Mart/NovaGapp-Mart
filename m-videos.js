@@ -16,6 +16,7 @@
   const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
   const MONETIZATION_MIN_FOLLOWERS = 5000;
   const MONETIZATION_UNLOCK_USD = 10;
+  const SEARCH_SCAN_LIMIT = 700;
 
   const state = {
     supa:null,
@@ -186,6 +187,18 @@
     write(key, value){ try{ localStorage.setItem(key, JSON.stringify(value)); }catch(_){ } },
     pushUnique(key, value, limit){ const val = util.safe(value); if(!val) return; const list = store.read(key, []); const next = [val].concat(list.filter(item => util.safe(item) !== val)).slice(0, limit || 50); store.write(key, next); }
   };
+
+  function matchesVideoSearch(video, term){
+    const query = util.clean(term);
+    if(!query) return true;
+    const hay = [
+      util.safe(video?.title),
+      util.safe(video?.description),
+      util.safe(video?.category),
+      util.safe(video?.tags)
+    ].join(" ").toLowerCase();
+    return hay.includes(query);
+  }
   let razorpaySdkPromise = null;
 
   function shuffleRows(list){
@@ -872,7 +885,7 @@
       if(Array.isArray(opts.userIds) && opts.userIds.length) query = query.in("user_id", opts.userIds.slice(0, 100));
       if(opts.search){
         const filter = util.clean(opts.search);
-        if(filter) query = query.or("title.ilike.%" + filter + "%,category.ilike.%" + filter + "%");
+        if(filter) query = query.or("title.ilike.%" + filter + "%,description.ilike.%" + filter + "%,category.ilike.%" + filter + "%");
       }
       if(typeof opts.offset === "number" && typeof opts.limit === "number"){
         const from = Math.max(0, opts.offset);
@@ -1122,17 +1135,18 @@
   api.buildSearchPool = async function(term){
     const text = util.clean(term);
     if(!text) return [];
-    const [contentRows, channelIds] = await Promise.all([
-      api.fetchVideos({ search:text, limit:180 }),
+    const [contentRows, broadRows, channelIds] = await Promise.all([
+      api.fetchVideos({ search:text, limit:SEARCH_SCAN_LIMIT }),
+      api.fetchVideos({ limit:SEARCH_SCAN_LIMIT }),
       api.searchChannelIds(text)
     ]);
     let channelRows = [];
     if(channelIds.length){
-      channelRows = await api.fetchVideos({ userIds:channelIds, limit:180 });
+      channelRows = await api.fetchVideos({ userIds:channelIds, limit:SEARCH_SCAN_LIMIT });
     }
     const seen = new Set();
     const merged = [];
-    contentRows.concat(channelRows).forEach(row => {
+    contentRows.concat(channelRows).concat(broadRows.filter(row => matchesVideoSearch(row, text))).forEach(row => {
       if(!row || !row.id || seen.has(row.id)) return;
       seen.add(row.id);
       merged.push(row);
@@ -1198,10 +1212,6 @@
         '<div class="mv-thumb-wrap">' +
           '<img src="' + util.esc(item.thumbnail_url || "Images/no-image.jpg") + '" alt="' + util.esc(item.title) + '">' +
           '<span class="mv-duration">' + util.esc(util.duration(item.duration_seconds)) + '</span>' +
-          '<div class="mv-thumb-tools">' +
-            '<button type="button" class="mv-thumb-tool" data-thumb-action="watch_later" aria-label="Watch later"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 11h5v2h-7V7h2z"></path></svg></button>' +
-            '<button type="button" class="mv-thumb-tool" data-thumb-action="queue" aria-label="Add to queue"><svg viewBox="0 0 24 24"><path d="M4 10h16v2H4zm0-4h16v2H4zm0 8h10v2H4zm12.5 0v-3h2v3h3v2h-3v3h-2v-3h-3v-2z"></path></svg></button>' +
-          '</div>' +
         '</div>' +
       '</button>' +
       '<div class="mv-card-meta">' +
@@ -1236,20 +1246,6 @@
       const visible = !menu.classList.contains("show");
       closeMenus();
       menu.classList.toggle("show", visible);
-    });
-    card.querySelectorAll("[data-thumb-action]").forEach(btn => {
-      btn.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const action = btn.getAttribute("data-thumb-action");
-        if(action === "watch_later"){
-          store.pushUnique(WATCH_LATER_KEY, item.id, 100);
-          showToast("Saved to Watch Later");
-        }else if(action === "queue"){
-          store.pushUnique(QUEUE_KEY, item.id, 100);
-          showToast("Added to Queue");
-        }
-      });
     });
     card.querySelectorAll("[data-menu-action]").forEach(btn => {
       btn.addEventListener("click", () => {

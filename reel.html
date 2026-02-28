@@ -530,7 +530,7 @@ let done = false;
 let feedLoopCount = 0;
 const PAGE_SIZE = 4;
 const SEARCH_DELAY_MS = 2300;
-const SEARCH_FETCH_LIMIT = 180;
+const SEARCH_FETCH_LIMIT = 700;
 let searchMode = false;
 let searchBusy = false;
 let activeSearchTerm = "";
@@ -858,20 +858,40 @@ function matchReelSearch(item, needle){
   return searchText.includes(q);
 }
 
-async function fetchSearchCandidates(){
+async function fetchSearchCandidates(term){
   const ready = await ensureNovaClientReady();
   if(!ready){
     throw new Error("Unable to load reels.");
   }
+  const queryText = sanitizeSearchText(term || "");
+  const clean = queryText.replace(/[%*,()]/g, "").trim();
+
   let query = window.NOVA.supa
     .from("reels")
     .select("id,user_id,video_url,thumb_url,title,description,keywords,created_at")
     .order("created_at", { ascending:false })
     .limit(SEARCH_FETCH_LIMIT);
+  if(clean){
+    query = query.or(`title.ilike.%${clean}%,description.ilike.%${clean}%,keywords.ilike.%${clean}%`);
+  }
   if(feedUserId){
     query = query.eq("user_id", feedUserId);
   }
-  const { data, error } = await query;
+  let { data, error } = await query;
+  if(error && String(error?.message || "").toLowerCase().includes("column") && String(error?.message || "").toLowerCase().includes("keywords")){
+    let fallbackQuery = window.NOVA.supa
+      .from("reels")
+      .select("id,user_id,video_url,thumb_url,title,description,created_at")
+      .order("created_at", { ascending:false })
+      .limit(SEARCH_FETCH_LIMIT);
+    if(clean){
+      fallbackQuery = fallbackQuery.or(`title.ilike.%${clean}%,description.ilike.%${clean}%`);
+    }
+    if(feedUserId){
+      fallbackQuery = fallbackQuery.eq("user_id", feedUserId);
+    }
+    ({ data, error } = await fallbackQuery);
+  }
   if(error){
     throw error;
   }
@@ -898,7 +918,7 @@ async function runReelSearch(rawText){
 
   try{
     const [rows] = await Promise.all([
-      fetchSearchCandidates(),
+      fetchSearchCandidates(queryText),
       sleep(SEARCH_DELAY_MS)
     ]);
     if(token !== searchToken) return;

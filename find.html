@@ -108,7 +108,8 @@ body{
 .reel-item{
   display:flex;align-items:center;gap:12px;padding:10px;cursor:pointer;
 }
-.reel-item video{
+.reel-item video,
+.reel-item img{
   width:72px;height:96px;object-fit:cover;border-radius:8px;background:#000;
 }
 .reel-item .meta{font-size:13px}
@@ -195,12 +196,14 @@ body{
 
 <!-- ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â SEARCH -->
 <div class="search">
-  <input type="text" id="searchInput" placeholder="Search users...">
+  <input type="text" id="searchInput" placeholder="Search reels, videos, posts, users...">
   <button onclick="searchUsers()">&#128269;</button>
 </div>
 
 <div class="tabs" id="tabs">
   <button class="tab-btn active" data-tab="reels">Reels</button>
+  <button class="tab-btn" data-tab="videos">Videos</button>
+  <button class="tab-btn" data-tab="posts">Posts</button>
   <button class="tab-btn" data-tab="account">Sellers &amp; Buyers</button>
   <button class="tab-btn" data-tab="profile">Profile</button>
   <button class="tab-btn" data-tab="users">Users</button>
@@ -511,22 +514,114 @@ async function fetchUsers(q){
 async function fetchReels(q){
   if(!supa) return [];
   const query = String(q || "").trim();
+  const clean = query.replace(/[%*,()]/g, "").trim();
   let request = supa
     .from("reels")
-    .select("id,video_url,title,description,user_id")
-    .limit(12);
-  if(query){
-    const clean = query.replace(/[%*,()]/g, "").trim();
-    if(clean){
-      request = request.or(`title.ilike.%${clean}%,description.ilike.%${clean}%`);
+    .select("id,video_url,title,description,keywords,user_id")
+    .order("created_at", { ascending:false })
+    .limit(120);
+  if(clean){
+    request = request.or(`title.ilike.%${clean}%,description.ilike.%${clean}%,keywords.ilike.%${clean}%`);
+  }
+  let { data, error } = await request;
+  if(error){
+    const msg = String(error?.message || "").toLowerCase();
+    if(msg.includes("column") && msg.includes("keywords")){
+      let fallback = supa
+        .from("reels")
+        .select("id,video_url,title,description,user_id")
+        .order("created_at", { ascending:false })
+        .limit(120);
+      if(clean){
+        fallback = fallback.or(`title.ilike.%${clean}%,description.ilike.%${clean}%`);
+      }
+      ({ data, error } = await fallback);
     }
   }
-  const { data, error } = await request;
   if(error){
     console.error("reels fetch error", error);
     return [];
   }
-  return Array.isArray(data) ? data : [];
+  const rows = Array.isArray(data) ? data : [];
+  if(!clean) return rows;
+  const lowered = clean.toLowerCase();
+  return rows.filter(row => {
+    const hay = [
+      row?.title || "",
+      row?.description || "",
+      Array.isArray(row?.keywords) ? row.keywords.join(" ") : (row?.keywords || "")
+    ].join(" ").toLowerCase();
+    return hay.includes(lowered);
+  });
+}
+
+async function fetchVideos(q){
+  if(!supa) return [];
+  const query = String(q || "").trim();
+  const clean = query.replace(/[%*,()]/g, "").trim();
+  let request = supa
+    .from("videos")
+    .select("id,user_id,title,description,thumbnail_url,tags,category,created_at")
+    .order("created_at", { ascending:false })
+    .limit(120);
+  if(clean){
+    request = request.or(`title.ilike.%${clean}%,description.ilike.%${clean}%,category.ilike.%${clean}%`);
+  }
+  const { data, error } = await request;
+  if(error){
+    console.error("videos fetch error", error);
+    return [];
+  }
+  const rows = Array.isArray(data) ? data : [];
+  if(!clean) return rows;
+  const lowered = clean.toLowerCase();
+  return rows.filter(row => {
+    const hay = [
+      row?.title || "",
+      row?.description || "",
+      row?.category || "",
+      Array.isArray(row?.tags) ? row.tags.join(" ") : (row?.tags || "")
+    ].join(" ").toLowerCase();
+    return hay.includes(lowered);
+  });
+}
+
+async function fetchPosts(q){
+  if(!supa) return [];
+  const query = String(q || "").trim();
+  const clean = query.replace(/[%*,()]/g, "").trim();
+  const plans = [
+    "id,user_id,media_url,media_type,title,description,keywords,created_at",
+    "id,user_id,media_url,media_type,title,description,created_at",
+    "id,user_id,media_url,title,description,keywords,created_at",
+    "id,user_id,media_url,title,description,created_at"
+  ];
+  for(const fields of plans){
+    let request = supa
+      .from("posts")
+      .select(fields)
+      .order("created_at", { ascending:false })
+      .limit(120);
+    if(clean){
+      request = request.or(`title.ilike.%${clean}%,description.ilike.%${clean}%`);
+    }
+    const { data, error } = await request;
+    if(error){
+      continue;
+    }
+    const rows = Array.isArray(data) ? data : [];
+    if(!clean) return rows;
+    const lowered = clean.toLowerCase();
+    return rows.filter(row => {
+      const hay = [
+        row?.title || "",
+        row?.description || "",
+        Array.isArray(row?.keywords) ? row.keywords.join(" ") : (row?.keywords || "")
+      ].join(" ").toLowerCase();
+      return hay.includes(lowered);
+    });
+  }
+  return [];
 }
 
 function renderReelsSection(reels){
@@ -548,7 +643,81 @@ function renderReelsSection(reels){
           <small>${escapeHtml(r.description || "")}</small>
         </div>
       `;
-      row.onclick = () => location.href = "reel.html";
+      row.onclick = () => {
+        const url = new URL("reel.html", location.href);
+        if(r?.user_id) url.searchParams.set("uid", String(r.user_id || ""));
+        if(r?.id) url.searchParams.set("focus", String(r.id || ""));
+        location.href = url.pathname + url.search;
+      };
+      wrap.appendChild(row);
+    });
+  }
+  section.appendChild(wrap);
+  return section;
+}
+
+function renderVideosSection(videos){
+  const section = document.createElement("div");
+  section.className = "section";
+  section.dataset.section = "videos";
+  section.innerHTML = `<div class="section-title">VIDEOS</div>`;
+  const wrap = document.createElement("div");
+  if(!videos.length){
+    wrap.innerHTML = "<p style='padding:0 12px 12px;color:#777'>No videos found</p>";
+  }else{
+    videos.forEach(v => {
+      const row = document.createElement("div");
+      row.className = "reel-item";
+      const thumb = escapeHtml(v.thumbnail_url || "Images/no-image.jpg");
+      row.innerHTML = `
+        <img src="${thumb}" alt="Video thumbnail">
+        <div class="meta">
+          <div><b>${escapeHtml(v.title || "Video")}</b></div>
+          <small>${escapeHtml(v.description || v.category || "")}</small>
+        </div>
+      `;
+      row.onclick = () => {
+        const url = new URL("m-videos.html", location.href);
+        if(v?.id) url.searchParams.set("v", String(v.id || ""));
+        location.href = url.pathname + url.search;
+      };
+      wrap.appendChild(row);
+    });
+  }
+  section.appendChild(wrap);
+  return section;
+}
+
+function renderPostsSection(posts){
+  const section = document.createElement("div");
+  section.className = "section";
+  section.dataset.section = "posts";
+  section.innerHTML = `<div class="section-title">POSTS</div>`;
+  const wrap = document.createElement("div");
+  if(!posts.length){
+    wrap.innerHTML = "<p style='padding:0 12px 12px;color:#777'>No posts found</p>";
+  }else{
+    posts.forEach(p => {
+      const row = document.createElement("div");
+      row.className = "reel-item";
+      const mediaUrl = escapeHtml(p.media_url || "Images/no-image.jpg");
+      const mediaType = String(p.media_type || "").toLowerCase();
+      const preview = mediaType.startsWith("video")
+        ? `<video src="${mediaUrl}" muted></video>`
+        : `<img src="${mediaUrl}" alt="Post preview">`;
+      row.innerHTML = `
+        ${preview}
+        <div class="meta">
+          <div><b>${escapeHtml(p.title || "Post")}</b></div>
+          <small>${escapeHtml(p.description || "")}</small>
+        </div>
+      `;
+      row.onclick = () => {
+        const url = new URL("post.html", location.href);
+        if(p?.user_id) url.searchParams.set("uid", String(p.user_id || ""));
+        if(p?.id) url.searchParams.set("focus", String(p.id || ""));
+        location.href = url.pathname + url.search;
+      };
       wrap.appendChild(row);
     });
   }
@@ -607,12 +776,16 @@ async function searchUsers(){
   list.innerHTML = "<p style='padding:12px;color:#777'>Loading...</p>";
   try{
     await ensureSession();
-    const [users, reels] = await Promise.all([
+    const [users, reels, videos, posts] = await Promise.all([
       fetchUsers(query),
-      fetchReels(query)
+      fetchReels(query),
+      fetchVideos(query),
+      fetchPosts(query)
     ]);
     list.innerHTML = "";
     list.appendChild(renderReelsSection(reels));
+    list.appendChild(renderVideosSection(videos));
+    list.appendChild(renderPostsSection(posts));
     list.appendChild(renderUserSection(users, "account", "SELLERS & BUYERS"));
     list.appendChild(renderUserSection(users, "profile", "PROFILE"));
     list.appendChild(renderUserSection(users, "users", "USERS"));
@@ -620,7 +793,9 @@ async function searchUsers(){
     trackAutomationStep("discovery", {
       query_length: query.length,
       user_results: users.length,
-      reel_results: reels.length
+      reel_results: reels.length,
+      video_results: videos.length,
+      post_results: posts.length
     }).catch(()=>{});
   }catch(err){
     if(String(err?.message || "").toLowerCase() === "login_required"){
