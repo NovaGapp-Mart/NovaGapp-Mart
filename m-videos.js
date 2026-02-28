@@ -16,7 +16,6 @@
   const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
   const MONETIZATION_MIN_FOLLOWERS = 5000;
   const MONETIZATION_UNLOCK_USD = 10;
-  const SEARCH_SCAN_LIMIT = 700;
 
   const state = {
     supa:null,
@@ -187,18 +186,6 @@
     write(key, value){ try{ localStorage.setItem(key, JSON.stringify(value)); }catch(_){ } },
     pushUnique(key, value, limit){ const val = util.safe(value); if(!val) return; const list = store.read(key, []); const next = [val].concat(list.filter(item => util.safe(item) !== val)).slice(0, limit || 50); store.write(key, next); }
   };
-
-  function matchesVideoSearch(video, term){
-    const query = util.clean(term);
-    if(!query) return true;
-    const hay = [
-      util.safe(video?.title),
-      util.safe(video?.description),
-      util.safe(video?.category),
-      util.safe(video?.tags)
-    ].join(" ").toLowerCase();
-    return hay.includes(query);
-  }
   let razorpaySdkPromise = null;
 
   function shuffleRows(list){
@@ -885,7 +872,7 @@
       if(Array.isArray(opts.userIds) && opts.userIds.length) query = query.in("user_id", opts.userIds.slice(0, 100));
       if(opts.search){
         const filter = util.clean(opts.search);
-        if(filter) query = query.or("title.ilike.%" + filter + "%,description.ilike.%" + filter + "%,category.ilike.%" + filter + "%");
+        if(filter) query = query.or("title.ilike.%" + filter + "%,category.ilike.%" + filter + "%");
       }
       if(typeof opts.offset === "number" && typeof opts.limit === "number"){
         const from = Math.max(0, opts.offset);
@@ -1135,18 +1122,17 @@
   api.buildSearchPool = async function(term){
     const text = util.clean(term);
     if(!text) return [];
-    const [contentRows, broadRows, channelIds] = await Promise.all([
-      api.fetchVideos({ search:text, limit:SEARCH_SCAN_LIMIT }),
-      api.fetchVideos({ limit:SEARCH_SCAN_LIMIT }),
+    const [contentRows, channelIds] = await Promise.all([
+      api.fetchVideos({ search:text, limit:180 }),
       api.searchChannelIds(text)
     ]);
     let channelRows = [];
     if(channelIds.length){
-      channelRows = await api.fetchVideos({ userIds:channelIds, limit:SEARCH_SCAN_LIMIT });
+      channelRows = await api.fetchVideos({ userIds:channelIds, limit:180 });
     }
     const seen = new Set();
     const merged = [];
-    contentRows.concat(channelRows).concat(broadRows.filter(row => matchesVideoSearch(row, text))).forEach(row => {
+    contentRows.concat(channelRows).forEach(row => {
       if(!row || !row.id || seen.has(row.id)) return;
       seen.add(row.id);
       merged.push(row);
@@ -3286,3 +3272,4 @@
 
   init();
 })();
+
