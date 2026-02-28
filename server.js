@@ -757,7 +757,6 @@ app.post("/api/videos/upload-assets",
             videoFile.mimetype
           );
           if(uploadedVideoUrl){
-            videoPublicUrl = uploadedVideoUrl;
             storageKind = "supabase_storage";
             shouldCleanupVideoTemp = true;
           }
@@ -771,7 +770,6 @@ app.post("/api/videos/upload-assets",
               thumbFile.mimetype
             );
             if(uploadedThumbUrl){
-              thumbPublicUrl = uploadedThumbUrl;
               shouldCleanupThumbTemp = true;
             }
           }
