@@ -515,15 +515,31 @@
 
   function buildAssetCandidates(value, kind){
     const list = [];
+    const raw = util.safe(value).replace(/\\/g, "/");
     const push = (entry) => {
       const item = util.safe(entry);
       if(!item || list.includes(item)) return;
       list.push(item);
     };
 
-    push(normalizeAssetUrl(value, kind));
+    const supabaseRef = parseSupabaseObjectReference(raw);
+    if(supabaseRef && supabaseRef.fileName){
+      const bucket = supabaseRef.bucket;
+      const looksVideoBucket = bucket === "long_videos" || bucket === "videos" || bucket.includes("video");
+      const looksThumbBucket = bucket === "thumbnails" || bucket === "video-thumbs" || bucket.includes("thumb");
+      if((kind === "video" && looksVideoBucket) || (kind === "thumb" && looksThumbBucket)){
+        push(buildSupabaseAssetProxyUrl(kind, supabaseRef.objectPath || supabaseRef.fileName));
+      }
+    }
 
-    const fileName = extractAssetFileName(value);
+    push(normalizeAssetUrl(raw, kind));
+
+    const absoluteRaw = toAbsoluteAssetUrl(raw);
+    if(/^https?:\/\//i.test(absoluteRaw) || absoluteRaw.startsWith("/")){
+      push(absoluteRaw);
+    }
+
+    const fileName = extractAssetFileName(raw);
     if(fileName){
       push(buildAssetProxyUrl(kind, fileName));
     }
@@ -642,13 +658,17 @@
 
   function normalizeVideo(row){
     const tagsRaw = Array.isArray(row?.tags) ? row.tags.join(", ") : util.safe(row?.tags);
+    const rawVideoUrl = util.safe(row?.video_url_raw || row?.video_url);
+    const rawThumbUrl = util.safe(row?.thumbnail_url_raw || row?.thumbnail_url);
     return {
       id:util.safe(row?.id),
       user_id:util.safe(row?.user_id),
       title:util.safe(row?.title) || "Untitled",
       description:util.safe(row?.description),
-      video_url:normalizeAssetUrl(row?.video_url, "video"),
-      thumbnail_url:normalizeAssetUrl(row?.thumbnail_url, "thumb"),
+      video_url:normalizeAssetUrl(rawVideoUrl, "video"),
+      thumbnail_url:normalizeAssetUrl(rawThumbUrl, "thumb"),
+      video_url_raw:rawVideoUrl,
+      thumbnail_url_raw:rawThumbUrl,
       views:Math.max(0, util.num(row?.views)),
       likes_count:Math.max(0, util.num(row?.likes_count)),
       dislikes_count:Math.max(0, util.num(row?.dislikes_count)),
@@ -1343,7 +1363,10 @@
     if(channelNode) channelNode.textContent = channel.name;
     if(stats) stats.textContent = util.compact(video.views) + " views . " + util.ago(video.created_at);
     if(image){
-      setImageSourceWithFallback(image, buildAssetCandidates(video.thumbnail_url, "thumb"));
+      setImageSourceWithFallback(
+        image,
+        buildAssetCandidates(video.thumbnail_url_raw || video.thumbnail_url, "thumb")
+      );
     }
     if(duration) duration.textContent = util.duration(video.duration_seconds);
   }
@@ -1356,7 +1379,7 @@
       return;
     }
     const channel = getChannel(item.user_id);
-    const thumbCandidates = buildAssetCandidates(item.thumbnail_url, "thumb");
+    const thumbCandidates = buildAssetCandidates(item.thumbnail_url_raw || item.thumbnail_url, "thumb");
     const thumbSrc = thumbCandidates[0] || "Images/no-image.jpg";
     const card = document.createElement("article");
     card.className = "mv-card";
@@ -1619,9 +1642,9 @@
     await api.fetchProfiles([video.user_id]);
     const channel = getChannel(video.user_id);
 
-    const posterCandidates = buildAssetCandidates(video.thumbnail_url, "thumb");
+    const posterCandidates = buildAssetCandidates(video.thumbnail_url_raw || video.thumbnail_url, "thumb");
     const posterUrl = posterCandidates[0] || "Images/no-image.jpg";
-    const sourceCandidates = buildVideoSourceCandidates(video.video_url);
+    const sourceCandidates = buildVideoSourceCandidates(video.video_url_raw || video.video_url);
     const initialSource = sourceCandidates[0] || "";
     state.playerSources = sourceCandidates;
     state.playerSourceIndex = 0;
@@ -2474,7 +2497,7 @@
       await api.fetchProfiles(list.map(item => item.user_id));
       list.forEach(item => {
         const channel = getChannel(item.user_id);
-        const thumbCandidates = buildAssetCandidates(item.thumbnail_url, "thumb");
+        const thumbCandidates = buildAssetCandidates(item.thumbnail_url_raw || item.thumbnail_url, "thumb");
         const thumbSrc = thumbCandidates[0] || "Images/no-image.jpg";
         const button = document.createElement("button");
         button.type = "button";

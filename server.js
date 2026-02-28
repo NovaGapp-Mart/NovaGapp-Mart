@@ -671,11 +671,19 @@ app.get("/api/videos/asset", async (req, res) => {
   try{
     const signedUrl = await buildSupabaseStorageSignedUrl(bucket, objectPath, 3600);
     if(!signedUrl){
+      const publicUrl = buildSupabaseStoragePublicUrl(bucket, objectPath);
+      if(publicUrl){
+        return res.redirect(302, publicUrl);
+      }
       return res.status(404).json({ ok:false, error:"video_asset_not_found" });
     }
     return res.redirect(302, signedUrl);
   }catch(err){
     console.error("video_asset_proxy_error:", err?.stack || err);
+    const publicUrl = buildSupabaseStoragePublicUrl(bucket, objectPath);
+    if(publicUrl){
+      return res.redirect(302, publicUrl);
+    }
     return res.status(502).json({
       ok:false,
       error:"video_asset_proxy_failed",
