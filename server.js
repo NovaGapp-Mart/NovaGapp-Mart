@@ -452,6 +452,28 @@ function encodeSupabasePath(value){
     .join("/");
 }
 
+function sanitizeSupabaseObjectPath(value){
+  const raw = String(value || "").trim().replace(/\\/g, "/");
+  if(!raw){
+    return "";
+  }
+  const parts = raw
+    .split("/")
+    .map(part => part.trim())
+    .filter(Boolean);
+  if(!parts.length){
+    return "";
+  }
+  const cleaned = [];
+  for(const part of parts){
+    if(part === "." || part === ".."){
+      return "";
+    }
+    cleaned.push(part.replace(/\0/g, ""));
+  }
+  return cleaned.join("/");
+}
+
 function buildVideoAssetObjectPath(fileName){
   const fallbackExt = String(path.extname(fileName || "") || ".bin").toLowerCase().replace(/[^a-z0-9.]/g, "") || ".bin";
   const fallback = `${Date.now()}_${crypto.randomBytes(4).toString("hex")}${fallbackExt}`;
@@ -619,6 +641,47 @@ app.options("/api/videos/upload-assets", (req, res) => {
   res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.sendStatus(204);
+});
+
+app.options("/api/videos/asset", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.sendStatus(204);
+});
+
+app.get("/api/videos/asset", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const kindRaw = String(req.query?.kind || "").trim().toLowerCase();
+  const kind = kindRaw === "thumb" ? "thumb" : (kindRaw === "video" ? "video" : "");
+  if(!kind){
+    return res.status(400).json({ ok:false, error:"video_asset_kind_invalid" });
+  }
+
+  const objectPath = sanitizeSupabaseObjectPath(req.query?.path);
+  if(!objectPath){
+    return res.status(400).json({ ok:false, error:"video_asset_path_invalid" });
+  }
+
+  if(!isVideoAssetSupabaseConfigured()){
+    return res.status(503).json({ ok:false, error:"video_asset_storage_unavailable" });
+  }
+
+  const bucket = kind === "thumb" ? VIDEO_ASSET_SUPABASE_THUMB_BUCKET : VIDEO_ASSET_SUPABASE_VIDEO_BUCKET;
+  try{
+    const signedUrl = await buildSupabaseStorageSignedUrl(bucket, objectPath, 3600);
+    if(!signedUrl){
+      return res.status(404).json({ ok:false, error:"video_asset_not_found" });
+    }
+    return res.redirect(302, signedUrl);
+  }catch(err){
+    console.error("video_asset_proxy_error:", err?.stack || err);
+    return res.status(502).json({
+      ok:false,
+      error:"video_asset_proxy_failed",
+      message: compactText(err?.message || "video_asset_proxy_failed", 220)
+    });
+  }
 });
 
 app.post("/api/videos/upload-assets",

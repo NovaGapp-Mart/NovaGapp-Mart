@@ -422,6 +422,19 @@
     return `/uploads/${folder}/${encoded}`;
   }
 
+  function buildSupabaseAssetProxyUrl(kind, objectPath){
+    const cleanPath = util.safe(objectPath).replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    if(!cleanPath) return "";
+    const safeKind = kind === "thumb" ? "thumb" : "video";
+    const query = `kind=${encodeURIComponent(safeKind)}&path=${encodeURIComponent(cleanPath)}`;
+    const rel = `/api/videos/asset?${query}`;
+    const origin = normalizeBase(location.origin);
+    if(/^https?:\/\//i.test(origin)){
+      return `${origin}${rel}`;
+    }
+    return rel;
+  }
+
   function parseSupabaseObjectReference(value){
     const raw = util.safe(value);
     if(!raw) return null;
@@ -467,12 +480,12 @@
     }
 
     const supabaseRef = parseSupabaseObjectReference(raw);
-    if(supabaseRef && supabaseRef.fileName && !supabaseRef.hasNestedPath){
+    if(supabaseRef && supabaseRef.fileName){
       const bucket = supabaseRef.bucket;
       const looksVideoBucket = bucket === "long_videos" || bucket === "videos" || bucket.includes("video");
       const looksThumbBucket = bucket === "thumbnails" || bucket === "video-thumbs" || bucket.includes("thumb");
       if((kind === "video" && looksVideoBucket) || (kind === "thumb" && looksThumbBucket)){
-        const proxied = buildAssetProxyUrl(kind, supabaseRef.fileName);
+        const proxied = buildSupabaseAssetProxyUrl(kind, supabaseRef.objectPath || supabaseRef.fileName);
         if(proxied) return proxied;
       }
     }
