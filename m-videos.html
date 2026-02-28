@@ -208,6 +208,18 @@
     </section>
   </main>
 </div>
+<aside id="mvMiniDock" class="mv-mini-dock mv-hidden" aria-label="Mini Player">
+  <div class="mv-mini-video-wrap">
+    <video id="mvMiniPlayer" class="mv-mini-video" playsinline></video>
+    <div class="mv-mini-actions">
+      <button type="button" id="mvMiniExpand" class="mv-mini-btn" aria-label="Expand video">[ ]</button>
+      <button type="button" id="mvMiniClose" class="mv-mini-btn" aria-label="Close mini player">x</button>
+    </div>
+  </div>
+  <button type="button" id="mvMiniOpen" class="mv-mini-open" aria-label="Open full player">
+    <span id="mvMiniTitle" class="mv-mini-title">Now Playing</span>
+  </button>
+</aside>
 <nav class="mv-footer-nav" aria-label="Main Navigation">
   <button type="button" class="mv-footer-btn" data-go="index.html"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3l-10-9-10 9h3v8z"></path></svg><span>Home</span></button>
   <button type="button" class="mv-footer-btn" data-go="find.html"><svg viewBox="0 0 24 24"><path d="M21 21l-5.2-5.2a7 7 0 1 0-1.8 1.8L21 21z"></path></svg><span>Search</span></button>

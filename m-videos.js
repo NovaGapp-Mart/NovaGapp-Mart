@@ -50,6 +50,7 @@
     playerSources:[],
     playerSourceIndex:0,
     playerAutoplayPending:false,
+    miniActive:false,
     realtimeChannel:null,
     observer:null,
     timers:{},
@@ -108,6 +109,12 @@
     playerCenterToggle:document.getElementById("mvPlayerCenterToggle"),
     playerCenterIcon:document.getElementById("mvPlayerCenterIcon"),
     playerNext:document.getElementById("mvPlayerNext"),
+    miniDock:document.getElementById("mvMiniDock"),
+    miniPlayer:document.getElementById("mvMiniPlayer"),
+    miniOpen:document.getElementById("mvMiniOpen"),
+    miniClose:document.getElementById("mvMiniClose"),
+    miniExpand:document.getElementById("mvMiniExpand"),
+    miniTitle:document.getElementById("mvMiniTitle"),
     seekBack:document.getElementById("mvSeekBack"),
     seekForward:document.getElementById("mvSeekForward"),
     watchTitle:document.getElementById("mvWatchTitle"),
@@ -230,6 +237,81 @@
     const posterVisible = !!keepPoster;
     if(dom.playerLoading) dom.playerLoading.classList.toggle("mv-hidden", !loading);
     if(dom.playerPoster) dom.playerPoster.classList.toggle("mv-hidden", !posterVisible);
+  }
+
+  function setMiniTitle(value){
+    if(!dom.miniTitle) return;
+    const title = util.safe(value) || "Now Playing";
+    dom.miniTitle.textContent = title;
+  }
+
+  function seekVideoWhenReady(videoEl, seconds){
+    if(!videoEl) return;
+    const at = Math.max(0, util.num(seconds));
+    const apply = () => {
+      try{ videoEl.currentTime = at; }catch(_){ }
+    };
+    if(videoEl.readyState >= 1){
+      apply();
+      return;
+    }
+    videoEl.addEventListener("loadedmetadata", apply, { once:true });
+  }
+
+  function hideMiniPlayer(clearSource){
+    if(!dom.miniDock || !dom.miniPlayer) return;
+    try{ dom.miniPlayer.pause(); }catch(_){ }
+    if(clearSource){
+      dom.miniPlayer.removeAttribute("src");
+      try{ dom.miniPlayer.load(); }catch(_){ }
+    }
+    dom.miniDock.classList.add("mv-hidden");
+    state.miniActive = false;
+  }
+
+  function openMiniPlayerFromMain(){
+    if(!dom.miniDock || !dom.miniPlayer || !dom.player) return false;
+    const source = util.safe(dom.player.currentSrc || dom.player.src);
+    if(!source || dom.player.ended || dom.player.paused) return false;
+
+    const seekAt = Math.max(0, util.num(dom.player.currentTime));
+    const miniSource = util.safe(dom.miniPlayer.currentSrc || dom.miniPlayer.src);
+    if(miniSource !== source){
+      dom.miniPlayer.src = source;
+      try{ dom.miniPlayer.load(); }catch(_){ }
+    }
+    seekVideoWhenReady(dom.miniPlayer, seekAt);
+
+    try{ dom.player.pause(); }catch(_){ }
+    setMiniTitle(currentVideo()?.title);
+    dom.miniDock.classList.remove("mv-hidden");
+    state.miniActive = true;
+    dom.miniPlayer.play().catch(() => {});
+    return true;
+  }
+
+  function restoreMainPlayerFromMini(pushState){
+    if(!state.miniActive || !dom.miniPlayer || !dom.player) return false;
+
+    const source = util.safe(dom.miniPlayer.currentSrc || dom.miniPlayer.src);
+    const seekAt = Math.max(0, util.num(dom.miniPlayer.currentTime));
+    const shouldResume = !dom.miniPlayer.paused && !dom.miniPlayer.ended;
+    if(source){
+      const currentMainSource = util.safe(dom.player.currentSrc || dom.player.src);
+      if(currentMainSource !== source){
+        dom.player.src = source;
+        try{ dom.player.load(); }catch(_){ }
+      }
+      seekVideoWhenReady(dom.player, seekAt);
+    }
+
+    hideMiniPlayer(false);
+    setPanel("watch", !!pushState);
+    if(shouldResume){
+      dom.player.play().catch(() => {});
+    }
+    refreshPlayerOverlayState();
+    return true;
   }
 
   function getWatchSequenceIds(){
@@ -1619,6 +1701,9 @@
   async function openVideo(videoId, pushState, autoplay){
     const id = util.safe(videoId);
     if(!id) return;
+    if(state.miniActive){
+      hideMiniPlayer(true);
+    }
 
     let video = state.videos.get(id) || null;
     if(!video){
@@ -1654,6 +1739,7 @@
       showToast("Video source missing", true);
     }
     dom.watchTitle.textContent = video.title;
+    setMiniTitle(video.title);
     dom.watchMeta.textContent = util.compact(video.views) + " views . " + util.ago(video.created_at);
     dom.watchAvatar.innerHTML = avatarHtml(channel);
     dom.watchChannelName.textContent = channel.name;
@@ -3048,6 +3134,7 @@
   }
 
   function setPanel(panel, pushState){
+    const prev = state.panel;
     const next = panel in dom.panels ? panel : "feed";
     state.panel = next;
     Object.keys(dom.panels).forEach(key => dom.panels[key].classList.toggle("active", key === next));
@@ -3061,8 +3148,21 @@
       history.pushState({ mv:next }, "", url.pathname + url.search);
     }
 
+    if(prev === "watch" && next === "feed" && !state.miniActive){
+      const minimized = openMiniPlayerFromMain();
+      if(!minimized){
+        try{ dom.player.pause(); }catch(_){ }
+      }
+    }
+
     if(next === "dashboard") loadDashboard();
     if(next === "upload") refreshMonetizationStatus().catch(() => {});
+    if(state.miniActive && next !== "feed" && next !== "watch"){
+      hideMiniPlayer(true);
+    }
+    if(prev !== "watch" && next === "watch"){
+      setMiniTitle(currentVideo()?.title);
+    }
     refreshPlayerOverlayState();
   }
 
@@ -3299,9 +3399,29 @@
 
     dom.watchBack.addEventListener("click", () => {
       setPanel("feed", true);
-      try{ dom.player.pause(); }catch(_){ }
       refreshPlayerOverlayState();
     });
+    if(dom.miniOpen){
+      dom.miniOpen.addEventListener("click", () => restoreMainPlayerFromMini(true));
+    }
+    if(dom.miniExpand){
+      dom.miniExpand.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        restoreMainPlayerFromMini(true);
+      });
+    }
+    if(dom.miniClose){
+      dom.miniClose.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        hideMiniPlayer(true);
+      });
+    }
+    if(dom.miniPlayer){
+      dom.miniPlayer.addEventListener("click", () => restoreMainPlayerFromMini(true));
+      dom.miniPlayer.addEventListener("ended", () => hideMiniPlayer(false));
+    }
     [dom.watchAvatar, dom.watchChannelName, dom.watchChannelSub].forEach(node => {
       if(!node) return;
       node.addEventListener("click", () => {
