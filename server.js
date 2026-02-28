@@ -714,16 +714,18 @@ app.post("/api/videos/upload-assets",
     const videoFile = Array.isArray(files.video) && files.video.length ? files.video[0] : null;
     const thumbFile = Array.isArray(files.thumbnail) && files.thumbnail.length ? files.thumbnail[0] : null;
 
-    const cleanupPaths = [];
+    let shouldCleanupVideoTemp = false;
+    let shouldCleanupThumbTemp = false;
     const cleanupUploadedFiles = async () => {
-      await Promise.all(cleanupPaths.map(filePath => fs.unlink(filePath).catch(() => {})));
+      const deletions = [];
+      if(shouldCleanupVideoTemp && videoFile?.path){
+        deletions.push(fs.unlink(videoFile.path).catch(() => {}));
+      }
+      if(shouldCleanupThumbTemp && thumbFile?.path){
+        deletions.push(fs.unlink(thumbFile.path).catch(() => {}));
+      }
+      await Promise.all(deletions);
     };
-    if(videoFile?.path){
-      cleanupPaths.push(videoFile.path);
-    }
-    if(thumbFile?.path){
-      cleanupPaths.push(thumbFile.path);
-    }
 
     try{
       if(!videoFile){
@@ -757,6 +759,7 @@ app.post("/api/videos/upload-assets",
           if(uploadedVideoUrl){
             videoPublicUrl = uploadedVideoUrl;
             storageKind = "supabase_storage";
+            shouldCleanupVideoTemp = true;
           }
 
           if(thumbFile){
@@ -769,6 +772,7 @@ app.post("/api/videos/upload-assets",
             );
             if(uploadedThumbUrl){
               thumbPublicUrl = uploadedThumbUrl;
+              shouldCleanupThumbTemp = true;
             }
           }
         }catch(storageErr){
