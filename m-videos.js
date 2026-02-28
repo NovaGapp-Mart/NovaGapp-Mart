@@ -1212,6 +1212,10 @@
         '<div class="mv-thumb-wrap">' +
           '<img src="' + util.esc(item.thumbnail_url || "Images/no-image.jpg") + '" alt="' + util.esc(item.title) + '">' +
           '<span class="mv-duration">' + util.esc(util.duration(item.duration_seconds)) + '</span>' +
+          '<div class="mv-thumb-tools">' +
+            '<button type="button" class="mv-thumb-tool" data-thumb-action="watch_later" aria-label="Watch later"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 11h5v2h-7V7h2z"></path></svg></button>' +
+            '<button type="button" class="mv-thumb-tool" data-thumb-action="queue" aria-label="Add to queue"><svg viewBox="0 0 24 24"><path d="M4 10h16v2H4zm0-4h16v2H4zm0 8h10v2H4zm12.5 0v-3h2v3h3v2h-3v3h-2v-3h-3v-2z"></path></svg></button>' +
+          '</div>' +
         '</div>' +
       '</button>' +
       '<div class="mv-card-meta">' +
@@ -1246,6 +1250,20 @@
       const visible = !menu.classList.contains("show");
       closeMenus();
       menu.classList.toggle("show", visible);
+    });
+    card.querySelectorAll("[data-thumb-action]").forEach(btn => {
+      btn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const action = btn.getAttribute("data-thumb-action");
+        if(action === "watch_later"){
+          store.pushUnique(WATCH_LATER_KEY, item.id, 100);
+          showToast("Saved to Watch Later");
+        }else if(action === "queue"){
+          store.pushUnique(QUEUE_KEY, item.id, 100);
+          showToast("Added to Queue");
+        }
+      });
     });
     card.querySelectorAll("[data-menu-action]").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -3268,4 +3286,3 @@
 
   init();
 })();
-
