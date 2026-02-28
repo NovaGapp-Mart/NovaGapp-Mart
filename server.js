@@ -50,6 +50,23 @@ const PORT = Math.max(1, Number(process.env.PORT || 3000) || 3000);
 const UPLOADS_DIR = path.join(__dirname, "uploads");
 const MANUAL_DIR = path.join(UPLOADS_DIR, "manual-requests");
 const MANUAL_JSON_PATH = path.join(MANUAL_DIR, "requests.json");
+const VIDEO_ASSET_UPLOAD_DIR = path.join(UPLOADS_DIR, "videos");
+const VIDEO_ASSET_THUMB_DIR = path.join(UPLOADS_DIR, "video-thumbs");
+const VIDEO_ASSET_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+const VIDEO_ASSET_MAX_THUMB_BYTES = 20 * 1024 * 1024;
+const VIDEO_ASSET_ALLOWED_VIDEO_MIME = new Set([
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "video/x-matroska",
+  "video/ogg",
+  "video/mpeg"
+]);
+const VIDEO_ASSET_ALLOWED_THUMB_MIME = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp"
+]);
 const AUTOMATION_EVENTS_DIR = path.join(UPLOADS_DIR, "automation-events");
 const ACCOUNT_SYNC_LOG_PATH = path.join(AUTOMATION_EVENTS_DIR, "account-sync.ndjson");
 const MEDIA_EVENT_LOG_PATH = path.join(AUTOMATION_EVENTS_DIR, "media-events.ndjson");
@@ -71,6 +88,53 @@ const FIREBASE_SERVER_KEY = String(
 ).trim();
 
 const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || "").trim();
+
+const videoAssetStorage = multer.diskStorage({
+  destination(req, file, cb){
+    try{
+      const dir = file && file.fieldname === "thumbnail" ? VIDEO_ASSET_THUMB_DIR : VIDEO_ASSET_UPLOAD_DIR;
+      fsNative.mkdirSync(dir, { recursive:true });
+      cb(null, dir);
+    }catch(err){
+      cb(err);
+    }
+  },
+  filename(req, file, cb){
+    const originalExt = String(path.extname(file?.originalname || "") || "").toLowerCase().replace(/[^a-z0-9.]/g, "");
+    const fallbackExt = file?.fieldname === "thumbnail" ? ".jpg" : ".mp4";
+    const ext = originalExt || fallbackExt;
+    cb(null, `${Date.now()}_${crypto.randomBytes(4).toString("hex")}${ext}`);
+  }
+});
+
+const uploadVideoAssets = multer({
+  storage: videoAssetStorage,
+  limits: {
+    fileSize: VIDEO_ASSET_MAX_BYTES,
+    files: 2
+  },
+  fileFilter(req, file, cb){
+    const isThumbnail = file && file.fieldname === "thumbnail";
+    const mime = String(file?.mimetype || "").toLowerCase();
+    if(isThumbnail){
+      if(!VIDEO_ASSET_ALLOWED_THUMB_MIME.has(mime)){
+        cb(new Error("thumbnail_mime_not_allowed"));
+        return;
+      }
+      cb(null, true);
+      return;
+    }
+    if(file && file.fieldname === "video"){
+      if(!VIDEO_ASSET_ALLOWED_VIDEO_MIME.has(mime)){
+        cb(new Error("video_mime_not_allowed"));
+        return;
+      }
+      cb(null, true);
+      return;
+    }
+    cb(new Error("unsupported_upload_field"));
+  }
+});
 
 app.use(express.json({ limit: "15mb" }));
 app.use(cors());
@@ -296,6 +360,16 @@ function compactText(value, maxLen){
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, cap);
 }
 
+function buildAbsoluteServerUrl(req, relativePath){
+  const rel = String(relativePath || "").trim();
+  if(!rel) return "";
+  const host = String(req.headers["x-forwarded-host"] || req.get("host") || "").trim();
+  const protoRaw = String(req.headers["x-forwarded-proto"] || req.protocol || "http").trim();
+  const proto = protoRaw.split(",")[0].trim() || "http";
+  if(!host) return rel;
+  return `${proto}://${host}${rel.startsWith("/") ? rel : `/${rel}`}`;
+}
+
 function normalizeEmail(value){
   return compactText(value, 254).toLowerCase();
 }
@@ -368,6 +442,94 @@ app.post("/api/media/events/upload", async (req, res) => {
     return res.status(500).json({ ok:false, error:"media_event_upload_failed" });
   }
 });
+
+app.options("/api/videos/upload-assets", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.sendStatus(204);
+});
+
+app.post("/api/videos/upload-assets",
+  (req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    uploadVideoAssets.fields([
+      { name:"video", maxCount:1 },
+      { name:"thumbnail", maxCount:1 }
+    ])(req, res, (err) => {
+      if(!err){
+        next();
+        return;
+      }
+      if(err.code === "LIMIT_FILE_SIZE"){
+        return res.status(413).json({ ok:false, error:"video_asset_too_large", message:"Video file exceeds 2GB limit." });
+      }
+      return res.status(400).json({ ok:false, error:"video_asset_upload_invalid", message:compactText(err.message, 220) });
+    });
+  },
+  async (req, res) => {
+    const files = req.files && typeof req.files === "object" ? req.files : {};
+    const videoFile = Array.isArray(files.video) && files.video.length ? files.video[0] : null;
+    const thumbFile = Array.isArray(files.thumbnail) && files.thumbnail.length ? files.thumbnail[0] : null;
+
+    const cleanupPaths = [];
+    const cleanupUploadedFiles = async () => {
+      await Promise.all(cleanupPaths.map(filePath => fs.unlink(filePath).catch(() => {})));
+    };
+    if(videoFile?.path){
+      cleanupPaths.push(videoFile.path);
+    }
+    if(thumbFile?.path){
+      cleanupPaths.push(thumbFile.path);
+    }
+
+    try{
+      if(!videoFile){
+        await cleanupUploadedFiles();
+        return res.status(400).json({ ok:false, error:"video_file_required" });
+      }
+      if(Number(videoFile.size || 0) > VIDEO_ASSET_MAX_BYTES){
+        await cleanupUploadedFiles();
+        return res.status(413).json({ ok:false, error:"video_asset_too_large", message:"Video file exceeds 2GB limit." });
+      }
+      if(thumbFile && Number(thumbFile.size || 0) > VIDEO_ASSET_MAX_THUMB_BYTES){
+        await cleanupUploadedFiles();
+        return res.status(413).json({ ok:false, error:"thumbnail_too_large", message:"Thumbnail exceeds 20MB limit." });
+      }
+
+      const userId = sanitizeCallUserId(req.body?.user_id || req.body?.userId || "");
+      const videoRelPath = path.posix.join("uploads", "videos", path.basename(String(videoFile.filename || "")));
+      const thumbRelPath = thumbFile
+        ? path.posix.join("uploads", "video-thumbs", path.basename(String(thumbFile.filename || "")))
+        : "";
+      const videoPublicUrl = buildAbsoluteServerUrl(req, "/" + videoRelPath);
+      const thumbPublicUrl = thumbRelPath ? buildAbsoluteServerUrl(req, "/" + thumbRelPath) : "";
+
+      if(userId){
+        appendNdjsonLine(MEDIA_EVENT_LOG_PATH, {
+          user_id: userId,
+          target_type: "video_asset",
+          target_id: "",
+          media_url: videoPublicUrl,
+          kind: "video_asset_upload",
+          source: "api_videos_upload_assets",
+          ts: new Date().toISOString()
+        }).catch(() => {});
+      }
+
+      return res.json({
+        ok:true,
+        storage: "server_local",
+        video_url: videoPublicUrl,
+        thumbnail_url: thumbPublicUrl
+      });
+    }catch(err){
+      console.error("video_asset_upload_error:", err?.stack || err);
+      await cleanupUploadedFiles();
+      return res.status(500).json({ ok:false, error:"video_asset_upload_failed" });
+    }
+  }
+);
 
 app.options("/api/automation/track", (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");

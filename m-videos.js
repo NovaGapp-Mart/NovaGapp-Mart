@@ -5,9 +5,11 @@
   const SEARCH_HISTORY_KEY = "mv_search_history_v1";
   const WATCH_LATER_KEY = "mv_watch_later_v1";
   const QUEUE_KEY = "mv_queue_v1";
-  const MAX_VIDEO_SIZE = 600 * 1024 * 1024;
+  const MAX_VIDEO_SIZE = 2 * 1024 * 1024 * 1024;
   const MAX_THUMB_SIZE = 8 * 1024 * 1024;
-  const UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
+  const UPLOAD_TIMEOUT_MS = 30 * 60 * 1000;
+  const DIRECT_TO_SERVER_UPLOAD_THRESHOLD = 45 * 1024 * 1024;
+  const SERVER_VIDEO_UPLOAD_TIMEOUT_MS = 45 * 60 * 1000;
   const VIDEO_SELECT = "id,user_id,title,description,video_url,thumbnail_url,views,likes_count,dislikes_count,monetized,created_at,category,tags,duration_seconds";
   const VIDEO_MIME_TYPES = new Set(["video/mp4","video/webm","video/quicktime","video/x-matroska","video/ogg","video/mpeg"]);
   const THUMB_MIME_TYPES = new Set(["image/jpeg","image/png","image/webp"]);
@@ -2377,7 +2379,7 @@
     state.uploadVideoFile = null;
     state.uploadThumbFile = null;
     dom.uploadForm.reset();
-    dom.videoFileName.textContent = "Supported: MP4, WEBM, MOV, MKV (max 600MB)";
+    dom.videoFileName.textContent = "Supported: MP4, WEBM, MOV, MKV (max 2GB)";
     dom.thumbFileName.textContent = "Supported: JPG, PNG, WEBP (max 8MB)";
     dom.thumbPreviewWrap.classList.add("mv-hidden");
     dom.thumbPreview.removeAttribute("src");
@@ -2387,7 +2389,7 @@
 
   function validateVideo(file){
     if(!file) return "Video file is required.";
-    if(file.size > MAX_VIDEO_SIZE) return "Video file exceeds 600MB.";
+    if(file.size > MAX_VIDEO_SIZE) return "Video file exceeds 2GB.";
     if(file.type && !VIDEO_MIME_TYPES.has(file.type)) return "Unsupported video format.";
     return "";
   }
@@ -2461,6 +2463,91 @@
     return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
   }
 
+  function toAbsoluteAssetUrl(value){
+    const raw = util.safe(value);
+    if(!raw) return "";
+    if(/^https?:\/\//i.test(raw) || raw.startsWith("data:")) return raw;
+    try{
+      return new URL(raw, location.origin).href;
+    }catch(_){
+      return raw;
+    }
+  }
+
+  function shouldUseServerUploadByError(err){
+    const text = util.safe(err?.message || err?.error_description || err?.details).toLowerCase();
+    if(!text) return false;
+    return (
+      text.includes("maximum allowed size") ||
+      text.includes("object exceeded") ||
+      text.includes("payload too large") ||
+      text.includes("upload_timeout") ||
+      text.includes("timeout") ||
+      text.includes("row level security") ||
+      text.includes("permission") ||
+      text.includes("not allowed") ||
+      text.includes("bucket")
+    );
+  }
+
+  function uploadAssetsThroughServerEndpoint(url, userId, videoFile, thumbFile){
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", url, true);
+      xhr.responseType = "json";
+      xhr.timeout = Math.max(SERVER_VIDEO_UPLOAD_TIMEOUT_MS, UPLOAD_TIMEOUT_MS);
+      xhr.upload.onprogress = (event) => {
+        if(!event.lengthComputable) return;
+        const ratio = Math.max(0, Math.min(1, event.loaded / Math.max(1, event.total)));
+        const pct = 30 + Math.round(ratio * 52);
+        setUploadProgress(pct, thumbFile ? "Uploading video + thumbnail..." : "Uploading video...");
+      };
+      xhr.onerror = () => reject(new Error("server_upload_network_error"));
+      xhr.ontimeout = () => reject(new Error("server_upload_timeout"));
+      xhr.onload = () => {
+        let payload = xhr.response;
+        if(!payload || typeof payload !== "object"){
+          try{
+            payload = JSON.parse(xhr.responseText || "{}");
+          }catch(_){
+            payload = {};
+          }
+        }
+        if(xhr.status >= 200 && xhr.status < 300 && payload && payload.ok){
+          resolve(payload);
+          return;
+        }
+        const message = util.safe(payload?.message || payload?.error) || `server_upload_failed_${xhr.status}`;
+        reject(new Error(message));
+      };
+      const form = new FormData();
+      form.append("user_id", util.safe(userId));
+      form.append("video", videoFile, videoFile?.name || "video.mp4");
+      if(thumbFile){
+        form.append("thumbnail", thumbFile, thumbFile?.name || "thumbnail.jpg");
+      }
+      xhr.send(form);
+    });
+  }
+
+  async function uploadAssetsThroughServer(userId, videoFile, thumbFile){
+    const bases = [""].concat(buildAutomationApiBases());
+    let lastError = null;
+    for(const base of bases){
+      const cleanBase = util.safe(base).replace(/\/+$/g, "");
+      const endpoint = cleanBase ? `${cleanBase}/api/videos/upload-assets` : "/api/videos/upload-assets";
+      try{
+        const payload = await uploadAssetsThroughServerEndpoint(endpoint, userId, videoFile, thumbFile);
+        if(payload && payload.ok){
+          return payload;
+        }
+      }catch(err){
+        lastError = err;
+      }
+    }
+    throw lastError || new Error("server_upload_unreachable");
+  }
+
   function explainUploadError(err){
     const text = util.safe(err?.message || err?.error_description || err?.details).toLowerCase();
     if(text.includes("maximum allowed size") || text.includes("object exceeded") || text.includes("payload too large")){
@@ -2474,6 +2561,9 @@
     }
     if(text.includes("permission") || text.includes("row level security") || text.includes("not allowed")){
       return "Upload blocked by storage policy. Update Supabase storage policies for long_videos bucket.";
+    }
+    if(text.includes("server_upload") || text.includes("video_asset_upload")){
+      return "Large video upload server unavailable. Start backend server and retry.";
     }
     return "Upload failed. Check storage bucket limit and policies.";
   }
@@ -2527,24 +2617,51 @@
     try{
       setUploadProgress(8, "Reading video metadata...");
       const meta = await window.NOVA.getVideoMeta(state.uploadVideoFile);
-
-      setUploadProgress(30, "Uploading video...");
-      const videoPath = window.NOVA.makePath(user.id, state.uploadVideoFile);
-      const videoUrl = await withTimeout(
-        window.NOVA.uploadToBucket("long_videos", state.uploadVideoFile, videoPath),
-        UPLOAD_TIMEOUT_MS,
-        "video_upload"
-      );
-
+      const shouldForceServerUpload = Number(state.uploadVideoFile?.size || 0) >= DIRECT_TO_SERVER_UPLOAD_THRESHOLD;
+      let videoUrl = "";
       let thumbUrl = "";
-      if(state.uploadThumbFile){
-        setUploadProgress(58, "Uploading thumbnail...");
-        const thumbPath = window.NOVA.makePath(user.id, state.uploadThumbFile);
-        thumbUrl = await withTimeout(
-          window.NOVA.uploadToBucket("thumbnails", state.uploadThumbFile, thumbPath),
-          Math.max(120000, Math.floor(UPLOAD_TIMEOUT_MS / 2)),
-          "thumbnail_upload"
+
+      if(shouldForceServerUpload){
+        setUploadProgress(26, "Uploading large video on optimized channel...");
+        const serverUpload = await withTimeout(
+          uploadAssetsThroughServer(user.id, state.uploadVideoFile, state.uploadThumbFile),
+          SERVER_VIDEO_UPLOAD_TIMEOUT_MS,
+          "server_video_upload"
         );
+        videoUrl = toAbsoluteAssetUrl(serverUpload?.video_url);
+        thumbUrl = toAbsoluteAssetUrl(serverUpload?.thumbnail_url);
+      }else{
+        try{
+          setUploadProgress(30, "Uploading video...");
+          const videoPath = window.NOVA.makePath(user.id, state.uploadVideoFile);
+          videoUrl = await withTimeout(
+            window.NOVA.uploadToBucket("long_videos", state.uploadVideoFile, videoPath),
+            UPLOAD_TIMEOUT_MS,
+            "video_upload"
+          );
+
+          if(state.uploadThumbFile){
+            setUploadProgress(58, "Uploading thumbnail...");
+            const thumbPath = window.NOVA.makePath(user.id, state.uploadThumbFile);
+            thumbUrl = await withTimeout(
+              window.NOVA.uploadToBucket("thumbnails", state.uploadThumbFile, thumbPath),
+              Math.max(120000, Math.floor(UPLOAD_TIMEOUT_MS / 2)),
+              "thumbnail_upload"
+            );
+          }
+        }catch(primaryUploadErr){
+          if(!shouldUseServerUploadByError(primaryUploadErr)){
+            throw primaryUploadErr;
+          }
+          setUploadProgress(36, "Switching to large-video upload mode...");
+          const serverUpload = await withTimeout(
+            uploadAssetsThroughServer(user.id, state.uploadVideoFile, state.uploadThumbFile),
+            SERVER_VIDEO_UPLOAD_TIMEOUT_MS,
+            "server_video_upload"
+          );
+          videoUrl = toAbsoluteAssetUrl(serverUpload?.video_url);
+          thumbUrl = toAbsoluteAssetUrl(serverUpload?.thumbnail_url);
+        }
       }
 
       setUploadProgress(82, "Saving video record...");

@@ -821,3 +821,275 @@ window.translateProductName = function(name){
     setTimeout(() => { startPush().catch(()=>{}); }, 600);
   });
 })();
+
+/* =====================================
+   GLOBAL INCOMING CALL LISTENER (NON-CHAT PAGES)
+===================================== */
+(function(){
+  try{
+    if(/\/chat\.html$/i.test(String(location.pathname || ""))){
+      return;
+    }
+  }catch(_){ }
+
+  const POLL_MS = 2200;
+  let pollTimer = null;
+  let activeOffer = null;
+  let dismissTimer = null;
+  let seenSignalIds = new Set();
+  let ui = null;
+
+  function getCurrentUserId(){
+    try{
+      const raw = JSON.parse(localStorage.getItem("user") || "{}");
+      return String(raw?.uid || raw?.user_id || raw?.id || "").trim();
+    }catch(_){
+      return "";
+    }
+  }
+
+  function buildApiBases(){
+    const out = [];
+    const push = (value) => {
+      const clean = String(value || "").trim().replace(/\/+$/g, "");
+      if(!clean) return;
+      if(!/^https?:\/\//i.test(clean)) return;
+      if(!out.includes(clean)) out.push(clean);
+    };
+    try{
+      push(window.CONTEST_API_BASE || window.API_BASE || "");
+      push(localStorage.getItem("contest_api_base"));
+      push(localStorage.getItem("api_base"));
+    }catch(_){ }
+    if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+    push("https://novagapp-mart.onrender.com");
+    return out;
+  }
+
+  function normalizeSignalRow(row){
+    const src = row && typeof row === "object" ? row : {};
+    const payload = src.payload && typeof src.payload === "object" ? src.payload : src;
+    const type = String(payload.type || src.type || "").trim().toLowerCase();
+    const callId = String(payload.call_id || payload.callId || src.call_id || src.callId || "").trim();
+    const toUserId = String(payload.to_user_id || payload.to || src.to_user_id || src.to || "").trim();
+    const fromUserId = String(payload.from_user_id || payload.from || src.from_user_id || src.from || "").trim();
+    if(!type || !callId || !toUserId || !fromUserId){
+      return null;
+    }
+    return {
+      id: String(src.id || "").trim(),
+      type,
+      call_id: callId,
+      to_user_id: toUserId,
+      from_user_id: fromUserId,
+      media_type: String(payload.media_type || payload.mediaType || src.media_type || src.mediaType || "").trim().toLowerCase() === "video" ? "video" : "audio",
+      reason: String(payload.reason || src.reason || "").trim().slice(0, 120)
+    };
+  }
+
+  async function sendCallSignal(payload){
+    const body = payload && typeof payload === "object" ? payload : {};
+    const toUserId = String(body.to_user_id || "").trim();
+    const fromUserId = String(body.from_user_id || "").trim();
+    const callId = String(body.call_id || "").trim();
+    const type = String(body.type || "").trim().toLowerCase();
+    if(!toUserId || !fromUserId || !callId || !type) return;
+
+    const reqBody = {
+      to_user_id: toUserId,
+      from_user_id: fromUserId,
+      call_id: callId,
+      type,
+      media_type: String(body.media_type || "").trim().toLowerCase() === "video" ? "video" : "audio",
+      reason: String(body.reason || "").trim().slice(0, 120),
+      ttl_sec: type === "call-offer" ? 90 : 120
+    };
+    const bases = buildApiBases();
+    for(const base of bases){
+      try{
+        const res = await fetch(`${base}/api/call/signal`, {
+          method: "POST",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify(reqBody)
+        });
+        if(res.ok) return;
+      }catch(_){ }
+    }
+  }
+
+  function ensureUi(){
+    if(ui) return ui;
+    const style = document.createElement("style");
+    style.textContent = `
+      .nova-call-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.56);display:none;align-items:center;justify-content:center;z-index:99999;padding:16px}
+      .nova-call-backdrop.show{display:flex}
+      .nova-call-card{width:min(92vw,360px);background:#121212;color:#fff;border:1px solid rgba(255,255,255,0.16);border-radius:16px;padding:18px;text-align:center;box-shadow:0 14px 44px rgba(0,0,0,0.5)}
+      .nova-call-title{font-size:18px;font-weight:700;margin-bottom:8px}
+      .nova-call-sub{font-size:13px;color:#cfd2d8}
+      .nova-call-actions{margin-top:16px;display:flex;gap:10px;justify-content:center}
+      .nova-call-actions button{border:none;border-radius:10px;padding:10px 14px;cursor:pointer;font-weight:700}
+      .nova-call-answer{background:#1aa34a;color:#fff}
+      .nova-call-decline{background:#e53935;color:#fff}
+    `;
+    document.head.appendChild(style);
+
+    const backdrop = document.createElement("div");
+    backdrop.className = "nova-call-backdrop";
+    backdrop.innerHTML = `
+      <div class="nova-call-card">
+        <div class="nova-call-title" data-call-title>Incoming call</div>
+        <div class="nova-call-sub" data-call-sub>Audio call</div>
+        <div class="nova-call-actions">
+          <button type="button" class="nova-call-answer" data-call-answer>Answer</button>
+          <button type="button" class="nova-call-decline" data-call-decline>Decline</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+    const title = backdrop.querySelector("[data-call-title]");
+    const sub = backdrop.querySelector("[data-call-sub]");
+    const answer = backdrop.querySelector("[data-call-answer]");
+    const decline = backdrop.querySelector("[data-call-decline]");
+
+    answer.addEventListener("click", () => {
+      if(!activeOffer) return;
+      const offer = activeOffer;
+      hideIncomingCallUi();
+      const target = `chat.html?uid=${encodeURIComponent(offer.from_user_id)}&call_action=answer&call_id=${encodeURIComponent(offer.call_id)}`;
+      location.href = target;
+    });
+    decline.addEventListener("click", () => {
+      declineIncomingCall("decline");
+    });
+
+    ui = { backdrop, title, sub };
+    return ui;
+  }
+
+  function showIncomingCallUi(offer){
+    const view = ensureUi();
+    const label = offer && offer.media_type === "video" ? "Incoming video call" : "Incoming audio call";
+    const from = String(offer?.from_user_id || "").trim();
+    view.title.textContent = from ? `Incoming call from ${from}` : "Incoming call";
+    view.sub.textContent = label;
+    view.backdrop.classList.add("show");
+  }
+
+  function hideIncomingCallUi(){
+    if(dismissTimer){
+      clearTimeout(dismissTimer);
+      dismissTimer = null;
+    }
+    if(ui && ui.backdrop){
+      ui.backdrop.classList.remove("show");
+    }
+    activeOffer = null;
+  }
+
+  async function declineIncomingCall(reason){
+    if(!activeOffer){
+      hideIncomingCallUi();
+      return;
+    }
+    const offer = activeOffer;
+    hideIncomingCallUi();
+    await sendCallSignal({
+      type: "call-decline",
+      call_id: offer.call_id,
+      from_user_id: offer.to_user_id,
+      to_user_id: offer.from_user_id,
+      media_type: offer.media_type,
+      reason: String(reason || "decline")
+    });
+  }
+
+  function rememberSignalId(id){
+    const clean = String(id || "").trim();
+    if(!clean) return;
+    seenSignalIds.add(clean);
+    if(seenSignalIds.size > 900){
+      const keep = Array.from(seenSignalIds).slice(-450);
+      seenSignalIds = new Set(keep);
+    }
+  }
+
+  function handleSignal(signal, myUid){
+    if(!signal || signal.to_user_id !== myUid) return;
+    if(signal.type === "call-offer"){
+      if(activeOffer && activeOffer.call_id && activeOffer.call_id !== signal.call_id){
+        sendCallSignal({
+          type: "call-busy",
+          call_id: signal.call_id,
+          from_user_id: myUid,
+          to_user_id: signal.from_user_id,
+          media_type: signal.media_type
+        }).catch(() => {});
+        return;
+      }
+      activeOffer = signal;
+      showIncomingCallUi(signal);
+      if(dismissTimer){
+        clearTimeout(dismissTimer);
+      }
+      dismissTimer = setTimeout(() => {
+        declineIncomingCall("timeout").catch(() => {});
+      }, 60000);
+      return;
+    }
+    if(!activeOffer || signal.call_id !== activeOffer.call_id) return;
+    if(signal.type === "call-end" || signal.type === "call-decline" || signal.type === "call-busy"){
+      hideIncomingCallUi();
+    }
+  }
+
+  async function pollSignals(force){
+    const myUid = getCurrentUserId();
+    if(!myUid) return;
+    if(document.hidden && !force && !activeOffer) return;
+
+    const params = new URLSearchParams();
+    params.set("user_id", myUid);
+    params.set("limit", "30");
+
+    const bases = buildApiBases();
+    for(const base of bases){
+      try{
+        const res = await fetch(`${base}/api/call/signals?${params.toString()}`, { cache:"no-store" });
+        if(!res.ok) continue;
+        const payload = await res.json().catch(() => null);
+        if(!payload || !payload.ok) continue;
+        const rows = Array.isArray(payload.signals) ? payload.signals : [];
+        rows.forEach((row) => {
+          const signalId = String(row?.id || "").trim();
+          if(signalId){
+            if(seenSignalIds.has(signalId)) return;
+            rememberSignalId(signalId);
+          }
+          const signal = normalizeSignalRow(row);
+          if(signal){
+            handleSignal(signal, myUid);
+          }
+        });
+        return;
+      }catch(_){ }
+    }
+  }
+
+  function start(){
+    if(pollTimer) return;
+    pollSignals(true).catch(() => {});
+    pollTimer = setInterval(() => {
+      pollSignals(false).catch(() => {});
+    }, POLL_MS);
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if(document.visibilityState === "visible"){
+      pollSignals(true).catch(() => {});
+    }
+  });
+
+  document.addEventListener("DOMContentLoaded", () => {
+    setTimeout(start, 900);
+  });
+})();

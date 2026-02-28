@@ -132,6 +132,35 @@ body{background:#000;color:#fff;height:100dvh;overflow:hidden}
   object-fit:contain;
   background:#000;
 }
+.playback-indicator{
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  pointer-events:none;
+  opacity:0;
+  transition:opacity 0.16s ease;
+  z-index:8;
+}
+.playback-indicator.show{opacity:1}
+.playback-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  background:rgba(0,0,0,0.68);
+  border:1px solid rgba(255,255,255,0.32);
+  color:#fff;
+  padding:8px 14px;
+  border-radius:999px;
+  font-size:13px;
+  font-weight:700;
+  backdrop-filter:blur(4px);
+}
+.playback-chip .icon{
+  font-size:15px;
+  line-height:1;
+}
 
 .actions{
   position:absolute;right:12px;bottom:calc(100px + env(safe-area-inset-bottom, 0px) + var(--nova-nav-lift, 0px));
@@ -551,7 +580,7 @@ const params = new URLSearchParams(location.search);
 const feedUserId = params.get("uid") || "";
 const focusReelId = params.get("focus") || "";
 let focusApplied = false;
-let userAudioUnlocked = false;
+let userAudioUnlocked = true;
 let playbackSyncQueued = false;
 let playbackPreferredReel = null;
 
@@ -1386,7 +1415,13 @@ async function renderReel(item, options){
 
   reel.innerHTML = `
     <div class="reel-stage">
-      <video src="${item.video_url}" playsinline webkit-playsinline muted autoplay loop preload="metadata"></video>
+      <video src="${item.video_url}" playsinline webkit-playsinline autoplay loop preload="metadata"></video>
+      <div class="playback-indicator" data-playback-indicator>
+        <div class="playback-chip">
+          <span class="icon" data-playback-icon>❚❚</span>
+          <span data-playback-text>Paused</span>
+        </div>
+      </div>
       <div class="actions">
         <div class="action-item">
           <div class="icon-btn" data-action="like">
@@ -1472,12 +1507,34 @@ async function renderReel(item, options){
   scheduleActivePlaybackSync();
 
   const videoEl = reel.querySelector("video");
+  const playbackHintEl = reel.querySelector("[data-playback-indicator]");
+  const playbackHintIconEl = reel.querySelector("[data-playback-icon]");
+  const playbackHintTextEl = reel.querySelector("[data-playback-text]");
+  let playbackHintTimer = 0;
   if(videoEl){
     videoEl.dataset.userPaused = "0";
-    videoEl.muted = true;
-    videoEl.setAttribute("muted", "");
+    setVideoMutedState(videoEl, !userAudioUnlocked);
     videoEl.playsInline = true;
     videoEl.autoplay = true;
+  }
+
+  function showPlaybackHint(mode){
+    if(!playbackHintEl) return;
+    const pauseMode = String(mode || "") === "pause";
+    if(playbackHintIconEl){
+      playbackHintIconEl.textContent = pauseMode ? "❚❚" : "▶";
+    }
+    if(playbackHintTextEl){
+      playbackHintTextEl.textContent = pauseMode ? "Paused" : "Playing";
+    }
+    playbackHintEl.classList.add("show");
+    if(playbackHintTimer){
+      clearTimeout(playbackHintTimer);
+    }
+    playbackHintTimer = setTimeout(() => {
+      playbackHintEl.classList.remove("show");
+      playbackHintTimer = 0;
+    }, 420);
   }
 
   const likeEl = reel.querySelector("[data-like]");
@@ -1630,22 +1687,16 @@ async function renderReel(item, options){
   }
 
   function toggleVideoPlayback(){
-    if(videoEl.muted){
-      userAudioUnlocked = true;
-      videoEl.dataset.userPaused = "0";
-      setVideoMutedState(videoEl, false);
-      videoEl.play().catch(() => {});
-      scheduleActivePlaybackSync(reel);
-      return;
-    }
     if(videoEl.paused){
       videoEl.dataset.userPaused = "0";
       videoEl.play().catch(() => {});
       scheduleActivePlaybackSync(reel);
+      showPlaybackHint("play");
     }else{
       videoEl.dataset.userPaused = "1";
       videoEl.pause();
       scheduleActivePlaybackSync();
+      showPlaybackHint("pause");
     }
   }
 
