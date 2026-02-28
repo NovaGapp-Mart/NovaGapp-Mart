@@ -139,7 +139,7 @@ const uploadVideoAssets = multer({
 app.use(express.json({ limit: "15mb" }));
 app.use(cors());
 app.use("/uploads", express.static(UPLOADS_DIR));
-app.get("/uploads/video-thumbs/:fileName", (req, res, next) => {
+app.get("/uploads/video-thumbs/:fileName", async (req, res, next) => {
   const fileName = path.basename(String(req.params?.fileName || "").trim());
   if(!fileName){
     next();
@@ -148,6 +148,14 @@ app.get("/uploads/video-thumbs/:fileName", (req, res, next) => {
   if(!isVideoAssetSupabaseConfigured()){
     next();
     return;
+  }
+  try{
+    const signedUrl = await buildSupabaseStorageSignedUrl(VIDEO_ASSET_SUPABASE_THUMB_BUCKET, fileName, 3600);
+    if(signedUrl){
+      return res.redirect(302, signedUrl);
+    }
+  }catch(err){
+    console.error("video_thumb_signed_url_error:", err?.message || err);
   }
   const redirectUrl = buildSupabaseStoragePublicUrl(VIDEO_ASSET_SUPABASE_THUMB_BUCKET, fileName);
   if(!redirectUrl){
@@ -156,7 +164,7 @@ app.get("/uploads/video-thumbs/:fileName", (req, res, next) => {
   }
   return res.redirect(302, redirectUrl);
 });
-app.get("/uploads/videos/:fileName", (req, res, next) => {
+app.get("/uploads/videos/:fileName", async (req, res, next) => {
   const fileName = path.basename(String(req.params?.fileName || "").trim());
   if(!fileName){
     next();
@@ -165,6 +173,14 @@ app.get("/uploads/videos/:fileName", (req, res, next) => {
   if(!isVideoAssetSupabaseConfigured()){
     next();
     return;
+  }
+  try{
+    const signedUrl = await buildSupabaseStorageSignedUrl(VIDEO_ASSET_SUPABASE_VIDEO_BUCKET, fileName, 3600);
+    if(signedUrl){
+      return res.redirect(302, signedUrl);
+    }
+  }catch(err){
+    console.error("video_asset_signed_url_error:", err?.message || err);
   }
   const redirectUrl = buildSupabaseStoragePublicUrl(VIDEO_ASSET_SUPABASE_VIDEO_BUCKET, fileName);
   if(!redirectUrl){
@@ -452,6 +468,45 @@ function buildSupabaseStoragePublicUrl(bucket, objectPath){
     return "";
   }
   return `${VIDEO_ASSET_SUPABASE_URL}/storage/v1/object/public/${encodeURIComponent(cleanBucket)}/${encodedPath}`;
+}
+
+async function buildSupabaseStorageSignedUrl(bucket, objectPath, expiresInSec){
+  if(!isVideoAssetSupabaseConfigured()){
+    return "";
+  }
+  const cleanBucket = String(bucket || "").trim();
+  const encodedPath = encodeSupabasePath(objectPath);
+  if(!cleanBucket || !encodedPath){
+    return "";
+  }
+
+  const ttl = Math.max(60, Math.min(24 * 60 * 60, Number(expiresInSec) || 3600));
+  const signUrl = `${VIDEO_ASSET_SUPABASE_URL}/storage/v1/object/sign/${encodeURIComponent(cleanBucket)}/${encodedPath}`;
+  const response = await fetch(signUrl, {
+    method: "POST",
+    headers: {
+      apikey: VIDEO_ASSET_SUPABASE_KEY,
+      Authorization: `Bearer ${VIDEO_ASSET_SUPABASE_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ expiresIn: ttl })
+  });
+  if(!response.ok){
+    const body = await response.text().catch(() => "");
+    throw new Error(`supabase_sign_failed_${response.status}:${body.slice(0, 180)}`);
+  }
+  const payload = await response.json().catch(() => ({}));
+  const signedRaw = compactText(payload?.signedURL || payload?.signedUrl || payload?.signed_url, 2048);
+  if(!signedRaw){
+    return "";
+  }
+  if(/^https?:\/\//i.test(signedRaw)){
+    return signedRaw;
+  }
+  if(signedRaw.startsWith("/")){
+    return `${VIDEO_ASSET_SUPABASE_URL}${signedRaw}`;
+  }
+  return `${VIDEO_ASSET_SUPABASE_URL}/storage/v1/${String(signedRaw).replace(/^\/+/, "")}`;
 }
 
 async function uploadLocalAssetToSupabase(bucket, objectPath, localFilePath, mimeType){

@@ -47,6 +47,9 @@
     commentBusy:false,
     replyParentId:"",
     watchToken:0,
+    playerSources:[],
+    playerSourceIndex:0,
+    playerAutoplayPending:false,
     realtimeChannel:null,
     observer:null,
     timers:{},
@@ -389,6 +392,154 @@
     return util.safe(value).replace(/\/+$/g, "");
   }
 
+  function decodePathPart(value){
+    const raw = util.safe(value);
+    if(!raw) return "";
+    try{
+      return decodeURIComponent(raw);
+    }catch(_){
+      return raw;
+    }
+  }
+
+  function extractAssetFileName(value){
+    const raw = util.safe(value).replace(/\\/g, "/");
+    if(!raw) return "";
+    const base = raw.split("?")[0].split("#")[0];
+    const piece = base.slice(base.lastIndexOf("/") + 1);
+    return decodePathPart(piece);
+  }
+
+  function buildAssetProxyUrl(kind, fileName){
+    const name = util.safe(fileName).replace(/^\/+|\/+$/g, "");
+    if(!name) return "";
+    const folder = kind === "thumb" ? "video-thumbs" : "videos";
+    const encoded = encodeURIComponent(name);
+    const origin = normalizeBase(location.origin);
+    if(/^https?:\/\//i.test(origin)){
+      return `${origin}/uploads/${folder}/${encoded}`;
+    }
+    return `/uploads/${folder}/${encoded}`;
+  }
+
+  function parseSupabaseObjectReference(value){
+    const raw = util.safe(value);
+    if(!raw) return null;
+    let url = null;
+    try{
+      url = new URL(raw, location.origin);
+    }catch(_){
+      return null;
+    }
+    const parts = String(url.pathname || "").split("/").filter(Boolean);
+    const objectIdx = parts.findIndex((part, index) => {
+      const next = util.safe(parts[index + 1]).toLowerCase();
+      return part === "object" && (next === "public" || next === "sign");
+    });
+    if(objectIdx < 0 || objectIdx + 3 >= parts.length){
+      return null;
+    }
+    const bucket = decodePathPart(parts[objectIdx + 2]).toLowerCase();
+    const objectParts = parts.slice(objectIdx + 3).map(decodePathPart).filter(Boolean);
+    const objectPath = objectParts.join("/");
+    if(!bucket || !objectPath){
+      return null;
+    }
+    return {
+      bucket,
+      objectPath,
+      fileName: objectParts[objectParts.length - 1] || "",
+      hasNestedPath: objectParts.length > 1
+    };
+  }
+
+  function normalizeAssetUrl(value, kind){
+    const raw = util.safe(value).replace(/\\/g, "/");
+    if(!raw) return "";
+    if(raw.startsWith("data:")) return raw;
+
+    const uploadsMatch = raw.match(/(?:^|\/)uploads\/(videos|video-thumbs)\/([^/?#]+)/i);
+    if(uploadsMatch){
+      const directKind = uploadsMatch[1].toLowerCase() === "video-thumbs" ? "thumb" : "video";
+      const fileName = decodePathPart(uploadsMatch[2]);
+      const proxied = buildAssetProxyUrl(directKind, fileName);
+      if(proxied) return proxied;
+    }
+
+    const supabaseRef = parseSupabaseObjectReference(raw);
+    if(supabaseRef && supabaseRef.fileName && !supabaseRef.hasNestedPath){
+      const bucket = supabaseRef.bucket;
+      const looksVideoBucket = bucket === "long_videos" || bucket === "videos" || bucket.includes("video");
+      const looksThumbBucket = bucket === "thumbnails" || bucket === "video-thumbs" || bucket.includes("thumb");
+      if((kind === "video" && looksVideoBucket) || (kind === "thumb" && looksThumbBucket)){
+        const proxied = buildAssetProxyUrl(kind, supabaseRef.fileName);
+        if(proxied) return proxied;
+      }
+    }
+
+    const resolved = toAbsoluteAssetUrl(raw);
+    let parsed = null;
+    try{
+      parsed = new URL(resolved, location.origin);
+    }catch(_){
+      return resolved;
+    }
+
+    const host = util.safe(parsed.hostname).toLowerCase();
+    if(host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0"){
+      const localName = extractAssetFileName(parsed.pathname);
+      const localProxy = buildAssetProxyUrl(kind, localName);
+      if(localProxy) return localProxy;
+    }
+
+    if(location.protocol === "https:" && parsed.protocol === "http:" && util.safe(parsed.host).toLowerCase() === util.safe(location.host).toLowerCase()){
+      parsed.protocol = "https:";
+      return parsed.href;
+    }
+
+    return parsed.href;
+  }
+
+  function buildAssetCandidates(value, kind){
+    const list = [];
+    const push = (entry) => {
+      const item = util.safe(entry);
+      if(!item || list.includes(item)) return;
+      list.push(item);
+    };
+
+    push(normalizeAssetUrl(value, kind));
+
+    const fileName = extractAssetFileName(value);
+    if(fileName){
+      push(buildAssetProxyUrl(kind, fileName));
+    }
+
+    if(kind === "thumb"){
+      push("Images/no-image.jpg");
+    }
+
+    return list;
+  }
+
+  function setImageSourceWithFallback(image, candidates){
+    if(!image) return;
+    const queue = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
+    if(!queue.length){
+      queue.push("Images/no-image.jpg");
+    }
+    let index = 0;
+    image.onerror = () => {
+      index += 1;
+      if(index >= queue.length){
+        image.onerror = null;
+        return;
+      }
+      image.src = queue[index];
+    };
+    image.src = queue[0];
+  }
+
   function buildAutomationApiBases(){
     const bases = [];
     const push = (value) => {
@@ -483,8 +634,8 @@
       user_id:util.safe(row?.user_id),
       title:util.safe(row?.title) || "Untitled",
       description:util.safe(row?.description),
-      video_url:util.safe(row?.video_url),
-      thumbnail_url:util.safe(row?.thumbnail_url),
+      video_url:normalizeAssetUrl(row?.video_url, "video"),
+      thumbnail_url:normalizeAssetUrl(row?.thumbnail_url, "thumb"),
       views:Math.max(0, util.num(row?.views)),
       likes_count:Math.max(0, util.num(row?.likes_count)),
       dislikes_count:Math.max(0, util.num(row?.dislikes_count)),
@@ -1178,7 +1329,9 @@
     if(title) title.textContent = video.title;
     if(channelNode) channelNode.textContent = channel.name;
     if(stats) stats.textContent = util.compact(video.views) + " views . " + util.ago(video.created_at);
-    if(image && video.thumbnail_url) image.src = video.thumbnail_url;
+    if(image){
+      setImageSourceWithFallback(image, buildAssetCandidates(video.thumbnail_url, "thumb"));
+    }
     if(duration) duration.textContent = util.duration(video.duration_seconds);
   }
 
@@ -1190,13 +1343,15 @@
       return;
     }
     const channel = getChannel(item.user_id);
+    const thumbCandidates = buildAssetCandidates(item.thumbnail_url, "thumb");
+    const thumbSrc = thumbCandidates[0] || "Images/no-image.jpg";
     const card = document.createElement("article");
     card.className = "mv-card";
     card.dataset.videoId = item.id;
     card.innerHTML =
       '<button type="button" class="mv-thumb-btn" data-open="1">' +
         '<div class="mv-thumb-wrap">' +
-          '<img src="' + util.esc(item.thumbnail_url || "Images/no-image.jpg") + '" alt="' + util.esc(item.title) + '">' +
+          '<img src="' + util.esc(thumbSrc) + '" alt="' + util.esc(item.title) + '">' +
           '<span class="mv-duration">' + util.esc(util.duration(item.duration_seconds)) + '</span>' +
           '<div class="mv-thumb-tools">' +
             '<button type="button" class="mv-thumb-tool" data-thumb-action="watch_later" aria-label="Watch later"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 11h5v2h-7V7h2z"></path></svg></button>' +
@@ -1223,6 +1378,8 @@
       '</div>';
 
     const menu = card.querySelector("[data-menu='1']");
+    const thumbImage = card.querySelector(".mv-thumb-wrap img");
+    setImageSourceWithFallback(thumbImage, thumbCandidates);
     card.querySelector("[data-open='1']").addEventListener("click", () => openVideo(item.id, true, true));
     card.querySelectorAll("[data-channel-open='1']").forEach(node => {
       node.addEventListener("click", (event) => {
@@ -1272,6 +1429,17 @@
     dom.grid.appendChild(card);
   }
 
+  async function hydrateCompatViews(rows){
+    if(!window.NOVA || typeof window.NOVA.getVideoViewCount !== "function") return;
+    const ids = util.uniq((Array.isArray(rows) ? rows : []).map(row => row?.id));
+    const batchSize = 4;
+    for(let index = 0; index < ids.length; index += batchSize){
+      const batch = ids.slice(index, index + batchSize);
+      await Promise.allSettled(batch.map(id => refreshCompatViewCount(id)));
+      await util.sleep(40);
+    }
+  }
+
   async function loadFeed(reset){
     if(state.feedLoading) return;
     if(reset){
@@ -1303,6 +1471,7 @@
       }
       await api.fetchProfiles(rows.map(row => row.user_id));
       rows.forEach(row => renderFeedCard(row));
+      hydrateCompatViews(rows).catch(() => {});
       state.feedOffset += rows.length;
       if(rows.length < PAGE_SIZE) state.feedDone = true;
       setFeedEmpty("");
@@ -1385,6 +1554,37 @@
     await refreshShareCount(video.id);
   }
 
+  function buildVideoSourceCandidates(videoUrl){
+    const list = buildAssetCandidates(videoUrl, "video");
+    if(!list.length){
+      const fallback = toAbsoluteAssetUrl(videoUrl);
+      if(fallback) list.push(fallback);
+    }
+    return list;
+  }
+
+  function applyPlayerSource(source){
+    const src = util.safe(source);
+    if(!src) return false;
+    dom.player.src = src;
+    try{ dom.player.load(); }catch(_){ }
+    return true;
+  }
+
+  function tryNextPlayerSource(){
+    const sources = Array.isArray(state.playerSources) ? state.playerSources : [];
+    let nextIndex = Math.max(0, util.num(state.playerSourceIndex)) + 1;
+    while(nextIndex < sources.length){
+      const nextSrc = util.safe(sources[nextIndex]);
+      state.playerSourceIndex = nextIndex;
+      if(nextSrc && applyPlayerSource(nextSrc)){
+        return true;
+      }
+      nextIndex += 1;
+    }
+    return false;
+  }
+
   async function openVideo(videoId, pushState, autoplay){
     const id = util.safe(videoId);
     if(!id) return;
@@ -1406,15 +1606,22 @@
     await api.fetchProfiles([video.user_id]);
     const channel = getChannel(video.user_id);
 
-    const posterUrl = util.safe(video.thumbnail_url) || "Images/no-image.jpg";
+    const posterCandidates = buildAssetCandidates(video.thumbnail_url, "thumb");
+    const posterUrl = posterCandidates[0] || "Images/no-image.jpg";
+    const sourceCandidates = buildVideoSourceCandidates(video.video_url);
+    const initialSource = sourceCandidates[0] || "";
+    state.playerSources = sourceCandidates;
+    state.playerSourceIndex = 0;
+    state.playerAutoplayPending = !!autoplay;
     if(dom.playerPoster){
-      dom.playerPoster.src = posterUrl;
+      setImageSourceWithFallback(dom.playerPoster, posterCandidates);
       dom.playerPoster.alt = util.safe(video.title) || "Video thumbnail";
     }
     setPlayerLoading(true, true);
     dom.player.poster = posterUrl;
-    dom.player.src = video.video_url;
-    try{ dom.player.load(); }catch(_){ }
+    if(!applyPlayerSource(initialSource)){
+      showToast("Video source missing", true);
+    }
     dom.watchTitle.textContent = video.title;
     dom.watchMeta.textContent = util.compact(video.views) + " views . " + util.ago(video.created_at);
     dom.watchAvatar.innerHTML = avatarHtml(channel);
@@ -1456,6 +1663,7 @@
       loadRecommendations(token)
     ]);
 
+    await refreshCompatViewCount(video.id);
     await recordView();
 
     if(autoplay){
@@ -2253,12 +2461,16 @@
       await api.fetchProfiles(list.map(item => item.user_id));
       list.forEach(item => {
         const channel = getChannel(item.user_id);
+        const thumbCandidates = buildAssetCandidates(item.thumbnail_url, "thumb");
+        const thumbSrc = thumbCandidates[0] || "Images/no-image.jpg";
         const button = document.createElement("button");
         button.type = "button";
         button.className = "mv-rec-item";
         button.innerHTML =
-          '<div class="mv-rec-thumb"><img src="' + util.esc(item.thumbnail_url || "Images/no-image.jpg") + '" alt="' + util.esc(item.title) + '"></div>' +
+          '<div class="mv-rec-thumb"><img src="' + util.esc(thumbSrc) + '" alt="' + util.esc(item.title) + '"></div>' +
           '<div class="mv-rec-body"><p class="mv-rec-title">' + util.esc(item.title) + '</p><p class="mv-rec-sub">' + util.esc(channel.name + " . " + util.compact(item.views) + " views") + '</p></div>';
+        const image = button.querySelector(".mv-rec-thumb img");
+        setImageSourceWithFallback(image, thumbCandidates);
         button.addEventListener("click", () => openVideo(item.id, true, true));
         dom.recommendList.appendChild(button);
       });
@@ -2538,7 +2750,7 @@
   }
 
   function toAbsoluteAssetUrl(value){
-    const raw = util.safe(value);
+    const raw = util.safe(value).replace(/\\/g, "/");
     if(!raw) return "";
     if(/^https?:\/\//i.test(raw) || raw.startsWith("data:")) return raw;
     try{
@@ -3071,8 +3283,15 @@
     dom.player.addEventListener("stalled", () => setPlayerLoading(true, util.num(dom.player.currentTime) < 0.2));
     dom.player.addEventListener("canplay", () => {
       if(dom.playerLoading) dom.playerLoading.classList.add("mv-hidden");
+      if(state.playerAutoplayPending){
+        state.playerAutoplayPending = false;
+        dom.player.play().catch(() => {
+          state.playerAutoplayPending = false;
+        });
+      }
     });
     dom.player.addEventListener("playing", () => {
+      state.playerAutoplayPending = false;
       setPlayerLoading(false, false);
       refreshPlayerOverlayState();
     });
@@ -3081,7 +3300,12 @@
     dom.player.addEventListener("ended", refreshPlayerOverlayState);
     dom.player.addEventListener("loadedmetadata", refreshPlayerOverlayState);
     dom.player.addEventListener("error", () => {
+      if(tryNextPlayerSource()){
+        setPlayerLoading(true, true);
+        return;
+      }
       setPlayerLoading(false, true);
+      showToast("Video cannot be played. Source unavailable.", true);
       refreshPlayerOverlayState();
     });
     if(dom.playerCenterToggle){
@@ -3272,4 +3496,3 @@
 
   init();
 })();
-
