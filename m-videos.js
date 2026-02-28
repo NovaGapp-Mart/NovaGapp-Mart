@@ -539,11 +539,6 @@
       push(absoluteRaw);
     }
 
-    const fileName = extractAssetFileName(raw);
-    if(fileName){
-      push(buildAssetProxyUrl(kind, fileName));
-    }
-
     if(kind === "thumb"){
       push("Images/no-image.jpg");
     }
