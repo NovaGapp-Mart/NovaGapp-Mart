@@ -57,6 +57,13 @@
             <img id="mvPlayerPoster" class="mv-player-poster" src="Images/no-image.jpg" alt="Video thumbnail">
             <div class="mv-player-loading" id="mvPlayerLoading"><span></span></div>
             <video id="mvPlayer" class="mv-player" controls playsinline></video>
+            <div class="mv-player-overlay" id="mvPlayerOverlay" aria-hidden="true">
+              <button type="button" class="mv-player-nav-btn" id="mvPlayerPrev" aria-label="Play previous video">&#10094;</button>
+              <button type="button" class="mv-player-main-btn" id="mvPlayerCenterToggle" aria-label="Play video">
+                <span id="mvPlayerCenterIcon">&#9658;</span>
+              </button>
+              <button type="button" class="mv-player-nav-btn" id="mvPlayerNext" aria-label="Play next video">&#10095;</button>
+            </div>
           </div>
           <div class="mv-player-tools">
             <button type="button" class="mv-action-btn mv-seek-btn" id="mvSeekBack"><< 10s</button>
@@ -124,7 +131,7 @@
               <label class="mv-label">Video File</label>
               <div class="mv-drop" id="mvVideoDrop">
                 <strong>Drag and drop video here</strong><br>
-                <small id="mvVideoFileName">Supported: MP4, WEBM, MOV, MKV (max 2GB)</small>
+                <small id="mvVideoFileName">Supported: MP4, WEBM, MOV, MKV (max 4GB)</small>
               </div>
               <input type="file" id="mvVideoFileInput" accept="video/mp4,video/webm,video/quicktime,video/x-matroska,video/ogg,video/mpeg" hidden>
             </div>

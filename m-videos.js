@@ -5,10 +5,10 @@
   const SEARCH_HISTORY_KEY = "mv_search_history_v1";
   const WATCH_LATER_KEY = "mv_watch_later_v1";
   const QUEUE_KEY = "mv_queue_v1";
-  const MAX_VIDEO_SIZE = 2 * 1024 * 1024 * 1024;
+  const MAX_VIDEO_SIZE = 4 * 1024 * 1024 * 1024;
   const MAX_THUMB_SIZE = 8 * 1024 * 1024;
   const UPLOAD_TIMEOUT_MS = 30 * 60 * 1000;
-  const DIRECT_TO_SERVER_UPLOAD_THRESHOLD = 45 * 1024 * 1024;
+  const DIRECT_TO_SERVER_UPLOAD_THRESHOLD = 8 * 1024 * 1024;
   const SERVER_VIDEO_UPLOAD_TIMEOUT_MS = 45 * 60 * 1000;
   const VIDEO_SELECT = "id,user_id,title,description,video_url,thumbnail_url,views,likes_count,dislikes_count,monetized,created_at,category,tags,duration_seconds";
   const VIDEO_MIME_TYPES = new Set(["video/mp4","video/webm","video/quicktime","video/x-matroska","video/ogg","video/mpeg"]);
@@ -100,6 +100,11 @@
     player:document.getElementById("mvPlayer"),
     playerPoster:document.getElementById("mvPlayerPoster"),
     playerLoading:document.getElementById("mvPlayerLoading"),
+    playerOverlay:document.getElementById("mvPlayerOverlay"),
+    playerPrev:document.getElementById("mvPlayerPrev"),
+    playerCenterToggle:document.getElementById("mvPlayerCenterToggle"),
+    playerCenterIcon:document.getElementById("mvPlayerCenterIcon"),
+    playerNext:document.getElementById("mvPlayerNext"),
     seekBack:document.getElementById("mvSeekBack"),
     seekForward:document.getElementById("mvSeekForward"),
     watchTitle:document.getElementById("mvWatchTitle"),
@@ -222,6 +227,73 @@
     const posterVisible = !!keepPoster;
     if(dom.playerLoading) dom.playerLoading.classList.toggle("mv-hidden", !loading);
     if(dom.playerPoster) dom.playerPoster.classList.toggle("mv-hidden", !posterVisible);
+  }
+
+  function getWatchSequenceIds(){
+    const ids = [];
+    const seen = new Set();
+    const push = (value) => {
+      const id = util.safe(value);
+      if(!id || seen.has(id)) return;
+      seen.add(id);
+      ids.push(id);
+    };
+
+    if(dom.grid){
+      dom.grid.querySelectorAll(".mv-card[data-video-id]").forEach(card => {
+        push(card.getAttribute("data-video-id"));
+      });
+    }
+    store.read(QUEUE_KEY, []).forEach(push);
+    Array.from(state.videos.values())
+      .sort((a, b) => (Date.parse(util.safe(b?.created_at)) || 0) - (Date.parse(util.safe(a?.created_at)) || 0))
+      .forEach(item => push(item?.id));
+    push(state.activeVideoId);
+    return ids;
+  }
+
+  function getAdjacentVideoId(direction){
+    const step = direction < 0 ? -1 : 1;
+    const order = getWatchSequenceIds();
+    if(order.length < 2) return "";
+    const activeId = util.safe(state.activeVideoId);
+    const currentIndex = Math.max(0, order.indexOf(activeId));
+    const nextIndex = (currentIndex + step + order.length) % order.length;
+    if(nextIndex === currentIndex) return "";
+    return util.safe(order[nextIndex]);
+  }
+
+  function setPlayerOverlayVisible(show){
+    if(!dom.playerOverlay) return;
+    const visible = !!show;
+    dom.playerOverlay.classList.toggle("show", visible);
+    dom.playerOverlay.setAttribute("aria-hidden", visible ? "false" : "true");
+  }
+
+  function refreshPlayerOverlayState(){
+    const paused = !!dom.player && (!!dom.player.paused || !!dom.player.ended);
+    if(dom.playerCenterIcon){
+      dom.playerCenterIcon.textContent = paused ? "\u25B6" : "\u275A\u275A";
+    }
+    if(dom.playerCenterToggle){
+      dom.playerCenterToggle.setAttribute("aria-label", paused ? "Play video" : "Pause video");
+    }
+    if(dom.playerPrev){
+      dom.playerPrev.disabled = !getAdjacentVideoId(-1);
+    }
+    if(dom.playerNext){
+      dom.playerNext.disabled = !getAdjacentVideoId(1);
+    }
+    setPlayerOverlayVisible(paused && state.panel === "watch");
+  }
+
+  async function openAdjacentVideo(direction){
+    const targetId = getAdjacentVideoId(direction);
+    if(!targetId){
+      showToast(direction < 0 ? "No previous video found." : "No next video found.", true);
+      return;
+    }
+    await openVideo(targetId, true, true);
   }
 
   function errorCode(err){
@@ -1366,6 +1438,7 @@
     setCommentsOpen(false, false);
     setSaveButton();
     setPanel("watch", false);
+    refreshPlayerOverlayState();
 
     if(pushState){
       const url = new URL(location.href);
@@ -1388,6 +1461,7 @@
     if(autoplay){
       try{ await dom.player.play(); }catch(_){ }
     }
+    refreshPlayerOverlayState();
   }
 
   async function loadReactionState(token){
@@ -2379,7 +2453,7 @@
     state.uploadVideoFile = null;
     state.uploadThumbFile = null;
     dom.uploadForm.reset();
-    dom.videoFileName.textContent = "Supported: MP4, WEBM, MOV, MKV (max 2GB)";
+    dom.videoFileName.textContent = "Supported: MP4, WEBM, MOV, MKV (max 4GB)";
     dom.thumbFileName.textContent = "Supported: JPG, PNG, WEBP (max 8MB)";
     dom.thumbPreviewWrap.classList.add("mv-hidden");
     dom.thumbPreview.removeAttribute("src");
@@ -2389,7 +2463,7 @@
 
   function validateVideo(file){
     if(!file) return "Video file is required.";
-    if(file.size > MAX_VIDEO_SIZE) return "Video file exceeds 2GB.";
+    if(file.size > MAX_VIDEO_SIZE) return "Video file exceeds 4GB.";
     if(file.type && !VIDEO_MIME_TYPES.has(file.type)) return "Unsupported video format.";
     return "";
   }
@@ -2711,6 +2785,25 @@
     }
   }
 
+  async function refreshCompatViewCount(videoId){
+    const id = util.safe(videoId);
+    if(!id || !window.NOVA || typeof window.NOVA.getVideoViewCount !== "function") return;
+    try{
+      const compatViews = Math.max(0, util.num(await window.NOVA.getVideoViewCount(id)));
+      const video = state.videos.get(id);
+      if(!video) return;
+      const nextViews = Math.max(Math.max(0, util.num(video.views)), compatViews);
+      if(nextViews !== util.num(video.views)){
+        video.views = nextViews;
+        state.videos.set(id, video);
+        updateFeedCard(id);
+      }
+      if(state.activeVideoId === id){
+        dom.watchMeta.textContent = util.compact(nextViews) + " views . " + util.ago(video.created_at);
+      }
+    }catch(_){ }
+  }
+
   function setPanel(panel, pushState){
     const next = panel in dom.panels ? panel : "feed";
     state.panel = next;
@@ -2727,6 +2820,7 @@
 
     if(next === "dashboard") loadDashboard();
     if(next === "upload") refreshMonetizationStatus().catch(() => {});
+    refreshPlayerOverlayState();
   }
 
   function setupRealtime(){
@@ -2765,6 +2859,25 @@
       });
     }
 
+    channel.on("postgres_changes", { event:"*", schema:"public", table:"reactions" }, (payload) => {
+      const targetType = util.safe(payload.new?.target_type || payload.old?.target_type).toLowerCase();
+      const id = util.safe(payload.new?.target_id || payload.old?.target_id);
+      if(targetType !== "video" || !id) return;
+      schedule("compat_reaction_" + id, async () => {
+        const video = state.videos.get(id);
+        if(video){
+          const counts = await getReactionCountsCompat(id);
+          video.likes_count = Math.max(0, util.num(counts.likes));
+          video.dislikes_count = Math.max(0, util.num(counts.dislikes));
+          state.videos.set(id, video);
+          updateFeedCard(id);
+        }
+        if(id === state.activeVideoId){
+          await loadReactionState(state.watchToken);
+        }
+      }, 140);
+    });
+
     if(state.feature.videoComments !== false){
       channel.on("postgres_changes", { event:"*", schema:"public", table:"video_comments" }, (payload) => {
         const id = util.safe(payload.new?.video_id || payload.old?.video_id);
@@ -2772,6 +2885,20 @@
         schedule("comments", () => loadComments(state.watchToken), 140);
       });
     }
+
+    channel.on("postgres_changes", { event:"*", schema:"public", table:"comments" }, (payload) => {
+      const type = util.safe(payload.new?.target_type || payload.old?.target_type || payload.new?.type || payload.old?.type).toLowerCase();
+      const id = util.safe(payload.new?.target_id || payload.old?.target_id || payload.new?.post_id || payload.old?.post_id);
+      if(type !== "video" || !id) return;
+      schedule("compat_comments_" + id, async () => {
+        await refreshCompatViewCount(id);
+        if(state.activeVideoId !== id) return;
+        await Promise.allSettled([
+          loadComments(state.watchToken),
+          refreshShareCount(id)
+        ]);
+      }, 180);
+    });
 
     if(state.feature.channelSubscribers !== false){
       channel.on("postgres_changes", { event:"*", schema:"public", table:"channel_subscribers" }, (payload) => {
@@ -2930,6 +3057,7 @@
     dom.watchBack.addEventListener("click", () => {
       setPanel("feed", true);
       try{ dom.player.pause(); }catch(_){ }
+      refreshPlayerOverlayState();
     });
     [dom.watchAvatar, dom.watchChannelName, dom.watchChannelSub].forEach(node => {
       if(!node) return;
@@ -2944,8 +3072,38 @@
     dom.player.addEventListener("canplay", () => {
       if(dom.playerLoading) dom.playerLoading.classList.add("mv-hidden");
     });
-    dom.player.addEventListener("playing", () => setPlayerLoading(false, false));
-    dom.player.addEventListener("error", () => setPlayerLoading(false, true));
+    dom.player.addEventListener("playing", () => {
+      setPlayerLoading(false, false);
+      refreshPlayerOverlayState();
+    });
+    dom.player.addEventListener("play", refreshPlayerOverlayState);
+    dom.player.addEventListener("pause", refreshPlayerOverlayState);
+    dom.player.addEventListener("ended", refreshPlayerOverlayState);
+    dom.player.addEventListener("loadedmetadata", refreshPlayerOverlayState);
+    dom.player.addEventListener("error", () => {
+      setPlayerLoading(false, true);
+      refreshPlayerOverlayState();
+    });
+    if(dom.playerCenterToggle){
+      dom.playerCenterToggle.addEventListener("click", async () => {
+        if(dom.player.paused || dom.player.ended){
+          try{ await dom.player.play(); }catch(_){ }
+        }else{
+          dom.player.pause();
+        }
+        refreshPlayerOverlayState();
+      });
+    }
+    if(dom.playerPrev){
+      dom.playerPrev.addEventListener("click", () => {
+        openAdjacentVideo(-1).catch(() => {});
+      });
+    }
+    if(dom.playerNext){
+      dom.playerNext.addEventListener("click", () => {
+        openAdjacentVideo(1).catch(() => {});
+      });
+    }
     if(dom.seekBack){
       dom.seekBack.addEventListener("click", () => {
         const current = Math.max(0, util.num(dom.player.currentTime));

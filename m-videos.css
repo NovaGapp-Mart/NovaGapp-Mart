@@ -474,6 +474,58 @@ body.mv-body{
   border-top-color:#fff;
   animation:mv-spin .85s linear infinite;
 }
+.mv-player-overlay{
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:14px;
+  padding:0 14px;
+  z-index:5;
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .16s ease;
+  background:linear-gradient(90deg, rgba(0,0,0,.4) 0%, rgba(0,0,0,.06) 26%, rgba(0,0,0,.06) 74%, rgba(0,0,0,.4) 100%);
+}
+.mv-player-overlay.show{
+  opacity:1;
+  pointer-events:auto;
+}
+.mv-player-nav-btn,
+.mv-player-main-btn{
+  border:none;
+  color:#fff;
+  cursor:pointer;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  background:rgba(0,0,0,.58);
+  transition:transform .12s ease, background .12s ease, opacity .12s ease;
+}
+.mv-player-nav-btn{
+  width:44px;
+  height:44px;
+  border-radius:999px;
+  font-size:26px;
+  line-height:1;
+}
+.mv-player-main-btn{
+  width:62px;
+  height:62px;
+  border-radius:999px;
+  font-size:30px;
+  line-height:1;
+}
+.mv-player-nav-btn:hover:not(:disabled),
+.mv-player-main-btn:hover{
+  transform:scale(1.05);
+  background:rgba(0,0,0,.72);
+}
+.mv-player-nav-btn:disabled{
+  opacity:.38;
+  cursor:not-allowed;
+}
 @keyframes mv-spin{
   to{
     transform:rotate(360deg);

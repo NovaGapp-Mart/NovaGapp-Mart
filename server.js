@@ -52,7 +52,7 @@ const MANUAL_DIR = path.join(UPLOADS_DIR, "manual-requests");
 const MANUAL_JSON_PATH = path.join(MANUAL_DIR, "requests.json");
 const VIDEO_ASSET_UPLOAD_DIR = path.join(UPLOADS_DIR, "videos");
 const VIDEO_ASSET_THUMB_DIR = path.join(UPLOADS_DIR, "video-thumbs");
-const VIDEO_ASSET_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+const VIDEO_ASSET_MAX_BYTES = 4 * 1024 * 1024 * 1024;
 const VIDEO_ASSET_MAX_THUMB_BYTES = 20 * 1024 * 1024;
 const VIDEO_ASSET_ALLOWED_VIDEO_MIME = new Set([
   "video/mp4",
@@ -462,7 +462,7 @@ app.post("/api/videos/upload-assets",
         return;
       }
       if(err.code === "LIMIT_FILE_SIZE"){
-        return res.status(413).json({ ok:false, error:"video_asset_too_large", message:"Video file exceeds 2GB limit." });
+        return res.status(413).json({ ok:false, error:"video_asset_too_large", message:"Video file exceeds 4GB limit." });
       }
       return res.status(400).json({ ok:false, error:"video_asset_upload_invalid", message:compactText(err.message, 220) });
     });
@@ -490,7 +490,7 @@ app.post("/api/videos/upload-assets",
       }
       if(Number(videoFile.size || 0) > VIDEO_ASSET_MAX_BYTES){
         await cleanupUploadedFiles();
-        return res.status(413).json({ ok:false, error:"video_asset_too_large", message:"Video file exceeds 2GB limit." });
+        return res.status(413).json({ ok:false, error:"video_asset_too_large", message:"Video file exceeds 4GB limit." });
       }
       if(thumbFile && Number(thumbFile.size || 0) > VIDEO_ASSET_MAX_THUMB_BYTES){
         await cleanupUploadedFiles();
