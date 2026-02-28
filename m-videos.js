@@ -2464,7 +2464,7 @@
   function explainUploadError(err){
     const text = util.safe(err?.message || err?.error_description || err?.details).toLowerCase();
     if(text.includes("maximum allowed size") || text.includes("object exceeded") || text.includes("payload too large")){
-      return "Video size is larger than storage bucket limit. Increase long_videos bucket size limit in Supabase.";
+      return "Upload blocked by Supabase file size limit. Check Storage Settings global file size limit (Free plan max is 50MB).";
     }
     if(text.includes("upload_timeout") || text.includes("timeout")){
       return "Upload timed out. Check internet speed and retry with a smaller video.";

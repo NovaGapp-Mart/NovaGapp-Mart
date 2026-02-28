@@ -18,6 +18,7 @@
   --reel-nav-space:calc(var(--reel-nav-base) + env(safe-area-inset-bottom, 0px) + var(--nova-nav-lift, 0px));
   --reel-stage-height:calc(100dvh - var(--reel-nav-space));
 }
+html,body{overscroll-behavior-y:none}
 body{background:#000;color:#fff;height:100dvh;overflow:hidden}
 
 .reel-search-shell{
@@ -105,6 +106,8 @@ body{background:#000;color:#fff;height:100dvh;overflow:hidden}
   width:100%;
   position:relative;
   overflow-y:auto;
+  overscroll-behavior-y:contain;
+  -webkit-overflow-scrolling:touch;
   scroll-snap-type:y mandatory;
 }
 .reel{
@@ -495,6 +498,7 @@ const reelSearchStatus = document.getElementById("reelSearchStatus");
 let page = 0;
 let loading = false;
 let done = false;
+let feedLoopCount = 0;
 const PAGE_SIZE = 4;
 const SEARCH_DELAY_MS = 2300;
 const SEARCH_FETCH_LIMIT = 180;
@@ -732,6 +736,7 @@ function resetFeedCursor(){
   loading = false;
   done = false;
   focusApplied = false;
+  feedLoopCount = 0;
 }
 
 function shuffleItems(items){
@@ -1338,8 +1343,8 @@ async function loadMore(){
     if(!searchMode && renderedIds.size){
       page = 0;
       done = false;
+      feedLoopCount += 1;
       boostedOwnReelIds.clear();
-      renderedIds.clear();
       loading = false;
       await sleep(40);
       loadMore();
@@ -1354,17 +1359,20 @@ async function loadMore(){
 
   const currentUser = await currentUserPromise;
   const orderedBatch = orderReelBatchForFeed(data, currentUser?.id || "", `feed_page_${page}`);
-  orderedBatch.forEach(item => renderReel(item));
+  const allowDuplicate = feedLoopCount > 0;
+  orderedBatch.forEach(item => renderReel(item, { allowDuplicate }));
   page += 1;
   loading = false;
 }
 
 async function renderReel(item, options){
   if(!item || !item.id) return;
-  if(renderedIds.has(item.id)) return;
-  renderedIds.add(item.id);
-
   const opts = options || {};
+  const allowDuplicate = !!opts.allowDuplicate;
+  if(!allowDuplicate){
+    if(renderedIds.has(item.id)) return;
+    renderedIds.add(item.id);
+  }
   const prepend = !!opts.prepend;
 
   const creator = await getCreatorInfo(item.user_id);

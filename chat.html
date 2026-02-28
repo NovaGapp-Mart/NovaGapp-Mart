@@ -517,7 +517,7 @@ let callSignalPollTimer = null;
 let callSignalSeenIds = new Set();
 let autoCallAnswerAttempted = false;
 const CALL_SIGNAL_POLL_MS = 2000;
-const CALL_SIGNAL_REMOTE_TYPES = new Set(["call-offer","call-answer","call-end","call-decline","call-busy"]);
+const CALL_SIGNAL_REMOTE_TYPES = new Set(["call-offer","call-answer","call-end","call-decline","call-busy","ice"]);
 const selectCols = "id,sender_id,receiver_id,message,media_url,media_type,created_at";
 const CHAT_READ_EVENT_PREFIX = "__NOVA_READ__:";
 let otherSeenAt = "";
@@ -1270,6 +1270,17 @@ function normalizeCallSignalPayload(payload){
   const to = String(row.to || row.to_user_id || "").trim();
   const from = String(row.from || row.from_user_id || "").trim();
   if(!type || !callId || !to || !from) return null;
+  const rawCandidate = row.candidate && typeof row.candidate === "object" ? row.candidate : null;
+  const candidate = rawCandidate
+    ? {
+      candidate: String(rawCandidate.candidate || "").slice(0, 6000),
+      sdpMid: String(rawCandidate.sdpMid || "").slice(0, 160),
+      sdpMLineIndex: Number.isFinite(Number(rawCandidate.sdpMLineIndex))
+        ? Number(rawCandidate.sdpMLineIndex)
+        : null,
+      usernameFragment: String(rawCandidate.usernameFragment || "").slice(0, 160)
+    }
+    : null;
   return {
     type,
     callId,
@@ -1279,7 +1290,8 @@ function normalizeCallSignalPayload(payload){
     reason: String(row.reason || "").trim().slice(0, 120),
     sdp: row.sdp && typeof row.sdp === "object"
       ? { type: String(row.sdp.type || "").slice(0, 40), sdp: String(row.sdp.sdp || "").slice(0, 18000) }
-      : null
+      : null,
+    candidate
   };
 }
 
@@ -1294,9 +1306,10 @@ async function sendCallSignalRemote(payload){
     type: clean.type,
     media_type: clean.mediaType,
     reason: clean.reason,
-    sdp: clean.sdp
+    sdp: clean.sdp,
+    candidate: clean.candidate
   };
-  const ttlSec = clean.type === "call-offer" ? 90 : 120;
+  const ttlSec = clean.type === "call-offer" ? 90 : (clean.type === "ice" ? 30 : 120);
   const bases = buildAutomationApiBases();
   for(const base of bases){
     try{

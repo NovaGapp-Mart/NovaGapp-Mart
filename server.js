@@ -64,6 +64,11 @@ const ADMIN_DM_EMAIL = String(process.env.TRYON_ADMIN_EMAIL || "prashikbhalerao0
 const ADMIN_DM_WEBHOOK_URL = String(process.env.TRYON_ADMIN_DM_WEBHOOK || "").trim();
 const RESEND_API_KEY = String(process.env.RESEND_API_KEY || "").trim();
 const RESEND_FROM_EMAIL = String(process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev").trim();
+const FIREBASE_SERVER_KEY = String(
+  process.env.FIREBASE_SERVER_KEY ||
+  process.env.FCM_SERVER_KEY ||
+  ""
+).trim();
 
 const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || "").trim();
 
@@ -94,15 +99,197 @@ const PUBLIC_RAZORPAY_KEY_ID = String(
   process.env.RAZORPAY_API_KEY ||
   ""
 ).trim();
+const PUBLIC_FIREBASE_API_KEY = String(process.env.FIREBASE_API_KEY || "").trim();
+const PUBLIC_FIREBASE_AUTH_DOMAIN = String(process.env.FIREBASE_AUTH_DOMAIN || "").trim();
+const PUBLIC_FIREBASE_PROJECT_ID = String(process.env.FIREBASE_PROJECT_ID || "").trim();
+const PUBLIC_FIREBASE_STORAGE_BUCKET = String(process.env.FIREBASE_STORAGE_BUCKET || "").trim();
+const PUBLIC_FIREBASE_MESSAGING_SENDER_ID = String(process.env.FIREBASE_MESSAGING_SENDER_ID || "").trim();
+const PUBLIC_FIREBASE_APP_ID = String(process.env.FIREBASE_APP_ID || "").trim();
+const PUBLIC_FIREBASE_MEASUREMENT_ID = String(process.env.FIREBASE_MEASUREMENT_ID || "").trim();
+const PUBLIC_FIREBASE_VAPID_KEY = String(process.env.FIREBASE_VAPID_KEY || "").trim();
 
 app.get("/api/public/config", (req, res) => {
   res.setHeader("Cache-Control", "public, max-age=120");
   res.json({
     supabaseUrl: PUBLIC_SUPABASE_URL,
     supabaseAnonKey: PUBLIC_SUPABASE_ANON_KEY,
-    razorpayKeyId: PUBLIC_RAZORPAY_KEY_ID
+    razorpayKeyId: PUBLIC_RAZORPAY_KEY_ID,
+    firebaseApiKey: PUBLIC_FIREBASE_API_KEY,
+    firebaseAuthDomain: PUBLIC_FIREBASE_AUTH_DOMAIN,
+    firebaseProjectId: PUBLIC_FIREBASE_PROJECT_ID,
+    firebaseStorageBucket: PUBLIC_FIREBASE_STORAGE_BUCKET,
+    firebaseMessagingSenderId: PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    firebaseAppId: PUBLIC_FIREBASE_APP_ID,
+    firebaseMeasurementId: PUBLIC_FIREBASE_MEASUREMENT_ID,
+    firebaseVapidKey: PUBLIC_FIREBASE_VAPID_KEY
   });
 });
+
+const AUTOMATION_TRACK_LOG_PATH = path.join(AUTOMATION_EVENTS_DIR, "automation-track.ndjson");
+const CALL_SIGNAL_TYPES = new Set(["call-offer", "call-answer", "call-end", "call-decline", "call-busy", "ice"]);
+const CALL_SIGNAL_MAX_ITEMS = 5000;
+const CALL_SIGNAL_DEFAULT_TTL_SEC = 120;
+const CALL_SIGNAL_MIN_TTL_SEC = 15;
+const CALL_SIGNAL_MAX_TTL_SEC = 180;
+const PUSH_TOKEN_PER_USER_LIMIT = 30;
+const callSignalStore = [];
+const pushTokenStore = new Map();
+
+function clampInt(value, min, max, fallback){
+  const next = Math.floor(Number(value));
+  if(!Number.isFinite(next)){
+    return Math.max(min, Math.min(max, Number(fallback) || min));
+  }
+  return Math.max(min, Math.min(max, next));
+}
+
+function sanitizeCallUserId(value){
+  return String(value || "").trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 120);
+}
+
+function sanitizeCallId(value){
+  return String(value || "").trim().replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 180);
+}
+
+function sanitizeCallType(value){
+  return String(value || "").trim().toLowerCase().replace(/[^a-z-]/g, "").slice(0, 40);
+}
+
+function sanitizeCallReason(value){
+  return compactText(value, 120);
+}
+
+function sanitizeCallMediaType(value){
+  return String(value || "").trim().toLowerCase() === "video" ? "video" : "audio";
+}
+
+function normalizeSdpPayload(raw){
+  if(!raw || typeof raw !== "object") return null;
+  const type = String(raw.type || "").trim().toLowerCase().replace(/[^a-z]/g, "").slice(0, 24);
+  const sdp = String(raw.sdp || "").slice(0, 18000);
+  if(!type || !sdp) return null;
+  return { type, sdp };
+}
+
+function normalizeIceCandidatePayload(raw){
+  if(!raw || typeof raw !== "object") return null;
+  const candidate = String(raw.candidate || "").slice(0, 6000);
+  if(!candidate) return null;
+  const sdpMid = String(raw.sdpMid || "").slice(0, 160);
+  const sdpMLineIndex = Number.isFinite(Number(raw.sdpMLineIndex))
+    ? Number(raw.sdpMLineIndex)
+    : null;
+  const usernameFragment = String(raw.usernameFragment || "").slice(0, 160);
+  return {
+    candidate,
+    sdpMid,
+    sdpMLineIndex,
+    usernameFragment
+  };
+}
+
+function normalizeCallSignalPayload(raw){
+  const body = raw && typeof raw === "object" ? raw : {};
+  const type = sanitizeCallType(body.type);
+  if(!CALL_SIGNAL_TYPES.has(type)) return null;
+  const toUserId = sanitizeCallUserId(body.to_user_id || body.to);
+  const fromUserId = sanitizeCallUserId(body.from_user_id || body.from);
+  const callId = sanitizeCallId(body.call_id || body.callId);
+  if(!type || !toUserId || !fromUserId || !callId) return null;
+
+  const mediaType = sanitizeCallMediaType(body.media_type || body.mediaType);
+  const reason = sanitizeCallReason(body.reason);
+  const defaultTtl = type === "call-offer" ? 90 : (type === "ice" ? 30 : CALL_SIGNAL_DEFAULT_TTL_SEC);
+  const ttlSec = clampInt(body.ttl_sec, CALL_SIGNAL_MIN_TTL_SEC, CALL_SIGNAL_MAX_TTL_SEC, defaultTtl);
+  const sdp = normalizeSdpPayload(body.sdp);
+  const candidate = normalizeIceCandidatePayload(body.candidate);
+
+  if((type === "call-offer" || type === "call-answer") && !sdp){
+    return null;
+  }
+  if(type === "ice" && !candidate){
+    return null;
+  }
+
+  return {
+    type,
+    to_user_id: toUserId,
+    from_user_id: fromUserId,
+    call_id: callId,
+    media_type: mediaType,
+    reason,
+    sdp,
+    candidate,
+    ttl_sec: ttlSec
+  };
+}
+
+function pruneCallSignalStore(nowMs){
+  const now = Number(nowMs) || Date.now();
+  for(let i = callSignalStore.length - 1; i >= 0; i -= 1){
+    const row = callSignalStore[i];
+    const createdMs = Date.parse(String(row?.created_at || ""));
+    const expiresMs = Date.parse(String(row?.expires_at || ""));
+    const expired = Number.isFinite(expiresMs) && expiresMs <= now;
+    const stale = Number.isFinite(createdMs) && createdMs < (now - (CALL_SIGNAL_MAX_TTL_SEC + 120) * 1000);
+    if(expired || stale){
+      callSignalStore.splice(i, 1);
+    }
+  }
+  if(callSignalStore.length > CALL_SIGNAL_MAX_ITEMS){
+    callSignalStore.splice(0, callSignalStore.length - CALL_SIGNAL_MAX_ITEMS);
+  }
+}
+
+function sanitizePushToken(value){
+  return String(value || "").trim().slice(0, 2048);
+}
+
+function sanitizePushPlatform(value){
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 24) || "web";
+}
+
+function normalizePushDataPayload(data){
+  if(!data || typeof data !== "object") return {};
+  const out = {};
+  Object.entries(data).slice(0, 24).forEach(([key, value]) => {
+    const safeKey = String(key || "").trim().replace(/[^a-zA-Z0-9_.:-]/g, "").slice(0, 80);
+    if(!safeKey) return;
+    out[safeKey] = String(value === undefined || value === null ? "" : value).slice(0, 500);
+  });
+  return out;
+}
+
+async function sendFcmLegacyMessage(token, payload){
+  if(!FIREBASE_SERVER_KEY){
+    return { ok:false, invalid:false, error:"firebase_server_key_missing" };
+  }
+  const res = await fetch("https://fcm.googleapis.com/fcm/send", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `key=${FIREBASE_SERVER_KEY}`
+    },
+    body: JSON.stringify({
+      to: token,
+      priority: "high",
+      notification: {
+        title: payload.title,
+        body: payload.body
+      },
+      data: payload.data
+    })
+  });
+  const body = await res.json().catch(() => ({}));
+  if(!res.ok){
+    return { ok:false, invalid:false, error:`fcm_http_${res.status}` };
+  }
+  const result = Array.isArray(body?.results) ? body.results[0] : null;
+  const errCode = String(result?.error || "").trim();
+  const invalid = errCode === "NotRegistered" || errCode === "InvalidRegistration" || errCode === "MismatchSenderId";
+  const ok = Number(body?.success || 0) > 0 || !!result?.message_id;
+  return { ok, invalid, error: errCode || "" };
+}
 
 function compactText(value, maxLen){
   const cap = Math.max(1, Number(maxLen) || 512);
@@ -179,6 +366,245 @@ app.post("/api/media/events/upload", async (req, res) => {
   }catch(err){
     console.error("media_event_upload_error:", err?.stack || err);
     return res.status(500).json({ ok:false, error:"media_event_upload_failed" });
+  }
+});
+
+app.options("/api/automation/track", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.sendStatus(204);
+});
+
+app.post("/api/automation/track", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  try{
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const record = {
+      user_id: compactText(body.user_id || body.userId, 128),
+      step: compactText(body.step, 80).toLowerCase(),
+      meta: body.meta && typeof body.meta === "object" ? body.meta : {},
+      ts: new Date().toISOString()
+    };
+    await appendNdjsonLine(AUTOMATION_TRACK_LOG_PATH, record);
+    return res.json({ ok:true, tracked:true });
+  }catch(err){
+    console.error("automation_track_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"automation_track_failed" });
+  }
+});
+
+app.options("/api/push/register", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.sendStatus(204);
+});
+
+app.post("/api/push/register", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  try{
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const userId = sanitizeCallUserId(body.user_id || body.userId);
+    const token = sanitizePushToken(body.token);
+    if(!userId || !token){
+      return res.status(400).json({ ok:false, error:"user_id_and_token_required" });
+    }
+
+    const platform = sanitizePushPlatform(body.platform || "web");
+    const userAgent = compactText(body.user_agent || body.userAgent, 300);
+    const updatedAt = new Date().toISOString();
+    const tokenMap = pushTokenStore.get(userId) || new Map();
+    tokenMap.set(token, {
+      token,
+      platform,
+      user_agent: userAgent,
+      updated_at: updatedAt
+    });
+
+    if(tokenMap.size > PUSH_TOKEN_PER_USER_LIMIT){
+      const rows = Array.from(tokenMap.values()).sort((a, b) => Date.parse(a.updated_at || "") - Date.parse(b.updated_at || ""));
+      while(rows.length > PUSH_TOKEN_PER_USER_LIMIT){
+        const oldest = rows.shift();
+        if(oldest && oldest.token){
+          tokenMap.delete(oldest.token);
+        }
+      }
+    }
+
+    pushTokenStore.set(userId, tokenMap);
+    return res.json({
+      ok:true,
+      registered:true,
+      tokens: tokenMap.size
+    });
+  }catch(err){
+    console.error("push_register_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"push_register_failed" });
+  }
+});
+
+app.options("/api/push/notify", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.sendStatus(204);
+});
+
+app.post("/api/push/notify", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  try{
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const toUserId = sanitizeCallUserId(body.to_user_id || body.toUserId);
+    const title = compactText(body.title, 120);
+    const messageBody = compactText(body.body, 300);
+    const data = normalizePushDataPayload(body.data);
+    if(!toUserId || !title){
+      return res.status(400).json({ ok:false, error:"to_user_id_and_title_required" });
+    }
+
+    const tokenMap = pushTokenStore.get(toUserId);
+    const tokenRows = tokenMap ? Array.from(tokenMap.values()) : [];
+    if(!tokenRows.length){
+      return res.json({ ok:true, delivered:0, attempted:0, reason:"no_registered_tokens" });
+    }
+    if(!FIREBASE_SERVER_KEY){
+      return res.status(503).json({ ok:false, error:"firebase_server_key_missing" });
+    }
+
+    let delivered = 0;
+    const invalidTokens = [];
+    for(const row of tokenRows){
+      const token = sanitizePushToken(row?.token);
+      if(!token) continue;
+      try{
+        const sent = await sendFcmLegacyMessage(token, { title, body:messageBody, data });
+        if(sent.ok){
+          delivered += 1;
+        }
+        if(sent.invalid){
+          invalidTokens.push(token);
+        }
+      }catch(_){ }
+    }
+
+    if(invalidTokens.length && tokenMap){
+      invalidTokens.forEach(token => tokenMap.delete(token));
+      if(tokenMap.size){
+        pushTokenStore.set(toUserId, tokenMap);
+      }else{
+        pushTokenStore.delete(toUserId);
+      }
+    }
+
+    return res.json({
+      ok:true,
+      delivered,
+      attempted: tokenRows.length
+    });
+  }catch(err){
+    console.error("push_notify_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"push_notify_failed" });
+  }
+});
+
+app.options("/api/call/signal", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.sendStatus(204);
+});
+
+app.post("/api/call/signal", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  try{
+    const signal = normalizeCallSignalPayload(req.body);
+    if(!signal){
+      return res.status(400).json({ ok:false, error:"invalid_call_signal" });
+    }
+    const nowMs = Date.now();
+    pruneCallSignalStore(nowMs);
+
+    const id = typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${nowMs}_${crypto.randomBytes(4).toString("hex")}`;
+    const createdAt = new Date(nowMs).toISOString();
+    const expiresAt = new Date(nowMs + (signal.ttl_sec * 1000)).toISOString();
+    const row = {
+      id,
+      to_user_id: signal.to_user_id,
+      from_user_id: signal.from_user_id,
+      call_id: signal.call_id,
+      type: signal.type,
+      media_type: signal.media_type,
+      reason: signal.reason,
+      sdp: signal.sdp,
+      candidate: signal.candidate,
+      created_at: createdAt,
+      expires_at: expiresAt
+    };
+    callSignalStore.push(row);
+    if(callSignalStore.length > CALL_SIGNAL_MAX_ITEMS){
+      callSignalStore.splice(0, callSignalStore.length - CALL_SIGNAL_MAX_ITEMS);
+    }
+    return res.json({
+      ok:true,
+      id,
+      expires_at: expiresAt
+    });
+  }catch(err){
+    console.error("call_signal_post_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"call_signal_post_failed" });
+  }
+});
+
+app.get("/api/call/signals", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  try{
+    const userId = sanitizeCallUserId(req.query.user_id || req.query.userId);
+    const withUserId = sanitizeCallUserId(req.query.with_user_id || req.query.withUserId);
+    const limit = clampInt(req.query.limit, 1, 100, 25);
+    if(!userId){
+      return res.status(400).json({ ok:false, error:"user_id_required" });
+    }
+
+    const nowMs = Date.now();
+    pruneCallSignalStore(nowMs);
+
+    const rows = callSignalStore
+      .filter(row => row.to_user_id === userId && (!withUserId || row.from_user_id === withUserId))
+      .sort((a, b) => Date.parse(String(a.created_at || "")) - Date.parse(String(b.created_at || "")));
+    const selected = rows.slice(-limit);
+    const signals = selected.map(row => ({
+      id: row.id,
+      to_user_id: row.to_user_id,
+      from_user_id: row.from_user_id,
+      call_id: row.call_id,
+      type: row.type,
+      media_type: row.media_type,
+      reason: row.reason,
+      sdp: row.sdp,
+      candidate: row.candidate,
+      created_at: row.created_at,
+      expires_at: row.expires_at,
+      payload: {
+        to_user_id: row.to_user_id,
+        from_user_id: row.from_user_id,
+        call_id: row.call_id,
+        type: row.type,
+        media_type: row.media_type,
+        reason: row.reason,
+        sdp: row.sdp,
+        candidate: row.candidate
+      }
+    }));
+    return res.json({
+      ok:true,
+      signals
+    });
+  }catch(err){
+    console.error("call_signal_get_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"call_signal_get_failed" });
   }
 });
 
