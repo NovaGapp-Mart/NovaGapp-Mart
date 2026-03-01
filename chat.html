@@ -529,6 +529,7 @@ let outgoingSubscription = null;
 let knownMessageIds = new Set();
 let pendingBySig = new Map();
 let userCache = new Map();
+let backendSummaryEndpointState = new Map();
 let deletedAtMap = new Map();
 let presenceUnsub = null;
 let replyContext = null;
@@ -1313,12 +1314,22 @@ async function fetchBackendSummaries(userIds){
   push("https://novagapp-mart.onrender.com");
 
   for(const base of bases){
+    const baseKey = String(base || "").trim().replace(/\/+$/g, "");
+    if(backendSummaryEndpointState.get(baseKey) === "missing"){
+      continue;
+    }
     const url = `${base}/api/users/summary?ids=${encodeURIComponent(joined)}`;
     try{
       const res = await fetch(url, { cache:"no-store" });
-      if(!res.ok) continue;
+      if(!res.ok){
+        if(res.status === 404 || res.status === 405){
+          backendSummaryEndpointState.set(baseKey, "missing");
+        }
+        continue;
+      }
       const payload = await res.json().catch(() => null);
       if(payload?.ok && payload?.users && typeof payload.users === "object"){
+        backendSummaryEndpointState.set(baseKey, "ok");
         return payload.users;
       }
     }catch(_){ }
