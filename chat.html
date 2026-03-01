@@ -566,7 +566,8 @@ let groupMetaCache = new Map();
 let groupMemberMap = new Map();
 let groupRoleMap = new Map();
 let myGroupIds = new Set();
-let groupLastLinkOpenAt = 0;
+let lastOpenedMessageLinkAt = 0;
+let lastOpenedMessageLinkHref = "";
 const CALL_SIGNAL_POLL_MS = 2000;
 const CALL_SIGNAL_REMOTE_TYPES = new Set(["call-offer","call-answer","call-end","call-decline","call-busy","ice"]);
 const selectCols = "id,sender_id,receiver_id,message,media_url,media_type,created_at";
@@ -641,6 +642,18 @@ function buildDirectChatLink(uid, phone){
 function buildGroupChatLink(groupId){
   const gid = String(groupId || "").trim();
   return gid ? ("chat.html?gid=" + encodeURIComponent(gid)) : "chat.html";
+}
+
+function appendQueryToLink(baseLink, params){
+  const base = String(baseLink || "chat.html");
+  const query = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if(value === undefined || value === null || value === "") return;
+    query.set(key, String(value));
+  });
+  const qs = query.toString();
+  if(!qs) return base;
+  return base + (base.includes("?") ? "&" : "?") + qs;
 }
 
 function isMissingRelationError(error){
@@ -957,10 +970,11 @@ function openMessageLinkInBrowser(urlText){
   const href = normalizeMessageUrl(urlText);
   if(!href) return;
   const now = Date.now();
-  if(now - groupLastLinkOpenAt < 280){
+  if(href === lastOpenedMessageLinkHref && (now - lastOpenedMessageLinkAt) < 650){
     return;
   }
-  groupLastLinkOpenAt = now;
+  lastOpenedMessageLinkHref = href;
+  lastOpenedMessageLinkAt = now;
   let opened = null;
   try{
     opened = window.open(href, "_blank", "noopener,noreferrer");
@@ -1014,6 +1028,30 @@ function setMessageTextContent(target, value){
   if(lastIndex < raw.length){
     appendTextWithLineBreaks(target, raw.slice(lastIndex));
   }
+}
+
+function closestElementFromTarget(target, selector){
+  let node = target;
+  while(node){
+    if(node.nodeType === 1 && typeof node.matches === "function" && node.matches(selector)){
+      return node;
+    }
+    node = node.parentNode;
+  }
+  return null;
+}
+
+function getMessageLinkFromEvent(e){
+  if(!e) return null;
+  if(typeof e.composedPath === "function"){
+    const path = e.composedPath();
+    for(const node of path){
+      if(node && node.nodeType === 1 && typeof node.matches === "function" && node.matches("a.msg-link")){
+        return node;
+      }
+    }
+  }
+  return closestElementFromTarget(e.target || null, "a.msg-link");
 }
 
 function renderDocCard(url, name, size){
@@ -1780,19 +1818,21 @@ async function fetchUsersByPhones(phoneNumbers){
 async function resolveDirectTargetFromQuery(){
   if(isGroupMode()) return;
   if(!supa) return;
+  const fromPhone = normalizePhoneNumber(otherPhone || requestedDirectPhone || "");
+  if(fromPhone){
+    const users = await fetchUsersByPhones([fromPhone]);
+    const matched = users.find(u => normalizePhoneNumber(u?.phone_number) === fromPhone) || users[0];
+    const target = String(matched?.user_id || "").trim();
+    if(target && target !== myUid){
+      otherUid = target;
+      otherPhone = fromPhone;
+      return;
+    }
+  }
   if(otherUid){
     const profile = await getUserSummary(otherUid);
     otherPhone = normalizePhoneNumber(otherPhone || profile?.phone || "");
-    return;
   }
-  const fromPhone = normalizePhoneNumber(otherPhone || requestedDirectPhone || "");
-  if(!fromPhone) return;
-  const users = await fetchUsersByPhones([fromPhone]);
-  const matched = users.find(u => normalizePhoneNumber(u?.phone_number) === fromPhone) || users[0];
-  const target = String(matched?.user_id || "").trim();
-  if(!target || target === myUid) return;
-  otherUid = target;
-  otherPhone = fromPhone;
 }
 
 async function ensureGroupSupport(){
@@ -3127,10 +3167,10 @@ function closeMessageMenu(){
 }
 
 function startLongPress(e){
-  if(e.target && e.target.closest && e.target.closest("a.msg-link")){
+  if(closestElementFromTarget(e.target || null, "a.msg-link")){
     return;
   }
-  const msg = e.target.closest(".msg");
+  const msg = closestElementFromTarget(e.target || null, ".msg");
   if(!msg || !e.touches || e.touches.length !== 1) return;
   const touch = e.touches[0];
   longPressStart = { x: touch.clientX, y: touch.clientY };
@@ -3666,7 +3706,10 @@ async function startCall(kind){
       call_type: kind,
       call_id: callId,
       from_user_id: myUid,
-      link: `chat.html?uid=${encodeURIComponent(myUid)}&call_action=answer&call_id=${encodeURIComponent(callId)}`
+      link: appendQueryToLink(buildDirectChatLink(myUid, myPhone), {
+        call_action: "answer",
+        call_id: callId
+      })
     }).catch(()=>{});
     callTimeout = setTimeout(() => {
       endCall(true, "timeout");
@@ -3947,7 +3990,7 @@ async function sendMsg(){
     sendRemotePush(otherUid, myName || "New message", msgPreview, {
       type: "chat_message",
       from_user_id: myUid,
-      link: `chat.html?uid=${encodeURIComponent(myUid)}`
+      link: buildDirectChatLink(myUid, myPhone)
     }).catch(()=>{});
   }
   scrollToBottom(true);
@@ -4066,20 +4109,21 @@ if(deleteForEveryoneBtn){
 
 if(chatBox){
   const openLinkFromEvent = (e) => {
-    const link = e.target && e.target.closest ? e.target.closest("a.msg-link") : null;
+    const link = getMessageLinkFromEvent(e);
     if(!link) return;
+    const href = normalizeMessageUrl(link.dataset.href || link.getAttribute("href") || "");
+    if(!href) return;
     e.preventDefault();
     e.stopPropagation();
-    const href = link.dataset.href || link.getAttribute("href") || "";
     openMessageLinkInBrowser(href);
   };
   chatBox.addEventListener("click", openLinkFromEvent);
   chatBox.addEventListener("touchend", openLinkFromEvent, { passive:false });
   chatBox.addEventListener("contextmenu", (e)=>{
-    if(e.target && e.target.closest && e.target.closest("a.msg-link")){
+    if(getMessageLinkFromEvent(e)){
       return;
     }
-    const msg = e.target.closest(".msg");
+    const msg = closestElementFromTarget(e.target || null, ".msg");
     if(!msg) return;
     e.preventDefault();
     openMessageMenu(msg, e.clientX, e.clientY, "floating");
