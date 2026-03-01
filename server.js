@@ -47,7 +47,6 @@ const BlobCtor = global.Blob;
 const app = express();
 const upload = multer();
 const PORT = Math.max(1, Number(process.env.PORT || 3000) || 3000);
-const PUBLIC_WEB_DIR = path.join(__dirname, "public");
 const UPLOADS_DIR = path.join(__dirname, "uploads");
 const MANUAL_DIR = path.join(UPLOADS_DIR, "manual-requests");
 const MANUAL_JSON_PATH = path.join(MANUAL_DIR, "requests.json");
@@ -139,18 +138,7 @@ const uploadVideoAssets = multer({
 
 app.use(express.json({ limit: "15mb" }));
 app.use(cors());
-app.use("/uploads/videos", express.static(VIDEO_ASSET_UPLOAD_DIR, {
-  dotfiles: "deny",
-  etag: true,
-  index: false,
-  maxAge: "1h"
-}));
-app.use("/uploads/video-thumbs", express.static(VIDEO_ASSET_THUMB_DIR, {
-  dotfiles: "deny",
-  etag: true,
-  index: false,
-  maxAge: "1h"
-}));
+app.use("/uploads", express.static(UPLOADS_DIR));
 app.get("/uploads/video-thumbs/:fileName", async (req, res, next) => {
   const fileName = path.basename(String(req.params?.fileName || "").trim());
   if(!fileName){
@@ -201,10 +189,9 @@ app.get("/uploads/videos/:fileName", async (req, res, next) => {
   }
   return res.redirect(302, redirectUrl);
 });
-app.use(express.static(PUBLIC_WEB_DIR, {
+app.use(express.static(__dirname, {
   dotfiles: "deny",
   etag: true,
-  index: false,
   maxAge: "1h"
 }));
 
@@ -217,18 +204,6 @@ const PUBLIC_SUPABASE_ANON_KEY = String(
   process.env.SUPABASE_ANON_KEY ||
   process.env.CONTEST_SUPABASE_ANON_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  ""
-).trim();
-const SECURITY_SUPABASE_URL = String(
-  process.env.CONTEST_SUPABASE_URL ||
-  process.env.SUPABASE_URL ||
-  ""
-).trim().replace(/\/+$/g, "");
-const SECURITY_SUPABASE_SERVICE_ROLE_KEY = String(
-  process.env.CONTEST_SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.CONTEST_SUPABASE_KEY ||
-  process.env.SUPABASE_KEY ||
   ""
 ).trim();
 const VIDEO_ASSET_SUPABASE_URL = String(
@@ -454,379 +429,6 @@ function compactText(value, maxLen){
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, cap);
 }
 
-const SECURITY_TRYON_USAGE_STEP = "tryon_request";
-const SECURITY_PAYMENT_ORDER_STEP = "payment_order_map";
-
-function isSecuritySupabaseConfigured(){
-  return Boolean(SECURITY_SUPABASE_URL && SECURITY_SUPABASE_SERVICE_ROLE_KEY);
-}
-
-function buildSecuritySupabaseHeaders(extra){
-  return {
-    apikey: SECURITY_SUPABASE_SERVICE_ROLE_KEY,
-    Authorization: `Bearer ${SECURITY_SUPABASE_SERVICE_ROLE_KEY}`,
-    ...(extra && typeof extra === "object" ? extra : {})
-  };
-}
-
-async function securitySupabaseUpsert(tableName, rows, onConflict){
-  if(!isSecuritySupabaseConfigured()){
-    throw new Error("security_store_unavailable");
-  }
-  const table = String(tableName || "").trim();
-  const conflict = String(onConflict || "").trim();
-  const list = Array.isArray(rows) ? rows.filter(Boolean) : [];
-  if(!table || !conflict || !list.length){
-    throw new Error("security_upsert_invalid_payload");
-  }
-
-  const endpoint = `${SECURITY_SUPABASE_URL}/rest/v1/${table}?on_conflict=${encodeURIComponent(conflict)}`;
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: buildSecuritySupabaseHeaders({
-      "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates,return=minimal"
-    }),
-    body: JSON.stringify(list)
-  });
-  if(!res.ok){
-    const body = await res.text().catch(() => "");
-    throw new Error(`security_upsert_failed_${table}_${res.status}:${body.slice(0, 220)}`);
-  }
-}
-
-function buildIsoDayKey(dateInput){
-  const date = dateInput instanceof Date ? dateInput : new Date();
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
-}
-
-function buildIsoMonthKey(dateInput){
-  const date = dateInput instanceof Date ? dateInput : new Date();
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
-function parseBearerToken(req){
-  const header = String(req.headers?.authorization || "").trim();
-  const match = header.match(/^Bearer\s+(.+)$/i);
-  return match ? String(match[1] || "").trim() : "";
-}
-
-async function resolveAuthUserFromToken(token){
-  const accessToken = String(token || "").trim();
-  if(!accessToken){
-    return null;
-  }
-  const authBase = String(PUBLIC_SUPABASE_URL || "").trim().replace(/\/+$/g, "");
-  const anonKey = String(PUBLIC_SUPABASE_ANON_KEY || "").trim();
-  if(!authBase || !anonKey){
-    throw new Error("auth_config_missing");
-  }
-
-  const res = await fetch(`${authBase}/auth/v1/user`, {
-    method: "GET",
-    headers: {
-      apikey: anonKey,
-      Authorization: `Bearer ${accessToken}`
-    }
-  });
-
-  if(res.status === 401 || res.status === 403){
-    return null;
-  }
-  if(!res.ok){
-    const body = await res.text().catch(() => "");
-    throw new Error(`auth_verify_failed_${res.status}:${body.slice(0, 180)}`);
-  }
-
-  const payload = await res.json().catch(() => null);
-  const userId = sanitizeUserId(payload?.id);
-  if(!userId){
-    return null;
-  }
-  return {
-    id: userId,
-    email: normalizeEmail(payload?.email || ""),
-    name: sanitizeDisplayName(payload?.user_metadata?.full_name || payload?.user_metadata?.name || "")
-  };
-}
-
-async function requireJwtAuth(req, res, next){
-  const token = parseBearerToken(req);
-  if(!token){
-    return res.status(401).json({ ok:false, error:"auth_token_required" });
-  }
-  try{
-    const user = await resolveAuthUserFromToken(token);
-    if(!user?.id){
-      return res.status(401).json({ ok:false, error:"auth_token_invalid" });
-    }
-    req.auth_user = user;
-    return next();
-  }catch(err){
-    console.error("auth_verify_error:", err?.stack || err);
-    return res.status(503).json({
-      ok:false,
-      error:"auth_verification_failed",
-      message:"Unable to verify user session."
-    });
-  }
-}
-
-async function resolveOptionalJwtAuth(req){
-  const token = parseBearerToken(req);
-  if(!token){
-    return null;
-  }
-  try{
-    return await resolveAuthUserFromToken(token);
-  }catch(_){
-    return null;
-  }
-}
-
-function getAuthenticatedUserId(req){
-  return sanitizeUserId(req?.auth_user?.id);
-}
-
-function getAuthenticatedUserName(req){
-  const fromToken = sanitizeDisplayName(req?.auth_user?.name);
-  if(fromToken){
-    return fromToken;
-  }
-  const fromBody = sanitizeDisplayName(req?.body?.user_name || req?.body?.username);
-  return fromBody || "member";
-}
-
-function getAuthenticatedUserEmail(req){
-  const tokenEmail = normalizeEmail(req?.auth_user?.email);
-  if(tokenEmail){
-    return tokenEmail;
-  }
-  return normalizeEmail(req?.body?.user_email || "");
-}
-
-function isSubscriptionStatusActive(statusValue){
-  const status = String(statusValue || "").trim().toLowerCase();
-  if(!status){
-    return true;
-  }
-  if(["active", "paid", "trial", "trialing", "premium", "pro", "enabled"].includes(status)){
-    return true;
-  }
-  if(["free", "inactive", "expired", "cancelled", "canceled", "failed"].includes(status)){
-    return false;
-  }
-  return true;
-}
-
-function isSubscriptionExpired(expiresAtValue){
-  const ts = Date.parse(String(expiresAtValue || "").trim());
-  if(!Number.isFinite(ts)){
-    return false;
-  }
-  return ts < Date.now();
-}
-
-async function resolveSubscriptionPlanForUser(userId){
-  const safeUserId = sanitizeUserId(userId);
-  if(!safeUserId){
-    throw new Error("subscription_user_invalid");
-  }
-  if(!isSecuritySupabaseConfigured()){
-    throw new Error("subscription_store_unavailable");
-  }
-
-  const endpoint = `${SECURITY_SUPABASE_URL}/rest/v1/subscription_state`
-    + `?select=user_id,plan,status,expires_at,updated_at`
-    + `&user_id=eq.${encodeURIComponent(safeUserId)}`
-    + `&order=updated_at.desc.nullslast`
-    + `&limit=1`;
-  const res = await fetch(endpoint, {
-    method: "GET",
-    headers: buildSecuritySupabaseHeaders()
-  });
-  if(!res.ok){
-    const body = await res.text().catch(() => "");
-    throw new Error(`subscription_fetch_failed_${res.status}:${body.slice(0, 220)}`);
-  }
-
-  const rows = await res.json().catch(() => []);
-  const row = Array.isArray(rows) && rows.length ? rows[0] : null;
-  if(!row){
-    return "free";
-  }
-  if(!isSubscriptionStatusActive(row.status) || isSubscriptionExpired(row.expires_at)){
-    return "free";
-  }
-  return normalizePlanCode(row.plan);
-}
-
-async function readTryonUsageCount(userId, dayKey){
-  const safeUserId = sanitizeUserId(userId);
-  const safeDayKey = String(dayKey || "").trim();
-  if(!safeUserId || !safeDayKey){
-    return 0;
-  }
-  if(!isSecuritySupabaseConfigured()){
-    throw new Error("tryon_usage_store_unavailable");
-  }
-
-  const endpoint = `${SECURITY_SUPABASE_URL}/rest/v1/automation_funnel_events`
-    + `?select=id`
-    + `&user_id=eq.${encodeURIComponent(safeUserId)}`
-    + `&step=eq.${encodeURIComponent(SECURITY_TRYON_USAGE_STEP)}`
-    + `&month_key=eq.${encodeURIComponent(safeDayKey)}`;
-
-  const headRes = await fetch(endpoint, {
-    method: "HEAD",
-    headers: buildSecuritySupabaseHeaders({ Prefer:"count=exact" })
-  });
-  if(headRes.ok){
-    const total = parseContentRangeTotal(headRes.headers.get("content-range"));
-    if(Number.isFinite(total) && total >= 0){
-      return total;
-    }
-  }
-
-  const fallbackRes = await fetch(endpoint, {
-    method: "GET",
-    headers: buildSecuritySupabaseHeaders({
-      Prefer: "count=exact",
-      Range: "0-0"
-    })
-  });
-  if(!fallbackRes.ok){
-    const body = await fallbackRes.text().catch(() => "");
-    throw new Error(`tryon_usage_read_failed_${fallbackRes.status}:${body.slice(0, 220)}`);
-  }
-  return parseContentRangeTotal(fallbackRes.headers.get("content-range"));
-}
-
-async function recordTryonUsage(userId, dayKey, planCode){
-  const safeUserId = sanitizeUserId(userId);
-  const safeDayKey = String(dayKey || "").trim();
-  if(!safeUserId || !safeDayKey){
-    throw new Error("tryon_usage_write_invalid_payload");
-  }
-  const row = {
-    id: `tryon_${safeUserId}_${safeDayKey}_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`,
-    user_id: safeUserId,
-    step: SECURITY_TRYON_USAGE_STEP,
-    month_key: safeDayKey,
-    meta: {
-      plan: normalizePlanCode(planCode),
-      source: "api_tryon",
-      ts: new Date().toISOString()
-    }
-  };
-  await securitySupabaseUpsert("automation_funnel_events", [row], "id");
-}
-
-function buildPaymentOrderMapId(orderId){
-  const cleanOrderId = sanitizeToken(orderId, 120);
-  return cleanOrderId ? `paymap_${cleanOrderId}` : "";
-}
-
-function normalizePaymentCurrency(value){
-  return String(value || "INR").trim().toUpperCase() || "INR";
-}
-
-async function savePaymentOrderMapping(payload){
-  const orderId = sanitizeToken(payload?.order_id, 120);
-  const userId = sanitizeUserId(payload?.user_id);
-  const mapId = buildPaymentOrderMapId(orderId);
-  const amountPaise = Math.round(safeNumber(payload?.amount_paise));
-  const currency = normalizePaymentCurrency(payload?.currency);
-  if(!orderId || !userId || !mapId || amountPaise < 100){
-    throw new Error("payment_order_map_invalid_payload");
-  }
-
-  const row = {
-    id: mapId,
-    user_id: userId,
-    step: SECURITY_PAYMENT_ORDER_STEP,
-    month_key: buildIsoMonthKey(new Date()),
-    meta: {
-      order_id: orderId,
-      user_id: userId,
-      amount_paise: amountPaise,
-      currency,
-      plan: normalizePlanCode(payload?.plan),
-      receipt: compactText(payload?.receipt, 80),
-      source: compactText(payload?.source, 80),
-      updated_at: new Date().toISOString()
-    }
-  };
-  await securitySupabaseUpsert("automation_funnel_events", [row], "id");
-}
-
-async function readPaymentOrderMapping(orderId){
-  const cleanOrderId = sanitizeToken(orderId, 120);
-  const mapId = buildPaymentOrderMapId(cleanOrderId);
-  if(!cleanOrderId || !mapId){
-    return null;
-  }
-  if(!isSecuritySupabaseConfigured()){
-    throw new Error("payment_order_map_store_unavailable");
-  }
-
-  const endpoint = `${SECURITY_SUPABASE_URL}/rest/v1/automation_funnel_events`
-    + `?select=id,user_id,step,meta`
-    + `&id=eq.${encodeURIComponent(mapId)}`
-    + `&step=eq.${encodeURIComponent(SECURITY_PAYMENT_ORDER_STEP)}`
-    + `&limit=1`;
-  const res = await fetch(endpoint, {
-    method: "GET",
-    headers: buildSecuritySupabaseHeaders()
-  });
-  if(!res.ok){
-    const body = await res.text().catch(() => "");
-    throw new Error(`payment_order_map_read_failed_${res.status}:${body.slice(0, 220)}`);
-  }
-
-  const rows = await res.json().catch(() => []);
-  const row = Array.isArray(rows) && rows.length ? rows[0] : null;
-  if(!row || typeof row !== "object"){
-    return null;
-  }
-  const meta = row.meta && typeof row.meta === "object" ? row.meta : {};
-  const amountPaise = Math.round(safeNumber(meta.amount_paise));
-  return {
-    order_id: cleanOrderId,
-    user_id: sanitizeUserId(meta.user_id || row.user_id),
-    amount_paise: amountPaise,
-    currency: normalizePaymentCurrency(meta.currency),
-    plan: normalizePlanCode(meta.plan),
-    receipt: compactText(meta.receipt, 80)
-  };
-}
-
-async function markPaymentOrderVerified(orderId, verifySnapshot){
-  const existing = await readPaymentOrderMapping(orderId);
-  if(!existing){
-    return;
-  }
-  const row = {
-    id: buildPaymentOrderMapId(existing.order_id),
-    user_id: existing.user_id,
-    step: SECURITY_PAYMENT_ORDER_STEP,
-    month_key: buildIsoMonthKey(new Date()),
-    meta: {
-      order_id: existing.order_id,
-      user_id: existing.user_id,
-      amount_paise: existing.amount_paise,
-      currency: existing.currency,
-      plan: existing.plan,
-      receipt: existing.receipt,
-      verified: true,
-      payment_id: String(verifySnapshot?.payment_id || "").trim(),
-      payment_status: String(verifySnapshot?.payment_status || "").trim().toLowerCase(),
-      verified_at: new Date().toISOString()
-    }
-  };
-  await securitySupabaseUpsert("automation_funnel_events", [row], "id");
-}
-
 function buildAbsoluteServerUrl(req, relativePath){
   const rel = String(relativePath || "").trim();
   if(!rel) return "";
@@ -978,11 +580,11 @@ app.options("/api/account/sync", (req, res) => {
   res.sendStatus(204);
 });
 
-app.post("/api/account/sync", requireJwtAuth, async (req, res) => {
+app.post("/api/account/sync", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   try{
     const body = req.body && typeof req.body === "object" ? req.body : {};
-    const userId = compactText(getAuthenticatedUserId(req), 128);
+    const userId = compactText(body.user_id || body.userId, 128);
     if(!userId){
       return res.status(400).json({ ok:false, error:"user_id_required" });
     }
@@ -1013,12 +615,12 @@ app.options("/api/media/events/upload", (req, res) => {
   res.sendStatus(204);
 });
 
-app.post("/api/media/events/upload", requireJwtAuth, async (req, res) => {
+app.post("/api/media/events/upload", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   try{
     const body = req.body && typeof req.body === "object" ? req.body : {};
     const record = {
-      user_id: compactText(getAuthenticatedUserId(req), 128),
+      user_id: compactText(body.user_id || body.userId, 128),
       target_type: compactText(body.target_type || body.targetType, 40),
       target_id: compactText(body.target_id || body.targetId, 128),
       media_url: compactText(body.media_url || body.url, 700),
@@ -1091,7 +693,6 @@ app.get("/api/videos/asset", async (req, res) => {
 });
 
 app.post("/api/videos/upload-assets",
-  requireJwtAuth,
   (req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     uploadVideoAssets.fields([
@@ -1137,7 +738,7 @@ app.post("/api/videos/upload-assets",
         return res.status(413).json({ ok:false, error:"thumbnail_too_large", message:"Thumbnail exceeds 20MB limit." });
       }
 
-      const userId = sanitizeCallUserId(getAuthenticatedUserId(req));
+      const userId = sanitizeCallUserId(req.body?.user_id || req.body?.userId || "");
       const videoRelPath = path.posix.join("uploads", "videos", path.basename(String(videoFile.filename || "")));
       const thumbRelPath = thumbFile
         ? path.posix.join("uploads", "video-thumbs", path.basename(String(thumbFile.filename || "")))
@@ -1215,12 +816,12 @@ app.options("/api/automation/track", (req, res) => {
   res.sendStatus(204);
 });
 
-app.post("/api/automation/track", requireJwtAuth, async (req, res) => {
+app.post("/api/automation/track", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   try{
     const body = req.body && typeof req.body === "object" ? req.body : {};
     const record = {
-      user_id: compactText(getAuthenticatedUserId(req), 128),
+      user_id: compactText(body.user_id || body.userId, 128),
       step: compactText(body.step, 80).toLowerCase(),
       meta: body.meta && typeof body.meta === "object" ? body.meta : {},
       ts: new Date().toISOString()
@@ -1240,11 +841,11 @@ app.options("/api/push/register", (req, res) => {
   res.sendStatus(204);
 });
 
-app.post("/api/push/register", requireJwtAuth, async (req, res) => {
+app.post("/api/push/register", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   try{
     const body = req.body && typeof req.body === "object" ? req.body : {};
-    const userId = sanitizeCallUserId(getAuthenticatedUserId(req));
+    const userId = sanitizeCallUserId(body.user_id || body.userId);
     const token = sanitizePushToken(body.token);
     if(!userId || !token){
       return res.status(400).json({ ok:false, error:"user_id_and_token_required" });
@@ -1290,7 +891,7 @@ app.options("/api/push/notify", (req, res) => {
   res.sendStatus(204);
 });
 
-app.post("/api/push/notify", requireJwtAuth, async (req, res) => {
+app.post("/api/push/notify", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   try{
     const body = req.body && typeof req.body === "object" ? req.body : {};
@@ -1354,19 +955,10 @@ app.options("/api/call/signal", (req, res) => {
   res.sendStatus(204);
 });
 
-app.post("/api/call/signal", requireJwtAuth, async (req, res) => {
+app.post("/api/call/signal", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   try{
-    const authUserId = sanitizeCallUserId(getAuthenticatedUserId(req));
-    if(!authUserId){
-      return res.status(401).json({ ok:false, error:"auth_token_invalid" });
-    }
-    const body = req.body && typeof req.body === "object" ? req.body : {};
-    const signal = normalizeCallSignalPayload({
-      ...body,
-      from_user_id: authUserId,
-      from: authUserId
-    });
+    const signal = normalizeCallSignalPayload(req.body);
     if(!signal){
       return res.status(400).json({ ok:false, error:"invalid_call_signal" });
     }
@@ -1406,10 +998,10 @@ app.post("/api/call/signal", requireJwtAuth, async (req, res) => {
   }
 });
 
-app.get("/api/call/signals", requireJwtAuth, async (req, res) => {
+app.get("/api/call/signals", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   try{
-    const userId = sanitizeCallUserId(getAuthenticatedUserId(req));
+    const userId = sanitizeCallUserId(req.query.user_id || req.query.userId);
     const withUserId = sanitizeCallUserId(req.query.with_user_id || req.query.withUserId);
     const limit = clampInt(req.query.limit, 1, 100, 25);
     if(!userId){
@@ -2834,7 +2426,7 @@ app.get("/api/payment/config", (req, res) => {
   });
 });
 
-app.post("/api/payment/razorpay/order", requireJwtAuth, async (req, res) => {
+app.post("/api/payment/razorpay/order", async (req, res) => {
   if(!isContestRazorpayConfigured()){
     return res.status(503).json({
       ok: false,
@@ -2845,22 +2437,7 @@ app.post("/api/payment/razorpay/order", requireJwtAuth, async (req, res) => {
     });
   }
 
-  const userId = getAuthenticatedUserId(req);
-  if(!userId){
-    return res.status(401).json({ ok:false, error:"auth_token_invalid" });
-  }
-
-  const rawNotes = req.body?.notes && typeof req.body.notes === "object" ? req.body.notes : {};
-  const requestedPlan = normalizePlanCode(rawNotes.plan || req.body?.plan);
-  const isSubscriptionOrder = requestedPlan === "40" || requestedPlan === "4000";
-
-  let amountPaise = Math.round(safeNumber(req.body?.amount_paise));
-  if(isSubscriptionOrder){
-    const usdAmount = requestedPlan === "4000" ? 4000 : 40;
-    const usdInrRate = await getUsdInrRateSafe();
-    amountPaise = Math.max(100, Math.round(usdAmount * usdInrRate * 100));
-  }
-
+  const amountPaise = Math.round(safeNumber(req.body?.amount_paise));
   if(!amountPaise || amountPaise < 100){
     return res.status(400).json({
       ok: false,
@@ -2879,15 +2456,15 @@ app.post("/api/payment/razorpay/order", requireJwtAuth, async (req, res) => {
   }
 
   const orderId = sanitizeToken(req.body?.order_id, 120);
-  const userName = getAuthenticatedUserName(req);
+  const userId = sanitizeUserId(req.body?.user_id);
+  const userName = sanitizeDisplayName(req.body?.user_name);
   const rawReceipt = sanitizeToken(req.body?.receipt, 40);
   const receipt = rawReceipt || `shop_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
   const notes = {
-    ...sanitizePaymentNotes(rawNotes),
+    ...sanitizePaymentNotes(req.body?.notes),
     app_order_id: orderId || "",
-    app_user_id: userId,
-    app_user_name: userName || "",
-    app_plan_code: isSubscriptionOrder ? requestedPlan : ""
+    app_user_id: userId || "",
+    app_user_name: userName || ""
   };
 
   try{
@@ -2896,25 +2473,14 @@ app.post("/api/payment/razorpay/order", requireJwtAuth, async (req, res) => {
       receipt,
       notes
     });
-    const createdAmountPaise = Math.round(safeNumber(razorpayOrder.amount) || amountPaise);
-    const createdCurrency = String(razorpayOrder.currency || "INR").trim().toUpperCase() || "INR";
-    await savePaymentOrderMapping({
-      order_id: razorpayOrder.id,
-      user_id: userId,
-      amount_paise: createdAmountPaise,
-      currency: createdCurrency,
-      plan: isSubscriptionOrder ? requestedPlan : "",
-      receipt: razorpayOrder.receipt || receipt,
-      source: rawNotes.source || ""
-    });
 
     return res.json({
       ok: true,
       order: {
         key_id: CONTEST_RAZORPAY_KEY_ID,
         razorpay_order_id: razorpayOrder.id,
-        amount_paise: createdAmountPaise,
-        currency: createdCurrency,
+        amount_paise: Math.round(safeNumber(razorpayOrder.amount) || amountPaise),
+        currency: String(razorpayOrder.currency || "INR").toUpperCase(),
         receipt: razorpayOrder.receipt || receipt,
         status: String(razorpayOrder.status || "created").toLowerCase()
       }
@@ -2929,7 +2495,7 @@ app.post("/api/payment/razorpay/order", requireJwtAuth, async (req, res) => {
   }
 });
 
-app.post("/api/payment/razorpay/verify", requireJwtAuth, async (req, res) => {
+app.post("/api/payment/razorpay/verify", async (req, res) => {
   if(!isContestRazorpayConfigured()){
     return res.status(503).json({
       ok: false,
@@ -2943,27 +2509,16 @@ app.post("/api/payment/razorpay/verify", requireJwtAuth, async (req, res) => {
   const orderId = String(req.body?.razorpay_order_id || "").trim();
   const paymentId = String(req.body?.razorpay_payment_id || "").trim();
   const signature = String(req.body?.razorpay_signature || "").trim();
-  const userId = getAuthenticatedUserId(req);
 
-  if(!userId){
-    return res.status(401).json({ ok:false, error:"auth_token_invalid" });
-  }
   if(!orderId || !paymentId || !signature){
     return res.status(400).json({ ok: false, error: "payment_fields_required" });
   }
+
   if(!verifyContestPaymentSignature(orderId, paymentId, signature)){
     return res.status(400).json({ ok: false, error: "invalid_payment_signature" });
   }
 
   try{
-    const orderMap = await readPaymentOrderMapping(orderId);
-    if(!orderMap){
-      return res.status(404).json({ ok:false, error:"order_not_found" });
-    }
-    if(orderMap.user_id !== userId){
-      return res.status(403).json({ ok:false, error:"order_user_mismatch" });
-    }
-
     const paymentSnapshot = await fetchRazorpayPaymentSnapshot(paymentId);
     if(String(paymentSnapshot?.order_id || "").trim() !== orderId){
       return res.status(400).json({ ok: false, error: "order_payment_mismatch" });
@@ -2994,40 +2549,12 @@ app.post("/api/payment/razorpay/verify", requireJwtAuth, async (req, res) => {
         payment_amount_paise: paymentAmountPaise
       });
     }
-    const mappedCurrency = normalizePaymentCurrency(orderMap.currency);
-    if(mappedCurrency && paymentCurrency && mappedCurrency !== paymentCurrency){
-      return res.status(400).json({
-        ok:false,
-        error:"payment_currency_mismatch",
-        payment_currency: paymentCurrency,
-        expected_currency: mappedCurrency
-      });
-    }
-    const mappedAmountPaise = Math.round(safeNumber(orderMap.amount_paise));
-    if(mappedAmountPaise > 0 && paymentAmountPaise !== mappedAmountPaise){
-      return res.status(400).json({
-        ok:false,
-        error:"payment_amount_mismatch",
-        payment_amount_paise: paymentAmountPaise,
-        expected_amount_paise: mappedAmountPaise
-      });
-    }
-    const snapshotOwnerId = sanitizeUserId(paymentSnapshot?.notes?.app_user_id || "");
-    if(snapshotOwnerId && snapshotOwnerId !== userId){
-      return res.status(403).json({ ok:false, error:"order_owner_mismatch" });
-    }
-
-    await markPaymentOrderVerified(orderId, {
-      payment_id: paymentId,
-      payment_status: paymentStatus
-    });
 
     return res.json({
       ok: true,
       verified: true,
       razorpay_order_id: orderId,
       razorpay_payment_id: paymentId,
-      user_id: userId,
       payment_status: paymentStatus || "verified",
       payment_currency: paymentCurrency || "INR",
       payment_amount_paise: paymentAmountPaise
@@ -3049,15 +2576,15 @@ app.options("/api/videos/monetization/status", (req, res) => {
   res.sendStatus(204);
 });
 
-app.get("/api/videos/monetization/status", requireJwtAuth, async (req, res) => {
+app.get("/api/videos/monetization/status", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  const userId = getAuthenticatedUserId(req);
+  const userId = sanitizeUserId(req.query?.user_id);
   const paymentReady = isContestRazorpayConfigured();
 
   if(!userId){
-    return res.status(401).json({
+    return res.status(400).json({
       ok:false,
-      error:"auth_token_invalid",
+      error:"user_id_required",
       unlocked:false,
       payment_ready: paymentReady,
       min_followers_required: VIDEO_MONETIZATION_MIN_FOLLOWERS,
@@ -3106,7 +2633,7 @@ app.options("/api/videos/monetization/order", (req, res) => {
   res.sendStatus(204);
 });
 
-app.post("/api/videos/monetization/order", requireJwtAuth, async (req, res) => {
+app.post("/api/videos/monetization/order", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   if(!isContestRazorpayConfigured()){
     return res.status(503).json({
@@ -3118,9 +2645,9 @@ app.post("/api/videos/monetization/order", requireJwtAuth, async (req, res) => {
     });
   }
 
-  const userId = getAuthenticatedUserId(req);
+  const userId = sanitizeUserId(req.body?.user_id);
   if(!userId){
-    return res.status(401).json({ ok:false, error:"auth_token_invalid" });
+    return res.status(400).json({ ok:false, error:"user_id_required" });
   }
 
   const followersCount = Math.max(0, Math.floor(safeNumber(req.body?.followers_count)));
@@ -3212,7 +2739,7 @@ app.options("/api/videos/monetization/verify", (req, res) => {
   res.sendStatus(204);
 });
 
-app.post("/api/videos/monetization/verify", requireJwtAuth, async (req, res) => {
+app.post("/api/videos/monetization/verify", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   if(!isContestRazorpayConfigured()){
     return res.status(503).json({
@@ -3224,7 +2751,7 @@ app.post("/api/videos/monetization/verify", requireJwtAuth, async (req, res) => 
     });
   }
 
-  const userId = getAuthenticatedUserId(req);
+  const userId = sanitizeUserId(req.body?.user_id);
   const orderId = String(req.body?.razorpay_order_id || "").trim();
   const paymentId = String(req.body?.razorpay_payment_id || "").trim();
   const signature = String(req.body?.razorpay_signature || "").trim();
@@ -3243,7 +2770,6 @@ app.post("/api/videos/monetization/verify", requireJwtAuth, async (req, res) => 
     const paymentStatus = String(paymentSnapshot?.status || "").trim().toLowerCase();
     const paymentCurrency = String(paymentSnapshot?.currency || "").trim().toUpperCase();
     const paymentAmountPaise = Math.round(safeNumber(paymentSnapshot?.amount));
-    const snapshotOwnerId = sanitizeUserId(paymentSnapshot?.notes?.app_user_id || "");
     const paymentCaptured = Boolean(paymentSnapshot?.captured) || paymentStatus === "captured";
     if(!paymentStatus || !isRazorpayPaymentStatusAcceptable(paymentStatus) || !paymentCaptured){
       return res.status(409).json({
@@ -3259,9 +2785,6 @@ app.post("/api/videos/monetization/verify", requireJwtAuth, async (req, res) => 
         payment_currency:paymentCurrency
       });
     }
-    if(snapshotOwnerId && snapshotOwnerId !== userId){
-      return res.status(403).json({ ok:false, error:"order_owner_mismatch" });
-    }
 
     const state = await readVideoMonetizationState();
     const order = state?.orders?.[orderId] && typeof state.orders[orderId] === "object"
@@ -3275,7 +2798,7 @@ app.post("/api/videos/monetization/verify", requireJwtAuth, async (req, res) => 
     }
 
     const expectedAmountPaise = Math.round(safeNumber(order.amount_inr_paise));
-    if(expectedAmountPaise > 0 && paymentAmountPaise !== expectedAmountPaise){
+    if(expectedAmountPaise > 0 && paymentAmountPaise < expectedAmountPaise){
       return res.status(400).json({
         ok:false,
         error:"payment_amount_mismatch",
@@ -3333,9 +2856,8 @@ app.post("/api/videos/monetization/verify", requireJwtAuth, async (req, res) => 
 
 app.get("/api/contest/dashboard", async (req, res) => {
   try{
-    const authUser = await resolveOptionalJwtAuth(req);
-    const userId = sanitizeUserId(authUser?.id);
-    const userName = sanitizeDisplayName(authUser?.name || req.query.user_name);
+    const userId = sanitizeUserId(req.query.user_id);
+    const userName = sanitizeDisplayName(req.query.user_name);
     const state = await readContestState();
     const totalAccounts = await getContestTotalAccountCount(state);
     const data = buildContestPayload(state, userId, userName, {
@@ -3351,10 +2873,10 @@ app.get("/api/contest/dashboard", async (req, res) => {
   }
 });
 
-app.post("/api/contest/account/register", requireJwtAuth, async (req, res) => {
-  const userId = getAuthenticatedUserId(req);
-  const userName = getAuthenticatedUserName(req);
-  const userEmail = getAuthenticatedUserEmail(req) || String(req.body?.email || "").trim().toLowerCase();
+app.post("/api/contest/account/register", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  const userName = sanitizeDisplayName(req.body?.user_name);
+  const userEmail = String(req.body?.email || "").trim().toLowerCase();
 
   if(!userId){
     return res.status(400).json({ ok:false, error:"user_id_required" });
@@ -3385,9 +2907,9 @@ app.post("/api/contest/account/register", requireJwtAuth, async (req, res) => {
   }
 });
 
-app.post("/api/contest/share/action", requireJwtAuth, async (req, res) => {
-  const userId = getAuthenticatedUserId(req);
-  const userName = getAuthenticatedUserName(req);
+app.post("/api/contest/share/action", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  const userName = sanitizeDisplayName(req.body?.user_name);
   if(!userId){
     return res.status(400).json({ ok:false, error:"user_id_required" });
   }
@@ -3485,10 +3007,9 @@ app.post("/api/contest/share/visit", async (req, res) => {
 });
 
 app.post("/api/contest/install", async (req, res) => {
-  const authUser = await resolveOptionalJwtAuth(req);
-  const tokenUserId = sanitizeUserId(authUser?.id);
-  const userId = canContestUserPay(tokenUserId) ? tokenUserId : "";
-  const userName = sanitizeDisplayName(authUser?.name || req.body?.user_name);
+  const requestedUserId = sanitizeUserId(req.body?.user_id);
+  const userId = canContestUserPay(requestedUserId) ? requestedUserId : "";
+  const userName = sanitizeDisplayName(req.body?.user_name);
   const refCode = sanitizeReferralCode(req.body?.ref_code);
   const source = sanitizeToken(req.body?.source, 40) || "unknown";
   const installId = sanitizeToken(req.body?.device_id, 120) || contestVisitorFingerprint(req);
@@ -3567,9 +3088,9 @@ app.post("/api/contest/install", async (req, res) => {
   }
 });
 
-app.post("/api/contest/order", requireJwtAuth, async (req, res) => {
-  const userId = getAuthenticatedUserId(req);
-  const userName = getAuthenticatedUserName(req);
+app.post("/api/contest/order", async (req, res) => {
+  const userId = sanitizeUserId(req.body?.user_id);
+  const userName = sanitizeDisplayName(req.body?.user_name);
   const contestId = sanitizeToken(req.body?.contest_id, 40).toLowerCase();
   const sideId = sanitizeToken(req.body?.side_id, 40).toLowerCase();
   const packId = sanitizeToken(req.body?.pack_id, 40).toLowerCase();
@@ -3672,12 +3193,12 @@ app.post("/api/contest/order", requireJwtAuth, async (req, res) => {
   }
 });
 
-app.post("/api/contest/order/verify", requireJwtAuth, async (req, res) => {
+app.post("/api/contest/order/verify", async (req, res) => {
   const orderId = String(req.body?.razorpay_order_id || "").trim();
   const paymentId = String(req.body?.razorpay_payment_id || "").trim();
   const signature = String(req.body?.razorpay_signature || "").trim();
-  const userId = getAuthenticatedUserId(req);
-  const userName = getAuthenticatedUserName(req);
+  const userId = sanitizeUserId(req.body?.user_id);
+  const userName = sanitizeDisplayName(req.body?.user_name);
 
   if(!isContestRazorpayConfigured()){
     return res.status(503).json({
@@ -3704,7 +3225,6 @@ app.post("/api/contest/order/verify", requireJwtAuth, async (req, res) => {
     const paymentStatus = String(paymentSnapshot?.status || "").trim().toLowerCase();
     const paymentCurrency = String(paymentSnapshot?.currency || "").trim().toUpperCase();
     const paymentAmountPaise = Math.round(safeNumber(paymentSnapshot?.amount));
-    const snapshotOwnerId = sanitizeUserId(paymentSnapshot?.notes?.user_id || paymentSnapshot?.notes?.app_user_id || "");
     const paymentCaptured = Boolean(paymentSnapshot?.captured) || paymentStatus === "captured";
 
     if(!paymentStatus || !isRazorpayPaymentStatusAcceptable(paymentStatus) || !paymentCaptured){
@@ -3727,9 +3247,6 @@ app.post("/api/contest/order/verify", requireJwtAuth, async (req, res) => {
         error:"invalid_payment_amount",
         payment_amount_paise: paymentAmountPaise
       });
-    }
-    if(snapshotOwnerId && snapshotOwnerId !== userId){
-      return res.status(403).json({ ok:false, error:"order_owner_mismatch" });
     }
 
     const result = await mutateContestState(state => {
@@ -3876,27 +3393,13 @@ app.options("/tryon", (req, res) => {
   res.sendStatus(204);
 });
 
-app.post("/tryon", requireJwtAuth, upload.single("userImage"), async (req, res) => {
+app.post("/tryon", upload.single("userImage"), async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
 
-  const userId = getAuthenticatedUserId(req);
-  if(!userId){
-    return res.status(401).json({ ok:false, error:"auth_token_invalid" });
-  }
-  const username = getAuthenticatedUserName(req);
-  const userEmail = getAuthenticatedUserEmail(req);
-  let planCode = "free";
-  try{
-    planCode = await resolveSubscriptionPlanForUser(userId);
-    req.verified_plan = planCode;
-  }catch(err){
-    console.error("tryon_plan_validation_error:", err?.stack || err);
-    return res.status(503).json({
-      ok:false,
-      error:"subscription_validation_failed",
-      message:"Unable to validate subscription plan."
-    });
-  }
+  const userId = String(req.body?.user_id || "guest").trim() || "guest";
+  const username = String(req.body?.username || req.body?.user_name || "guest").trim() || "guest";
+  const userEmail = String(req.body?.user_email || "").trim();
+  const planCode = normalizePlanCode(req.body?.user_plan);
   const language = String(req.body?.user_language || "en").trim() || "en";
   const userImage = req.file?.buffer || null;
   const userImageMime = req.file?.mimetype || "image/jpeg";
@@ -3921,8 +3424,11 @@ app.post("/tryon", requireJwtAuth, upload.single("userImage"), async (req, res) 
   };
 
   try{
-    const dateKey = buildIsoDayKey(new Date());
-    const used = await readTryonUsageCount(userId, dateKey);
+    const usageStore = app.locals.tryonUsage || (app.locals.tryonUsage = new Map());
+    const now = new Date();
+    const dateKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const usageKey = `${userId}::${dateKey}`;
+    const used = usageStore.get(usageKey) || 0;
     const limit = getPlanDailyLimit(planCode);
 
     if(limit !== Infinity && used >= limit){
@@ -3935,7 +3441,7 @@ app.post("/tryon", requireJwtAuth, upload.single("userImage"), async (req, res) 
     }
 
     if(limit !== Infinity){
-      await recordTryonUsage(userId, dateKey, planCode);
+      usageStore.set(usageKey, used + 1);
     }
 
     if(!userImage || !userImage.length){
@@ -4023,7 +3529,7 @@ app.use((err, req, res, next) => {
   if (req.path === "/tryon") {
     console.error("Try-on middleware error:", err?.stack || err);
     res.setHeader("Access-Control-Allow-Origin", "*");
-    return res.json(manualProcessingResponse(req.verified_plan || "free"));
+    return res.json(manualProcessingResponse(req.body?.user_plan));
   }
   return next(err);
 });
