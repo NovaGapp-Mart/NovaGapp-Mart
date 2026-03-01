@@ -520,9 +520,6 @@ async function fetchReels(q){
     .select("id,video_url,title,description,keywords,user_id")
     .order("created_at", { ascending:false })
     .limit(120);
-  if(clean){
-    request = request.or(`title.ilike.%${clean}%,description.ilike.%${clean}%,keywords.ilike.%${clean}%`);
-  }
   let { data, error } = await request;
   if(error){
     const msg = String(error?.message || "").toLowerCase();
@@ -532,9 +529,6 @@ async function fetchReels(q){
         .select("id,video_url,title,description,user_id")
         .order("created_at", { ascending:false })
         .limit(120);
-      if(clean){
-        fallback = fallback.or(`title.ilike.%${clean}%,description.ilike.%${clean}%`);
-      }
       ({ data, error } = await fallback);
     }
   }
