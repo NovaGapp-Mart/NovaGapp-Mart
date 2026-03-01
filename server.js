@@ -47,6 +47,8 @@ const BlobCtor = global.Blob;
 const app = express();
 const upload = multer();
 const PORT = Math.max(1, Number(process.env.PORT || 3000) || 3000);
+const PUBLIC_WEB_DIR = path.join(__dirname, "public");
+const STATIC_ROOT_DIR = fsNative.existsSync(PUBLIC_WEB_DIR) ? PUBLIC_WEB_DIR : __dirname;
 const UPLOADS_DIR = path.join(__dirname, "uploads");
 const MANUAL_DIR = path.join(UPLOADS_DIR, "manual-requests");
 const MANUAL_JSON_PATH = path.join(MANUAL_DIR, "requests.json");
@@ -138,7 +140,37 @@ const uploadVideoAssets = multer({
 
 app.use(express.json({ limit: "15mb" }));
 app.use(cors());
-app.use("/uploads", express.static(UPLOADS_DIR));
+app.use("/uploads/videos", express.static(VIDEO_ASSET_UPLOAD_DIR, {
+  dotfiles: "deny",
+  etag: true,
+  index: false,
+  maxAge: "1h"
+}));
+app.use("/uploads/video-thumbs", express.static(VIDEO_ASSET_THUMB_DIR, {
+  dotfiles: "deny",
+  etag: true,
+  index: false,
+  maxAge: "1h"
+}));
+app.use((req, res, next) => {
+  const rawPath = String(req.path || "").trim();
+  const safePath = rawPath.replace(/\\/g, "/").toLowerCase();
+  if(
+    safePath.includes("..")
+    || safePath.startsWith("/sql/")
+    || safePath.startsWith("/uploads/manual-requests/")
+    || safePath.startsWith("/uploads/system/")
+    || safePath.startsWith("/uploads/contest-data/")
+    || safePath.startsWith("/uploads/videos-monetization/")
+    || safePath.endsWith(".sql")
+    || safePath.endsWith(".env")
+    || safePath.endsWith(".ndjson")
+    || safePath.endsWith(".log")
+  ){
+    return res.status(404).json({ ok:false, error:"not_found" });
+  }
+  return next();
+});
 app.get("/uploads/video-thumbs/:fileName", async (req, res, next) => {
   const fileName = path.basename(String(req.params?.fileName || "").trim());
   if(!fileName){
@@ -189,9 +221,10 @@ app.get("/uploads/videos/:fileName", async (req, res, next) => {
   }
   return res.redirect(302, redirectUrl);
 });
-app.use(express.static(__dirname, {
+app.use(express.static(STATIC_ROOT_DIR, {
   dotfiles: "deny",
   etag: true,
+  index: false,
   maxAge: "1h"
 }));
 
@@ -204,6 +237,20 @@ const PUBLIC_SUPABASE_ANON_KEY = String(
   process.env.SUPABASE_ANON_KEY ||
   process.env.CONTEST_SUPABASE_ANON_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  ""
+).trim();
+const SECURITY_SUPABASE_URL = String(
+  process.env.SUPABASE_URL ||
+  process.env.CONTEST_SUPABASE_URL ||
+  ""
+).trim().replace(/\/+$/g, "");
+const SECURITY_SUPABASE_KEY = String(
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.CONTEST_SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_KEY ||
+  process.env.CONTEST_SUPABASE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  process.env.CONTEST_SUPABASE_ANON_KEY ||
   ""
 ).trim();
 const VIDEO_ASSET_SUPABASE_URL = String(
@@ -427,6 +474,627 @@ async function sendFcmLegacyMessage(token, payload){
 function compactText(value, maxLen){
   const cap = Math.max(1, Number(maxLen) || 512);
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, cap);
+}
+
+const SUBSCRIPTION_ORDER_MAP_EVENT = "payment_order_map";
+const SUBSCRIPTION_ORDER_VERIFY_EVENT = "payment_order_verified";
+const DB_STEP_TRYON_USAGE = "tryon_usage";
+const DB_STEP_PUSH_TOKEN = "push_token";
+const DB_STEP_CALL_SIGNAL = "call_signal";
+const SUBSCRIPTION_PLAN_USD = Object.freeze({
+  free: 0,
+  "40": 40,
+  "4000": 4000
+});
+
+function isSecurityStoreConfigured(){
+  return Boolean(SECURITY_SUPABASE_URL && SECURITY_SUPABASE_KEY);
+}
+
+function buildSecurityStoreHeaders(extra){
+  return {
+    apikey: SECURITY_SUPABASE_KEY,
+    Authorization: `Bearer ${SECURITY_SUPABASE_KEY}`,
+    ...(extra && typeof extra === "object" ? extra : {})
+  };
+}
+
+function parseContentRangeCount(raw){
+  const text = String(raw || "").trim();
+  if(!text) return 0;
+  const slash = text.lastIndexOf("/");
+  if(slash < 0) return 0;
+  const total = Number(text.slice(slash + 1));
+  if(!Number.isFinite(total) || total < 0) return 0;
+  return Math.floor(total);
+}
+
+function buildIsoDayKey(dateInput){
+  const date = dateInput instanceof Date ? dateInput : new Date();
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+function buildIsoMonthKey(dateInput){
+  const date = dateInput instanceof Date ? dateInput : new Date();
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+async function securityStoreGet(tableName, queryString){
+  if(!isSecurityStoreConfigured()){
+    return [];
+  }
+  const table = String(tableName || "").trim();
+  if(!table){
+    return [];
+  }
+  const query = String(queryString || "").trim();
+  const endpoint = `${SECURITY_SUPABASE_URL}/rest/v1/${table}${query ? `?${query}` : ""}`;
+  const res = await fetch(endpoint, {
+    method: "GET",
+    headers: buildSecurityStoreHeaders()
+  });
+  if(!res.ok){
+    const body = await res.text().catch(() => "");
+    throw new Error(`security_store_get_failed_${table}_${res.status}:${body.slice(0, 220)}`);
+  }
+  const rows = await res.json().catch(() => []);
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function securityStoreHead(tableName, queryString){
+  if(!isSecurityStoreConfigured()){
+    return 0;
+  }
+  const table = String(tableName || "").trim();
+  if(!table){
+    return 0;
+  }
+  const query = String(queryString || "").trim();
+  const endpoint = `${SECURITY_SUPABASE_URL}/rest/v1/${table}${query ? `?${query}` : ""}`;
+  const res = await fetch(endpoint, {
+    method: "HEAD",
+    headers: buildSecurityStoreHeaders({
+      Prefer: "count=exact"
+    })
+  });
+  if(!res.ok){
+    return 0;
+  }
+  return parseContentRangeCount(res.headers.get("content-range"));
+}
+
+async function securityStoreUpsert(tableName, rows, onConflict){
+  if(!isSecurityStoreConfigured()){
+    return false;
+  }
+  const table = String(tableName || "").trim();
+  const list = Array.isArray(rows) ? rows.filter(Boolean) : [];
+  const conflict = String(onConflict || "").trim();
+  if(!table || !list.length || !conflict){
+    return false;
+  }
+  const endpoint = `${SECURITY_SUPABASE_URL}/rest/v1/${table}?on_conflict=${encodeURIComponent(conflict)}`;
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: buildSecurityStoreHeaders({
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal"
+    }),
+    body: JSON.stringify(list)
+  });
+  if(!res.ok){
+    const body = await res.text().catch(() => "");
+    throw new Error(`security_store_upsert_failed_${table}_${res.status}:${body.slice(0, 220)}`);
+  }
+  return true;
+}
+
+async function securityStoreDelete(tableName, queryString){
+  if(!isSecurityStoreConfigured()){
+    return false;
+  }
+  const table = String(tableName || "").trim();
+  const query = String(queryString || "").trim();
+  if(!table || !query){
+    return false;
+  }
+  const endpoint = `${SECURITY_SUPABASE_URL}/rest/v1/${table}?${query}`;
+  const res = await fetch(endpoint, {
+    method: "DELETE",
+    headers: buildSecurityStoreHeaders({
+      Prefer: "return=minimal"
+    })
+  });
+  if(!res.ok){
+    const body = await res.text().catch(() => "");
+    throw new Error(`security_store_delete_failed_${table}_${res.status}:${body.slice(0, 220)}`);
+  }
+  return true;
+}
+
+function parseBearerToken(req){
+  const raw = String(req.headers?.authorization || "").trim();
+  const match = raw.match(/^Bearer\s+(.+)$/i);
+  return match ? String(match[1] || "").trim() : "";
+}
+
+async function resolveAuthUserFromBearer(token){
+  const accessToken = String(token || "").trim();
+  if(!accessToken || !PUBLIC_SUPABASE_URL || !PUBLIC_SUPABASE_ANON_KEY){
+    return null;
+  }
+  const endpoint = `${String(PUBLIC_SUPABASE_URL).replace(/\/+$/g, "")}/auth/v1/user`;
+  const res = await fetch(endpoint, {
+    method: "GET",
+    headers: {
+      apikey: PUBLIC_SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+  if(res.status === 401 || res.status === 403){
+    return null;
+  }
+  if(!res.ok){
+    const body = await res.text().catch(() => "");
+    throw new Error(`auth_verify_failed_${res.status}:${body.slice(0, 180)}`);
+  }
+  const payload = await res.json().catch(() => null);
+  const userId = sanitizeUserId(payload?.id);
+  if(!userId){
+    return null;
+  }
+  return {
+    id: userId,
+    email: normalizeEmail(payload?.email || ""),
+    name: sanitizeDisplayName(payload?.user_metadata?.full_name || payload?.user_metadata?.name || "")
+  };
+}
+
+async function attachVerifiedUser(req){
+  if(req?.authUser && req.authUser.id){
+    return req.authUser;
+  }
+  const token = parseBearerToken(req);
+  if(!token){
+    return null;
+  }
+  const user = await resolveAuthUserFromBearer(token);
+  if(user){
+    req.authUser = user;
+  }
+  return user;
+}
+
+async function requireJwtAuth(req, res, next){
+  try{
+    const user = await attachVerifiedUser(req);
+    if(!user?.id){
+      return res.status(401).json({ ok:false, error:"auth_required" });
+    }
+    return next();
+  }catch(err){
+    console.error("auth_required_error:", err?.stack || err);
+    return res.status(503).json({ ok:false, error:"auth_verification_failed" });
+  }
+}
+
+function getTrustedUserId(req, ...fallbacks){
+  const tokenUserId = sanitizeUserId(req?.authUser?.id);
+  if(tokenUserId){
+    return tokenUserId;
+  }
+  for(const value of fallbacks){
+    const safe = sanitizeUserId(value);
+    if(safe){
+      return safe;
+    }
+  }
+  return "";
+}
+
+function getTrustedUserName(req, ...fallbacks){
+  const tokenName = sanitizeDisplayName(req?.authUser?.name);
+  if(tokenName){
+    return tokenName;
+  }
+  for(const value of fallbacks){
+    const safe = sanitizeDisplayName(value);
+    if(safe){
+      return safe;
+    }
+  }
+  return "";
+}
+
+function getTrustedUserEmail(req, ...fallbacks){
+  const tokenEmail = normalizeEmail(req?.authUser?.email);
+  if(tokenEmail){
+    return tokenEmail;
+  }
+  for(const value of fallbacks){
+    const safe = normalizeEmail(value);
+    if(safe){
+      return safe;
+    }
+  }
+  return "";
+}
+
+function isSubscriptionStatusActive(statusValue){
+  const status = String(statusValue || "").trim().toLowerCase();
+  if(!status) return true;
+  if(["active", "paid", "trial", "trialing", "premium", "enabled"].includes(status)){
+    return true;
+  }
+  return false;
+}
+
+function isSubscriptionStateExpired(expiresAtValue){
+  const ts = Date.parse(String(expiresAtValue || "").trim());
+  if(!Number.isFinite(ts)){
+    return false;
+  }
+  return ts < Date.now();
+}
+
+function buildSubscriptionGate(planCode, row){
+  const safePlan = normalizePlanCode(planCode);
+  const isPaid = safePlan !== "free";
+  return {
+    user_id: sanitizeUserId(row?.user_id),
+    plan: safePlan,
+    status: String(row?.status || (isPaid ? "active" : "free")).trim().toLowerCase(),
+    plan_active: isPaid,
+    tryon_lane: safePlan === "4000" ? "priority" : "standard",
+    premium_badge: isPaid,
+    started_at: row?.started_at || null,
+    expires_at: row?.expires_at || null,
+    source: compactText(row?.source || "subscription_state", 80),
+    payment_id: compactText(row?.payment_id || "", 120),
+    order_id: compactText(row?.order_id || "", 120),
+    amount_paise: Math.round(Number(row?.amount_paise || 0) || 0),
+    currency: String(row?.currency || "INR").trim().toUpperCase() || "INR",
+    metadata: row?.metadata && typeof row.metadata === "object" ? row.metadata : {}
+  };
+}
+
+async function fetchSubscriptionRow(userId){
+  const safeUserId = sanitizeUserId(userId);
+  if(!safeUserId){
+    return null;
+  }
+  if(!isSecurityStoreConfigured()){
+    return null;
+  }
+  const rows = await securityStoreGet(
+    "subscription_state",
+    `select=user_id,plan,status,started_at,expires_at,source,payment_id,order_id,amount_paise,currency,metadata,updated_at&user_id=eq.${encodeURIComponent(safeUserId)}&limit=1`
+  );
+  if(!rows.length){
+    return null;
+  }
+  return rows[0] && typeof rows[0] === "object" ? rows[0] : null;
+}
+
+async function resolveActiveSubscriptionPlan(userId){
+  const row = await fetchSubscriptionRow(userId);
+  if(!row){
+    return "free";
+  }
+  const plan = normalizePlanCode(row.plan);
+  if(!isSubscriptionStatusActive(row.status) || isSubscriptionStateExpired(row.expires_at)){
+    return "free";
+  }
+  return plan;
+}
+
+async function upsertSubscriptionRow(row){
+  const safeRow = row && typeof row === "object" ? row : {};
+  const userId = sanitizeUserId(safeRow.user_id);
+  if(!userId){
+    return false;
+  }
+  const payload = {
+    user_id: userId,
+    plan: normalizePlanCode(safeRow.plan),
+    status: compactText(safeRow.status || "active", 24).toLowerCase(),
+    started_at: safeRow.started_at || null,
+    expires_at: safeRow.expires_at || null,
+    source: compactText(safeRow.source || "subscription_checkout", 80),
+    payment_id: compactText(safeRow.payment_id || "", 120),
+    order_id: compactText(safeRow.order_id || "", 120),
+    amount_paise: Math.round(Number(safeRow.amount_paise || 0) || 0),
+    currency: String(safeRow.currency || "INR").trim().toUpperCase() || "INR",
+    metadata: safeRow.metadata && typeof safeRow.metadata === "object" ? safeRow.metadata : {},
+    updated_at: new Date().toISOString()
+  };
+  return securityStoreUpsert("subscription_state", [payload], "user_id");
+}
+
+function buildPaymentOrderMapEventId(orderId){
+  const safeOrderId = sanitizeToken(orderId, 120);
+  return safeOrderId ? `payment_order_map_${safeOrderId}` : "";
+}
+
+async function savePaymentOrderBinding(payload){
+  const safe = payload && typeof payload === "object" ? payload : {};
+  const orderId = sanitizeToken(safe.order_id, 120);
+  const userId = sanitizeUserId(safe.user_id);
+  const eventId = buildPaymentOrderMapEventId(orderId);
+  const amountPaise = Math.round(Number(safe.amount_paise || 0) || 0);
+  const currency = String(safe.currency || "INR").trim().toUpperCase() || "INR";
+  if(!eventId || !orderId || !userId || amountPaise < 1){
+    return false;
+  }
+  const row = {
+    event_id: eventId,
+    event_name: SUBSCRIPTION_ORDER_MAP_EVENT,
+    payment_id: "",
+    order_id: orderId,
+    payload: {
+      order_id: orderId,
+      user_id: userId,
+      amount_paise: amountPaise,
+      currency,
+      plan: normalizePlanCode(safe.plan),
+      source: compactText(safe.source || "", 80),
+      created_at: new Date().toISOString()
+    }
+  };
+  return securityStoreUpsert("subscription_webhook_events", [row], "event_id");
+}
+
+async function fetchPaymentOrderBinding(orderId){
+  const eventId = buildPaymentOrderMapEventId(orderId);
+  if(!eventId){
+    return null;
+  }
+  const rows = await securityStoreGet(
+    "subscription_webhook_events",
+    `select=event_id,event_name,order_id,payment_id,payload&event_id=eq.${encodeURIComponent(eventId)}&limit=1`
+  );
+  const row = rows[0] && typeof rows[0] === "object" ? rows[0] : null;
+  if(!row || String(row.event_name || "").trim() !== SUBSCRIPTION_ORDER_MAP_EVENT){
+    return null;
+  }
+  const payload = row.payload && typeof row.payload === "object" ? row.payload : {};
+  return {
+    order_id: sanitizeToken(row.order_id || payload.order_id, 120),
+    user_id: sanitizeUserId(payload.user_id),
+    amount_paise: Math.round(Number(payload.amount_paise || 0) || 0),
+    currency: String(payload.currency || "INR").trim().toUpperCase() || "INR",
+    plan: normalizePlanCode(payload.plan),
+    source: compactText(payload.source || "", 80)
+  };
+}
+
+async function markPaymentOrderVerified(orderId, paymentId, snapshot){
+  const binding = await fetchPaymentOrderBinding(orderId);
+  if(!binding){
+    return false;
+  }
+  const row = {
+    event_id: buildPaymentOrderMapEventId(binding.order_id),
+    event_name: SUBSCRIPTION_ORDER_MAP_EVENT,
+    payment_id: compactText(paymentId, 120),
+    order_id: binding.order_id,
+    payload: {
+      order_id: binding.order_id,
+      user_id: binding.user_id,
+      amount_paise: binding.amount_paise,
+      currency: binding.currency,
+      plan: binding.plan,
+      source: binding.source,
+      verify_event: SUBSCRIPTION_ORDER_VERIFY_EVENT,
+      payment_id: compactText(paymentId, 120),
+      payment_status: compactText(snapshot?.status || "", 40).toLowerCase(),
+      payment_currency: String(snapshot?.currency || "INR").trim().toUpperCase(),
+      payment_amount_paise: Math.round(Number(snapshot?.amount || 0) || 0),
+      verified_at: new Date().toISOString()
+    }
+  };
+  return securityStoreUpsert("subscription_webhook_events", [row], "event_id");
+}
+
+function hashSha1(value){
+  return crypto.createHash("sha1").update(String(value || "")).digest("hex");
+}
+
+function buildPushTokenId(userId, token){
+  const safeUserId = sanitizeUserId(userId);
+  const safeToken = sanitizePushToken(token);
+  if(!safeUserId || !safeToken){
+    return "";
+  }
+  return `push_${safeUserId}_${hashSha1(safeToken).slice(0, 20)}`;
+}
+
+async function persistPushToken(userId, token, extras){
+  const safeUserId = sanitizeUserId(userId);
+  const safeToken = sanitizePushToken(token);
+  const rowId = buildPushTokenId(safeUserId, safeToken);
+  if(!safeUserId || !safeToken || !rowId){
+    return false;
+  }
+  const row = {
+    id: rowId,
+    user_id: safeUserId,
+    step: DB_STEP_PUSH_TOKEN,
+    month_key: buildIsoMonthKey(new Date()),
+    meta: {
+      token: safeToken,
+      platform: sanitizePushPlatform(extras?.platform || "web"),
+      user_agent: compactText(extras?.user_agent || "", 320),
+      updated_at: new Date().toISOString()
+    }
+  };
+  return securityStoreUpsert("automation_funnel_events", [row], "id");
+}
+
+async function fetchPersistedPushTokens(userId){
+  const safeUserId = sanitizeUserId(userId);
+  if(!safeUserId){
+    return [];
+  }
+  const rows = await securityStoreGet(
+    "automation_funnel_events",
+    `select=id,user_id,created_at,meta&user_id=eq.${encodeURIComponent(safeUserId)}&step=eq.${encodeURIComponent(DB_STEP_PUSH_TOKEN)}&order=created_at.desc&limit=120`
+  );
+  return rows
+    .map((row) => {
+      const meta = row?.meta && typeof row.meta === "object" ? row.meta : {};
+      const token = sanitizePushToken(meta.token);
+      if(!token) return null;
+      return {
+        id: compactText(row.id, 160),
+        token,
+        platform: sanitizePushPlatform(meta.platform || "web"),
+        user_agent: compactText(meta.user_agent || "", 320),
+        updated_at: compactText(meta.updated_at || row.created_at || "", 80)
+      };
+    })
+    .filter(Boolean);
+}
+
+async function removePersistedPushToken(userId, token){
+  const rowId = buildPushTokenId(userId, token);
+  if(!rowId){
+    return false;
+  }
+  return securityStoreDelete(
+    "automation_funnel_events",
+    `id=eq.${encodeURIComponent(rowId)}&step=eq.${encodeURIComponent(DB_STEP_PUSH_TOKEN)}`
+  );
+}
+
+async function persistCallSignal(signal, createdAtIso, expiresAtIso, signalId){
+  const safeSignal = signal && typeof signal === "object" ? signal : {};
+  const toUserId = sanitizeCallUserId(safeSignal.to_user_id);
+  const fromUserId = sanitizeCallUserId(safeSignal.from_user_id);
+  const callId = sanitizeCallId(safeSignal.call_id);
+  const type = sanitizeCallType(safeSignal.type);
+  const rowId = compactText(signalId || "", 160);
+  if(!rowId || !toUserId || !fromUserId || !callId || !type){
+    return false;
+  }
+  const row = {
+    id: rowId,
+    user_id: toUserId,
+    step: DB_STEP_CALL_SIGNAL,
+    month_key: buildIsoDayKey(new Date()),
+    meta: {
+      id: rowId,
+      to_user_id: toUserId,
+      from_user_id: fromUserId,
+      call_id: callId,
+      type,
+      media_type: sanitizeCallMediaType(safeSignal.media_type),
+      reason: sanitizeCallReason(safeSignal.reason),
+      sdp: safeSignal.sdp || null,
+      candidate: safeSignal.candidate || null,
+      created_at: createdAtIso || new Date().toISOString(),
+      expires_at: expiresAtIso || new Date(Date.now() + CALL_SIGNAL_DEFAULT_TTL_SEC * 1000).toISOString()
+    }
+  };
+  return securityStoreUpsert("automation_funnel_events", [row], "id");
+}
+
+async function fetchPersistedCallSignals(userId, withUserId, limit){
+  const safeUserId = sanitizeCallUserId(userId);
+  const safeWithUserId = sanitizeCallUserId(withUserId);
+  const safeLimit = clampInt(limit, 1, 100, 25);
+  if(!safeUserId){
+    return [];
+  }
+  const rows = await securityStoreGet(
+    "automation_funnel_events",
+    `select=id,created_at,meta&user_id=eq.${encodeURIComponent(safeUserId)}&step=eq.${encodeURIComponent(DB_STEP_CALL_SIGNAL)}&order=created_at.desc&limit=${Math.max(50, safeLimit * 3)}`
+  );
+  const nowMs = Date.now();
+  return rows
+    .map((row) => {
+      const meta = row?.meta && typeof row.meta === "object" ? row.meta : {};
+      const expiresAt = String(meta.expires_at || "").trim();
+      const expiresMs = Date.parse(expiresAt);
+      if(Number.isFinite(expiresMs) && expiresMs <= nowMs){
+        return null;
+      }
+      const fromId = sanitizeCallUserId(meta.from_user_id);
+      if(safeWithUserId && fromId !== safeWithUserId){
+        return null;
+      }
+      const parsed = normalizeCallSignalPayload(meta);
+      if(!parsed){
+        return null;
+      }
+      return {
+        id: compactText(meta.id || row.id || "", 160),
+        to_user_id: parsed.to_user_id,
+        from_user_id: parsed.from_user_id,
+        call_id: parsed.call_id,
+        type: parsed.type,
+        media_type: parsed.media_type,
+        reason: parsed.reason,
+        sdp: parsed.sdp,
+        candidate: parsed.candidate,
+        created_at: compactText(meta.created_at || row.created_at || "", 80),
+        expires_at: compactText(meta.expires_at || "", 80)
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => Date.parse(String(a.created_at || "")) - Date.parse(String(b.created_at || "")))
+    .slice(-safeLimit);
+}
+
+function buildTryonUsageRowId(userId, dayKey){
+  const safeUserId = sanitizeUserId(userId);
+  const safeDayKey = compactText(dayKey, 24);
+  return `${DB_STEP_TRYON_USAGE}_${safeUserId}_${safeDayKey}_${Date.now()}_${crypto.randomBytes(2).toString("hex")}`;
+}
+
+async function fetchTryonUsageCount(userId, dayKey){
+  const safeUserId = sanitizeUserId(userId);
+  const safeDayKey = compactText(dayKey, 24);
+  if(!safeUserId || !safeDayKey || !isSecurityStoreConfigured()){
+    return 0;
+  }
+  const query = `user_id=eq.${encodeURIComponent(safeUserId)}&step=eq.${encodeURIComponent(DB_STEP_TRYON_USAGE)}&month_key=eq.${encodeURIComponent(safeDayKey)}`;
+  const count = await securityStoreHead("automation_funnel_events", query);
+  if(count > 0){
+    return count;
+  }
+  const rows = await securityStoreGet("automation_funnel_events", `select=id&${query}&limit=500`);
+  return rows.length;
+}
+
+async function persistTryonUsage(userId, dayKey, planCode){
+  const safeUserId = sanitizeUserId(userId);
+  const safeDayKey = compactText(dayKey, 24);
+  if(!safeUserId || !safeDayKey){
+    return false;
+  }
+  const row = {
+    id: buildTryonUsageRowId(safeUserId, safeDayKey),
+    user_id: safeUserId,
+    step: DB_STEP_TRYON_USAGE,
+    month_key: safeDayKey,
+    meta: {
+      plan: normalizePlanCode(planCode),
+      source: "tryon",
+      ts: new Date().toISOString()
+    }
+  };
+  return securityStoreUpsert("automation_funnel_events", [row], "id");
+}
+
+async function resolvePlanAmountPaise(planCode){
+  const safePlan = normalizePlanCode(planCode);
+  const usd = Number(SUBSCRIPTION_PLAN_USD[safePlan] || 0);
+  if(!usd){
+    return 0;
+  }
+  const rate = await getUsdInrRateSafe();
+  return Math.max(100, Math.round(usd * rate * 100));
 }
 
 function buildAbsoluteServerUrl(req, relativePath){

@@ -42,6 +42,15 @@ body{
   font-size:14px;cursor:pointer;padding:0
 }
 .chat-action-btn:disabled{opacity:.5;cursor:not-allowed}
+.chat-section-label{
+  padding:8px 10px 4px;
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  color:#888;
+  background:#fff;
+  border-top:1px solid #f2f2f2;
+}
 .contacts-panel{
   background:#fff;border-bottom:1px solid #ddd;display:none
 }
@@ -106,6 +115,30 @@ body{
   text-decoration-thickness:1px;
   text-underline-offset:2px;
   word-break:break-all;
+  pointer-events:auto;
+  touch-action:manipulation;
+  cursor:pointer;
+}
+.msg-sender{
+  font-size:11px;
+  font-weight:700;
+  margin-bottom:3px;
+  opacity:.9;
+}
+.chat-badge{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:22px;
+  height:16px;
+  padding:0 6px;
+  border-radius:8px;
+  font-size:9px;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+  background:#111;
+  color:#fff;
+  margin-left:6px;
 }
 .msg-media{display:block;max-width:100%;border-radius:10px;margin-bottom:6px}
 .msg-media.video{max-height:320px}
@@ -314,6 +347,8 @@ body.chat-disabled #replyPreview{display:none !important}
   <div class="chat-actions">
     <button class="chat-action-btn" id="audioCallBtn" title="Call" aria-label="Call">📞</button>
     <button class="chat-action-btn" id="videoCallBtn" title="Video call" aria-label="Video call">🎥</button>
+    <button class="chat-action-btn" id="createGroupBtn" title="Create group" aria-label="Create group">👥</button>
+    <button class="chat-action-btn" id="manageGroupBtn" title="Manage group" aria-label="Manage group">⚙</button>
     <button class="chat-action-btn" id="chatMoreBtn" title="More options" aria-label="More options">⋮</button>
     <button id="toggleContacts">Contacts</button>
   </div>
@@ -421,6 +456,8 @@ const chatSearch = document.getElementById("chatSearch");
 const toggleContacts = document.getElementById("toggleContacts");
 const audioCallBtn = document.getElementById("audioCallBtn");
 const videoCallBtn = document.getElementById("videoCallBtn");
+const createGroupBtn = document.getElementById("createGroupBtn");
+const manageGroupBtn = document.getElementById("manageGroupBtn");
 const chatMoreBtn = document.getElementById("chatMoreBtn");
 const chatMenuBtn = document.getElementById("chatMenuBtn");
 const chatMenu = document.getElementById("chatMenu");
@@ -467,8 +504,14 @@ let currentUser = null;
 let myUid = null;
 let myName = "";
 let myPhoto = "";
+let myPhone = "";
 const URL_PARAMS = new URLSearchParams(location.search);
-let otherUid = URL_PARAMS.get("uid");
+const requestedDirectUid = String(URL_PARAMS.get("uid") || "").trim();
+const requestedDirectPhone = normalizePhoneNumber(URL_PARAMS.get("phone"));
+let activeGroupId = String(URL_PARAMS.get("gid") || "").trim();
+let chatMode = activeGroupId ? "group" : "direct";
+let otherUid = requestedDirectUid || "";
+let otherPhone = requestedDirectPhone || "";
 const callActionFromQuery = String(URL_PARAMS.get("call_action") || "").trim().toLowerCase();
 const callIdFromQuery = String(URL_PARAMS.get("call_id") || "").trim();
 let otherUsername = "";
@@ -516,9 +559,18 @@ let callVideoInputIndex = -1;
 let callSignalPollTimer = null;
 let callSignalSeenIds = new Set();
 let autoCallAnswerAttempted = false;
+let groupSubscription = null;
+let groupSupportChecked = false;
+let groupSupportAvailable = false;
+let groupMetaCache = new Map();
+let groupMemberMap = new Map();
+let groupRoleMap = new Map();
+let myGroupIds = new Set();
+let groupLastLinkOpenAt = 0;
 const CALL_SIGNAL_POLL_MS = 2000;
 const CALL_SIGNAL_REMOTE_TYPES = new Set(["call-offer","call-answer","call-end","call-decline","call-busy","ice"]);
 const selectCols = "id,sender_id,receiver_id,message,media_url,media_type,created_at";
+const selectGroupCols = "id,group_id,sender_id,message,media_url,media_type,created_at";
 const CHAT_READ_EVENT_PREFIX = "__NOVA_READ__:";
 let otherSeenAt = "";
 let lastSentReadAt = "";
@@ -567,6 +619,37 @@ function scrollToBottom(smooth){
   }else{
     chatBox.scrollTop = top;
   }
+}
+
+function isGroupMode(){
+  return chatMode === "group" && !!activeGroupId;
+}
+
+function isDirectMode(){
+  return !isGroupMode();
+}
+
+function buildDirectChatLink(uid, phone){
+  const normalizedPhone = normalizePhoneNumber(phone);
+  if(normalizedPhone){
+    return "chat.html?phone=" + encodeURIComponent(normalizedPhone);
+  }
+  const id = String(uid || "").trim();
+  return id ? ("chat.html?uid=" + encodeURIComponent(id)) : "chat.html";
+}
+
+function buildGroupChatLink(groupId){
+  const gid = String(groupId || "").trim();
+  return gid ? ("chat.html?gid=" + encodeURIComponent(gid)) : "chat.html";
+}
+
+function isMissingRelationError(error){
+  const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
+  return (text.includes("relation") || text.includes("table")) && text.includes("does not exist");
+}
+
+function isOwnMessage(m){
+  return String(m?.sender_id || "") === String(myUid || "");
 }
 
 function formatTime(value){
@@ -640,12 +723,12 @@ function isReadEventMessage(m){
 }
 
 function getSeenStorageKey(){
-  if(!myUid || !otherUid) return "";
+  if(!isDirectMode() || !myUid || !otherUid) return "";
   return `chat_seen_${myUid}_${otherUid}`;
 }
 
 function getSentReadStorageKey(){
-  if(!myUid || !otherUid) return "";
+  if(!isDirectMode() || !myUid || !otherUid) return "";
   return `chat_sent_read_${myUid}_${otherUid}`;
 }
 
@@ -705,6 +788,7 @@ function updateSeenAt(nextSeenAt){
 }
 
 function processReadEventMessage(m){
+  if(m?.group_id) return false;
   const evt = parseChatReadEvent(m?.message || "");
   if(!evt) return false;
   if(!myUid || !otherUid) return true;
@@ -715,7 +799,7 @@ function processReadEventMessage(m){
 }
 
 async function emitReadReceipt(seenAt){
-  if(!supa || !myUid || !otherUid) return;
+  if(!isDirectMode() || !supa || !myUid || !otherUid) return;
   const iso = getIsoTime(seenAt || "");
   if(!iso) return;
   if(lastSentReadAt && Date.parse(iso) <= Date.parse(lastSentReadAt)) return;
@@ -767,8 +851,14 @@ function applyAvatar(imgEl, photoUrl, name){
 function updateChatSub(statusText){
   if(!chatSub) return;
   const parts = [];
-  if(otherUsername) parts.push("@" + otherUsername);
-  if(statusText) parts.push(statusText);
+  if(isGroupMode()){
+    const name = String(statusText || "").trim();
+    if(name) parts.push(name);
+  }else{
+    if(otherUsername) parts.push("@" + otherUsername);
+    if(otherPhone) parts.push(otherPhone);
+    if(statusText) parts.push(statusText);
+  }
   chatSub.textContent = parts.join(" • ");
 }
 
@@ -857,6 +947,31 @@ function normalizeMessageUrl(urlText){
   }
 }
 
+function cleanDetectedUrlToken(token){
+  const raw = String(token || "").trim();
+  if(!raw) return "";
+  return raw.replace(/[)\],.!?;:'"]+$/g, "");
+}
+
+function openMessageLinkInBrowser(urlText){
+  const href = normalizeMessageUrl(urlText);
+  if(!href) return;
+  const now = Date.now();
+  if(now - groupLastLinkOpenAt < 280){
+    return;
+  }
+  groupLastLinkOpenAt = now;
+  let opened = null;
+  try{
+    opened = window.open(href, "_blank", "noopener,noreferrer");
+  }catch(_){
+    opened = null;
+  }
+  if(!opened){
+    location.assign(href);
+  }
+}
+
 function setMessageTextContent(target, value){
   if(!target) return;
   target.textContent = "";
@@ -868,28 +983,32 @@ function setMessageTextContent(target, value){
   let match;
   while((match = urlRegex.exec(raw))){
     const start = match.index;
+    const fullToken = match[0];
+    const cleanToken = cleanDetectedUrlToken(fullToken);
+    const trailing = fullToken.slice(cleanToken.length);
+    const tokenEnd = start + cleanToken.length;
     const end = urlRegex.lastIndex;
     if(start > lastIndex){
       appendTextWithLineBreaks(target, raw.slice(lastIndex, start));
     }
 
-    const href = normalizeMessageUrl(match[0]);
+    const href = normalizeMessageUrl(cleanToken);
     if(href){
       const link = document.createElement("a");
       link.className = "msg-link";
       link.href = href;
-      link.textContent = match[0];
-      link.rel = "noopener";
-      if(href.startsWith(location.origin)){
-        link.target = "_self";
-      }else{
-        link.target = "_blank";
-      }
+      link.dataset.href = href;
+      link.textContent = cleanToken;
+      link.rel = "noopener noreferrer nofollow";
+      link.target = "_blank";
       target.appendChild(link);
     }else{
-      appendTextWithLineBreaks(target, match[0]);
+      appendTextWithLineBreaks(target, cleanToken);
     }
-    lastIndex = end;
+    if(trailing){
+      appendTextWithLineBreaks(target, trailing);
+    }
+    lastIndex = Math.max(end, tokenEnd);
   }
 
   if(lastIndex < raw.length){
@@ -1178,6 +1297,10 @@ async function readUserRowFlexible(userId){
   const id = String(userId || "").trim();
   if(!id || !supa) return null;
   const selects = [
+    "username,full_name,display_name,email,photo,phone_number",
+    "username,full_name,email,photo,phone_number",
+    "username,full_name,display_name,photo,phone_number",
+    "username,full_name,photo,phone_number",
     "username,full_name,display_name,email,photo",
     "username,full_name,email,photo",
     "username,full_name,display_name,photo",
@@ -1394,7 +1517,7 @@ function maybeAutoAnswerFromQuery(){
 }
 
 async function getUserSummary(userId){
-  if(!userId) return { name:"Member", photo:"", username:"", verified:false, trust_score:0 };
+  if(!userId) return { name:"Member", photo:"", username:"", phone:"", verified:false, trust_score:0 };
   if(userCache.has(userId)) return userCache.get(userId);
   const data = await readUserRowFlexible(userId);
   let backend = null;
@@ -1418,6 +1541,7 @@ async function getUserSummary(userId){
     name: safeName,
     photo: data?.photo || backend?.photo || "",
     username: safeUsername,
+    phone: normalizePhoneNumber(data?.phone_number || backend?.phone_number || ""),
     verified: !!backend?.verified,
     trust_score: Math.max(0, Number(backend?.trust_score || 0))
   };
@@ -1427,27 +1551,53 @@ async function getUserSummary(userId){
 
 async function notifyMessage(m){
   if(!m) return;
+  if(isOwnMessage(m)) return;
   if(isReadEventMessage(m)) return;
   const sender = await getUserSummary(m.sender_id);
   const type = normalizeMediaType(m.media_type);
   const preview = m.message || (type === "image" ? "Photo" : type === "video" ? "Video" : type === "document" ? "Document" : "Message");
   const icon = sender.photo || makeAvatarDataUrl(sender.name || "User");
-  const targetUid = m.sender_id === myUid ? m.receiver_id : m.sender_id;
+  let title = sender.name;
+  let targetLink = "";
+
+  if(m.group_id){
+    const gid = String(m.group_id || "").trim();
+    const cached = groupMetaCache.get(gid);
+    let groupName = String(cached?.name || "").trim();
+    if(!groupName && supa){
+      try{
+        const { data } = await supa
+          .from("chat_groups")
+          .select("id,name")
+          .eq("id", gid)
+          .maybeSingle();
+        if(data){
+          groupMetaCache.set(gid, data);
+          groupName = String(data.name || "").trim();
+        }
+      }catch(_){ }
+    }
+    title = groupName ? `${sender.name} • ${groupName}` : sender.name;
+    targetLink = buildGroupChatLink(gid);
+  }else{
+    const targetUid = m.sender_id === myUid ? m.receiver_id : m.sender_id;
+    targetLink = buildDirectChatLink(targetUid, sender.phone || "");
+  }
 
   if(document.hidden && "Notification" in window && Notification.permission === "granted"){
     try{
-      const notif = new Notification(sender.name, { body: preview, icon, badge: icon });
+      const notif = new Notification(title, { body: preview, icon, badge: icon });
       notif.onclick = () => {
         try{ notif.close(); }catch(_){}
         window.focus();
-        if(targetUid){
-          location.href = "chat.html?uid=" + encodeURIComponent(targetUid);
+        if(targetLink){
+          location.href = targetLink;
         }
       };
       return;
     }catch(_){}
   }
-  showToast(sender.name, preview, sender.photo || icon);
+  showToast(title, preview, sender.photo || icon);
 }
 
 function setContactsHint(message){
@@ -1585,6 +1735,489 @@ function coerceContact(item){
   return null;
 }
 
+function parsePhoneInput(raw){
+  const seen = new Set();
+  const out = [];
+  parseManualContacts(raw).forEach(entry => {
+    const phone = normalizePhoneNumber(entry?.phone_number || entry?.phone || "");
+    if(!phone || seen.has(phone)) return;
+    seen.add(phone);
+    out.push(phone);
+  });
+  return out;
+}
+
+async function fetchUsersByPhones(phoneNumbers){
+  const numbers = Array.from(new Set(
+    (Array.isArray(phoneNumbers) ? phoneNumbers : [])
+      .map(normalizePhoneNumber)
+      .filter(Boolean)
+  )).slice(0, 300);
+  if(!numbers.length || !supa){
+    return [];
+  }
+  const selectPlans = [
+    "user_id,username,full_name,display_name,photo,email,phone_number",
+    "user_id,username,full_name,photo,email,phone_number",
+    "user_id,username,full_name,photo,phone_number"
+  ];
+  for(const fields of selectPlans){
+    const { data, error } = await supa
+      .from("users")
+      .select(fields)
+      .in("phone_number", numbers)
+      .limit(500);
+    if(!error){
+      return Array.isArray(data) ? data : [];
+    }
+    if(!isMissingColumnError(error)){
+      break;
+    }
+  }
+  return [];
+}
+
+async function resolveDirectTargetFromQuery(){
+  if(isGroupMode()) return;
+  if(!supa) return;
+  if(otherUid){
+    const profile = await getUserSummary(otherUid);
+    otherPhone = normalizePhoneNumber(otherPhone || profile?.phone || "");
+    return;
+  }
+  const fromPhone = normalizePhoneNumber(otherPhone || requestedDirectPhone || "");
+  if(!fromPhone) return;
+  const users = await fetchUsersByPhones([fromPhone]);
+  const matched = users.find(u => normalizePhoneNumber(u?.phone_number) === fromPhone) || users[0];
+  const target = String(matched?.user_id || "").trim();
+  if(!target || target === myUid) return;
+  otherUid = target;
+  otherPhone = fromPhone;
+}
+
+async function ensureGroupSupport(){
+  if(groupSupportChecked){
+    return groupSupportAvailable;
+  }
+  groupSupportChecked = true;
+  groupSupportAvailable = false;
+  if(!supa){
+    return false;
+  }
+  try{
+    const probes = [
+      { table:"chat_groups", fields:"id" },
+      { table:"chat_group_members", fields:"group_id,user_id" },
+      { table:"chat_group_messages", fields:"group_id,sender_id,created_at" }
+    ];
+    for(const probe of probes){
+      const { error } = await supa
+        .from(probe.table)
+        .select(probe.fields)
+        .limit(1);
+      if(error){
+        if(isMissingRelationError(error) || isMissingColumnError(error)){
+          return false;
+        }
+        return false;
+      }
+    }
+    groupSupportAvailable = true;
+    return true;
+  }catch(_){
+    return false;
+  }
+}
+
+async function fetchGroupMembers(groupId){
+  const gid = String(groupId || "").trim();
+  if(!gid || !supa) return [];
+  const plans = [
+    "user_id,role,joined_at",
+    "user_id,role",
+    "user_id"
+  ];
+  for(const fields of plans){
+    const { data, error } = await supa
+      .from("chat_group_members")
+      .select(fields)
+      .eq("group_id", gid)
+      .limit(1000);
+    if(!error){
+      return Array.isArray(data) ? data : [];
+    }
+    if(!isMissingColumnError(error)){
+      return [];
+    }
+  }
+  return [];
+}
+
+function isCurrentUserGroupAdmin(){
+  if(!isGroupMode()) return false;
+  const directAdminMatch = String(groupMetaCache.get(activeGroupId)?.admin_id || "") === String(myUid || "");
+  if(directAdminMatch) return true;
+  return String(groupRoleMap.get(String(myUid || "")) || "").toLowerCase() === "admin";
+}
+
+function refreshGroupSubtitle(){
+  if(!isGroupMode()) return;
+  const memberCount = Math.max(1, Number(groupMemberMap.size || 0));
+  const adminText = isCurrentUserGroupAdmin() ? "You are admin" : "Group chat";
+  updateChatSub(`${memberCount} members • ${adminText}`);
+}
+
+async function loadGroupContext(){
+  if(!isGroupMode() || !activeGroupId || !myUid || !supa){
+    return false;
+  }
+  if(!(await ensureGroupSupport())){
+    activeGroupId = "";
+    chatMode = "direct";
+    return false;
+  }
+
+  const { data: groupRow, error: groupErr } = await supa
+    .from("chat_groups")
+    .select("id,name,admin_id,created_at")
+    .eq("id", activeGroupId)
+    .maybeSingle();
+  if(groupErr || !groupRow){
+    console.error("loadGroupContext group error", groupErr);
+    activeGroupId = "";
+    chatMode = "direct";
+    return false;
+  }
+
+  const members = await fetchGroupMembers(activeGroupId);
+  const allowed = members.some(item => String(item?.user_id || "") === String(myUid || ""));
+  if(!allowed){
+    alert("You are not a member of this group.");
+    location.href = "chat.html";
+    return false;
+  }
+
+  groupMemberMap = new Map();
+  groupRoleMap = new Map();
+  members.forEach(item => {
+    const uid = String(item?.user_id || "").trim();
+    if(!uid) return;
+    groupMemberMap.set(uid, true);
+    groupRoleMap.set(uid, String(item?.role || "").trim().toLowerCase());
+  });
+  if(groupRow.admin_id){
+    groupRoleMap.set(String(groupRow.admin_id), "admin");
+  }
+  groupMetaCache.set(String(groupRow.id), groupRow);
+  myGroupIds.add(String(groupRow.id));
+
+  const groupName = String(groupRow.name || "Group").trim() || "Group";
+  chatName.innerText = groupName;
+  applyAvatar(chatAvatar, "", groupName);
+  otherUsername = "";
+  otherPhone = "";
+  refreshGroupSubtitle();
+  if(manageGroupBtn){
+    manageGroupBtn.style.display = "inline-flex";
+    manageGroupBtn.disabled = !isCurrentUserGroupAdmin();
+  }
+  return true;
+}
+
+async function createGroupChat(){
+  if(!myUid || !supa) return;
+  const ok = await ensureGroupSupport();
+  if(!ok){
+    alert("Group chat tables are not available yet.");
+    return;
+  }
+  const groupName = String(prompt("Group name:", "") || "").trim();
+  if(!groupName) return;
+  const rawPhones = prompt("Add members by phone number (comma separated). Optional.", "") || "";
+  const phones = parsePhoneInput(rawPhones);
+  const matchedUsers = await fetchUsersByPhones(phones);
+  const memberIds = new Set([myUid]);
+  matchedUsers.forEach(user => {
+    const uid = String(user?.user_id || "").trim();
+    if(uid) memberIds.add(uid);
+  });
+
+  const payload = {
+    name: groupName.slice(0, 80),
+    admin_id: myUid,
+    created_at: new Date().toISOString()
+  };
+  const { data: groupRow, error: groupErr } = await supa
+    .from("chat_groups")
+    .insert(payload)
+    .select("id,name,admin_id,created_at")
+    .single();
+
+  if(groupErr || !groupRow?.id){
+    alert(groupErr?.message || "Unable to create group.");
+    return;
+  }
+
+  const nowIso = new Date().toISOString();
+  const rows = Array.from(memberIds).map(uid => ({
+    group_id: groupRow.id,
+    user_id: uid,
+    role: uid === myUid ? "admin" : "member",
+    joined_at: nowIso
+  }));
+
+  const { error: memberErr } = await supa
+    .from("chat_group_members")
+    .upsert(rows, { onConflict: "group_id,user_id" });
+  if(memberErr){
+    alert(memberErr.message || "Group created but members were not added.");
+  }
+
+  await loadChatList();
+  location.href = buildGroupChatLink(groupRow.id);
+}
+
+async function addMembersToActiveGroup(){
+  if(!isGroupMode() || !activeGroupId || !myUid || !supa) return;
+  if(!isCurrentUserGroupAdmin()){
+    alert("Only group admin can add members.");
+    return;
+  }
+  const raw = prompt("Enter phone numbers to add (comma separated):", "");
+  if(!raw) return;
+  const phones = parsePhoneInput(raw);
+  if(!phones.length){
+    alert("No valid phone numbers found.");
+    return;
+  }
+  const users = await fetchUsersByPhones(phones);
+  const rows = users
+    .map(user => String(user?.user_id || "").trim())
+    .filter(uid => uid && uid !== myUid)
+    .map(uid => ({
+      group_id: activeGroupId,
+      user_id: uid,
+      role: "member",
+      joined_at: new Date().toISOString()
+    }));
+  if(!rows.length){
+    alert("No app users found for those numbers.");
+    return;
+  }
+  const { error } = await supa
+    .from("chat_group_members")
+    .upsert(rows, { onConflict:"group_id,user_id" });
+  if(error){
+    alert(error.message || "Unable to add members.");
+    return;
+  }
+  await loadGroupContext();
+  await loadChatList();
+}
+
+async function removeMembersFromActiveGroup(){
+  if(!isGroupMode() || !activeGroupId || !myUid || !supa) return;
+  if(!isCurrentUserGroupAdmin()){
+    alert("Only group admin can remove members.");
+    return;
+  }
+  const raw = prompt("Enter phone numbers to remove (comma separated):", "");
+  if(!raw) return;
+  const phones = parsePhoneInput(raw);
+  if(!phones.length){
+    alert("No valid phone numbers found.");
+    return;
+  }
+  const users = await fetchUsersByPhones(phones);
+  const removableIds = users
+    .map(user => String(user?.user_id || "").trim())
+    .filter(uid => uid && uid !== myUid && uid !== String(groupMetaCache.get(activeGroupId)?.admin_id || ""));
+  if(!removableIds.length){
+    alert("No removable group members matched those numbers.");
+    return;
+  }
+  const { error } = await supa
+    .from("chat_group_members")
+    .delete()
+    .eq("group_id", activeGroupId)
+    .in("user_id", removableIds);
+  if(error){
+    alert(error.message || "Unable to remove members.");
+    return;
+  }
+  await loadGroupContext();
+  await loadChatList();
+}
+
+async function leaveGroupChat(groupId){
+  const gid = String(groupId || "").trim();
+  if(!gid || !myUid || !supa) return;
+  const shouldLeave = confirm("Leave this group?");
+  if(!shouldLeave) return;
+  const { error } = await supa
+    .from("chat_group_members")
+    .delete()
+    .eq("group_id", gid)
+    .eq("user_id", myUid);
+  if(error){
+    alert(error.message || "Unable to leave group.");
+    return;
+  }
+  myGroupIds.delete(gid);
+  groupMetaCache.delete(gid);
+  if(String(activeGroupId || "") === gid){
+    location.href = "chat.html";
+    return;
+  }
+  await loadChatList();
+}
+
+async function loadGroupChats(){
+  if(!myUid || !supa) return [];
+  const ok = await ensureGroupSupport();
+  if(!ok){
+    return [];
+  }
+
+  let memberships = [];
+  let membersErr = null;
+  for(const fields of ["group_id,role", "group_id"]){
+    const result = await supa
+      .from("chat_group_members")
+      .select(fields)
+      .eq("user_id", myUid)
+      .limit(1000);
+    memberships = Array.isArray(result?.data) ? result.data : [];
+    membersErr = result?.error || null;
+    if(!membersErr) break;
+    if(!isMissingColumnError(membersErr)) break;
+  }
+  if(membersErr){
+    if(!isMissingRelationError(membersErr)){
+      console.error("loadGroupChats memberships error", membersErr);
+    }
+    return [];
+  }
+  const groupIds = Array.from(new Set((memberships || []).map(row => String(row?.group_id || "").trim()).filter(Boolean)));
+  myGroupIds = new Set(groupIds);
+  if(!groupIds.length){
+    return [];
+  }
+
+  const { data: groups, error: groupsErr } = await supa
+    .from("chat_groups")
+    .select("id,name,admin_id,created_at")
+    .in("id", groupIds)
+    .limit(600);
+  if(groupsErr){
+    console.error("loadGroupChats groups error", groupsErr);
+    return [];
+  }
+  (groups || []).forEach(group => {
+    groupMetaCache.set(String(group?.id || ""), group);
+  });
+
+  const { data: messageRows, error: msgErr } = await supa
+    .from("chat_group_messages")
+    .select(selectGroupCols)
+    .in("group_id", groupIds)
+    .order("created_at", { ascending:false })
+    .limit(2000);
+  if(msgErr && !isMissingRelationError(msgErr)){
+    console.error("loadGroupChats messages error", msgErr);
+  }
+
+  const { data: countRows } = await supa
+    .from("chat_group_members")
+    .select("group_id,user_id")
+    .in("group_id", groupIds)
+    .limit(5000);
+  const countMap = new Map();
+  (countRows || []).forEach(row => {
+    const gid = String(row?.group_id || "");
+    if(!gid) return;
+    countMap.set(gid, Number(countMap.get(gid) || 0) + 1);
+  });
+
+  const latestByGroup = new Map();
+  (messageRows || []).forEach(row => {
+    const gid = String(row?.group_id || "").trim();
+    if(!gid || latestByGroup.has(gid)) return;
+    latestByGroup.set(gid, row);
+  });
+
+  const senderIds = Array.from(new Set(
+    Array.from(latestByGroup.values())
+      .map(item => String(item?.sender_id || "").trim())
+      .filter(uid => uid && uid !== myUid)
+  ));
+  await Promise.all(senderIds.map(uid => getUserSummary(uid).catch(() => null)));
+
+  return (groups || []).map(group => {
+    const gid = String(group?.id || "").trim();
+    const latest = latestByGroup.get(gid) || null;
+    const sender = latest?.sender_id && latest.sender_id !== myUid ? userCache.get(latest.sender_id) : null;
+    const basePreview = latest ? getMessagePreview(latest) : "Group created";
+    const withSender = sender?.name ? `${sender.name}: ${basePreview}` : basePreview;
+    return {
+      id: gid,
+      kind: "group",
+      name: String(group?.name || "Group").trim() || "Group",
+      username: "",
+      phone: "",
+      photo: "",
+      member_count: Number(countMap.get(gid) || 0),
+      is_admin: String(group?.admin_id || "") === String(myUid || ""),
+      lastMessage: withSender,
+      created_at: latest?.created_at || group?.created_at || ""
+    };
+  });
+}
+
+async function upsertGroupChatListEntry(m){
+  if(!m?.group_id) return;
+  const gid = String(m.group_id || "").trim();
+  if(!gid) return;
+  if(!myGroupIds.has(gid) && String(activeGroupId || "") !== gid){
+    return;
+  }
+  let meta = groupMetaCache.get(gid);
+  if(!meta && supa){
+    const { data } = await supa
+      .from("chat_groups")
+      .select("id,name,admin_id,created_at")
+      .eq("id", gid)
+      .maybeSingle();
+    if(data){
+      meta = data;
+      groupMetaCache.set(gid, data);
+    }
+  }
+
+  const sender = m.sender_id && m.sender_id !== myUid ? await getUserSummary(m.sender_id).catch(() => null) : null;
+  const preview = sender?.name ? `${sender.name}: ${getMessagePreview(m)}` : getMessagePreview(m);
+  const entry = {
+    id: gid,
+    kind: "group",
+    name: String(meta?.name || "Group").trim() || "Group",
+    username: "",
+    phone: "",
+    photo: "",
+    member_count: Number(meta?.member_count || groupMemberMap.size || 0),
+    is_admin: String(meta?.admin_id || "") === String(myUid || ""),
+    lastMessage: preview,
+    created_at: m.created_at
+  };
+  const existing = allChats.find(item => item.kind === "group" && String(item.id || "") === gid);
+  if(existing){
+    Object.assign(existing, entry);
+  }else{
+    allChats.push(entry);
+  }
+  allChats.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  renderChatList(allChats);
+}
+
 function getSimulatedContacts(){
   if(window.NOVA && Array.isArray(window.NOVA.phoneContacts)){
     return window.NOVA.phoneContacts;
@@ -1632,6 +2265,7 @@ function isMessageDeleted(m){
 function isMessageHidden(m){
   if(!m) return false;
   if(isMessageDeleted(m)) return true;
+  if(m.group_id) return false;
   const otherId = m.sender_id === myUid ? m.receiver_id : m.sender_id;
   const deletedAt = getDeletedAt(otherId);
   if(!deletedAt) return false;
@@ -1654,7 +2288,7 @@ async function deleteChat(otherId){
   }
 
   deletedAtMap.set(otherId, deletedAt);
-  allChats = allChats.filter(c => c.id !== otherId);
+  allChats = allChats.filter(c => !(c.kind !== "group" && c.id === otherId));
   renderChatList(allChats);
 
   if(otherUid === otherId){
@@ -1665,6 +2299,8 @@ async function deleteChat(otherId){
 
 function makeSignature(m){
   return [
+    m.group_id ? "group" : "direct",
+    m.group_id || "",
     m.sender_id || "",
     m.receiver_id || "",
     m.created_at || "",
@@ -1677,6 +2313,8 @@ function makeSignature(m){
 function makeMessageKey(m){
   if(!m) return "";
   return [
+    m.group_id ? "group" : "direct",
+    m.group_id || "",
     m.sender_id || "",
     m.receiver_id || "",
     m.created_at || "",
@@ -1809,6 +2447,10 @@ function markPendingFailed(el, err){
 }
 
 function messageBelongsToOpenChat(m){
+  if(!m) return false;
+  if(isGroupMode()){
+    return !!activeGroupId && String(m.group_id || "") === String(activeGroupId || "");
+  }
   if(!otherUid) return false;
   return (
     (m.sender_id === myUid && m.receiver_id === otherUid) ||
@@ -1832,7 +2474,11 @@ function ingestMessage(m){
     renderMsg(m);
     if(m.id) knownMessageIds.add(m.id);
   }
-  if(String(m.sender_id || "") === String(otherUid || "") && String(m.receiver_id || "") === String(myUid || "")){
+  if(
+    !m.group_id &&
+    String(m.sender_id || "") === String(otherUid || "") &&
+    String(m.receiver_id || "") === String(myUid || "")
+  ){
     emitReadReceipt(m.created_at);
   }
   scrollToBottom(true);
@@ -1843,14 +2489,20 @@ async function upsertChatListEntry(m){
   if(!m) return;
   if(isReadEventMessage(m)) return;
   if(isMessageHidden(m)) return;
+  if(m.group_id){
+    await upsertGroupChatListEntry(m);
+    return;
+  }
   const otherId = m.sender_id === myUid ? m.receiver_id : m.sender_id;
   if(!otherId) return;
   const profile = await getUserSummary(otherId);
-  const existing = allChats.find(c => c.id === otherId);
+  const existing = allChats.find(c => c.kind !== "group" && c.id === otherId);
   const entry = {
     id: otherId,
+    kind: "direct",
     name: profile.name || "User",
     username: profile.username || "",
+    phone: profile.phone || "",
     photo: profile.photo || "",
     lastMessage: getMessagePreview(m),
     created_at: m.created_at
@@ -1882,17 +2534,71 @@ async function upsertChatListEntry(m){
   const mySummary = await getUserSummary(myUid);
   myName = mySummary?.name || "User";
   myPhoto = mySummary?.photo || "";
+  myPhone = normalizePhoneNumber(mySummary?.phone || "");
   applyAvatar(chatAvatar, myPhoto, myName);
+  if(createGroupBtn){
+    createGroupBtn.style.display = "inline-flex";
+    createGroupBtn.disabled = false;
+  }
+  if(manageGroupBtn){
+    manageGroupBtn.style.display = "none";
+  }
 
-  if(otherUid){
+  if(isDirectMode()){
+    await resolveDirectTargetFromQuery();
+  }
+
+  if(isGroupMode()){
+    otherSeenAt = "";
+    lastSentReadAt = "";
+    if(toggleContacts) toggleContacts.style.display = "inline-flex";
+    if(chatMenuBtn) chatMenuBtn.style.display = "none";
+    setContactsVisible(false);
+    setChatListVisible(false);
+    await loadContacts();
+    const groupReady = await loadGroupContext();
+    if(!groupReady){
+      setChatListVisible(true);
+      setChatActive(false);
+      msgInput.disabled = true;
+      if(attachBtn) attachBtn.disabled = true;
+      sendBtn.disabled = true;
+      if(audioCallBtn) audioCallBtn.disabled = true;
+      if(videoCallBtn) videoCallBtn.disabled = true;
+      if(chatMoreBtn) chatMoreBtn.disabled = true;
+      await loadChatList();
+      return;
+    }
+    msgInput.disabled = false;
+    if(attachBtn) attachBtn.disabled = false;
+    sendBtn.disabled = false;
+    setChatActive(true);
+    if(audioCallBtn) audioCallBtn.disabled = true;
+    if(videoCallBtn) videoCallBtn.disabled = true;
+    if(chatMoreBtn) chatMoreBtn.disabled = false;
+    if(manageGroupBtn){
+      manageGroupBtn.style.display = "inline-flex";
+      manageGroupBtn.disabled = !isCurrentUserGroupAdmin();
+    }
+    if(presenceUnsub){
+      presenceUnsub();
+      presenceUnsub = null;
+    }
+    stopCallSignalPolling();
+    await loadMessages();
+    await loadChatList();
+  }else if(otherUid){
+    chatMode = "direct";
     loadSeenState();
     loadSentReadState();
     if(toggleContacts) toggleContacts.style.display = "inline-flex";
     if(chatMenuBtn) chatMenuBtn.style.display = "inline-flex";
+    if(manageGroupBtn) manageGroupBtn.style.display = "none";
     setContactsVisible(false);
     setChatListVisible(false);
     const otherSummary = await getUserSummary(otherUid);
-    const otherName = otherSummary?.name || "Chat";
+    otherPhone = normalizePhoneNumber(otherSummary?.phone || otherPhone || "");
+    const otherName = otherSummary?.name || otherPhone || "Chat";
     otherUsername = otherSummary?.username || "";
     chatName.innerText = otherName;
     applyAvatar(chatAvatar, otherSummary?.photo || "", otherName);
@@ -1912,10 +2618,12 @@ async function upsertChatListEntry(m){
     startCallSignalPolling();
     pollRemoteCallSignals(true).catch(()=>{});
   }else{
+    chatMode = "direct";
     otherSeenAt = "";
     lastSentReadAt = "";
     if(toggleContacts) toggleContacts.style.display = "inline-flex";
     if(chatMenuBtn) chatMenuBtn.style.display = "none";
+    if(manageGroupBtn) manageGroupBtn.style.display = "none";
     setContactsVisible(false);
     setChatListVisible(true);
     await loadContacts();
@@ -1936,6 +2644,9 @@ async function upsertChatListEntry(m){
     if(audioCallBtn) audioCallBtn.disabled = true;
     if(videoCallBtn) videoCallBtn.disabled = true;
     if(chatMoreBtn) chatMoreBtn.disabled = true;
+    if(requestedDirectPhone && !otherUid){
+      updateChatSub(`No account found for ${requestedDirectPhone}`);
+    }
     endCall(false);
     stopCallSignalPolling();
   }
@@ -1945,6 +2656,37 @@ async function upsertChatListEntry(m){
    LOAD MESSAGES
 ====================== */
 async function loadMessages(){
+  knownMessageIds.clear();
+  pendingBySig.clear();
+  chatBox.innerHTML = "";
+
+  if(isGroupMode()){
+    if(!activeGroupId) return;
+    const { data, error } = await supa
+      .from("chat_group_messages")
+      .select(selectGroupCols)
+      .eq("group_id", activeGroupId)
+      .order("created_at", { ascending:true })
+      .limit(2000);
+    if(error){
+      console.error("loadMessages group error", error);
+      return;
+    }
+    const senderIds = Array.from(new Set(
+      (data || [])
+        .map(item => String(item?.sender_id || "").trim())
+        .filter(uid => uid && uid !== myUid)
+    ));
+    await Promise.all(senderIds.map(uid => getUserSummary(uid).catch(() => null)));
+    (data || []).forEach(m => {
+      if(isMessageHidden(m)) return;
+      renderMsg(m);
+      if(m.id) knownMessageIds.add(m.id);
+    });
+    scrollToBottom(false);
+    return;
+  }
+
   if(!otherUid) return;
   const deletedAt = getDeletedAt(otherUid);
   let query = supa
@@ -1961,10 +2703,6 @@ async function loadMessages(){
     console.error("loadMessages error", error);
     return;
   }
-
-  knownMessageIds.clear();
-  pendingBySig.clear();
-  chatBox.innerHTML = "";
 
   let latestIncomingAt = "";
   (data || []).forEach(m => {
@@ -1991,6 +2729,9 @@ function listenRealtime(){
   }
   if(outgoingSubscription){
     supa.removeChannel(outgoingSubscription);
+  }
+  if(groupSubscription){
+    supa.removeChannel(groupSubscription);
   }
 
   incomingSubscription = supa
@@ -2047,6 +2788,47 @@ function listenRealtime(){
       }
     )
     .subscribe();
+
+  ensureGroupSupport().then((ok) => {
+    if(!ok || !myUid || !supa) return;
+    if(groupSubscription){
+      try{ supa.removeChannel(groupSubscription); }catch(_){ }
+      groupSubscription = null;
+    }
+    groupSubscription = supa
+      .channel("chat-group-" + myUid)
+      .on(
+        "postgres_changes",
+        { event:"INSERT", schema:"public", table:"chat_group_messages" },
+        payload => {
+          const m = payload.new;
+          if(!m || !m.group_id) return;
+          const gid = String(m.group_id || "");
+          if(!gid) return;
+          if(!myGroupIds.has(gid) && String(activeGroupId || "") !== gid){
+            return;
+          }
+          const rendered = ingestMessage(m);
+          if((!rendered || document.hidden) && !isOwnMessage(m)){
+            notifyMessage(m);
+          }
+          upsertGroupChatListEntry(m).catch(() => {});
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event:"DELETE", schema:"public", table:"chat_group_messages" },
+        payload => {
+          const m = payload.old;
+          if(!m || !m.id) return;
+          if(isGroupMode() && String(m.group_id || "") !== String(activeGroupId || "")){
+            return;
+          }
+          removeMessageById(m.id);
+        }
+      )
+      .subscribe();
+  }).catch(() => {});
 }
 
 /* ======================
@@ -2059,6 +2841,7 @@ function renderMsg(m, opts = {}){
   if(opts.pending) div.classList.add("pending");
   if(opts.tempId) div.dataset.tempId = opts.tempId;
   if(m.id) div.dataset.msgId = m.id;
+  if(m.group_id) div.dataset.groupId = m.group_id;
   div.dataset.key = makeMessageKey(m);
    div.dataset.createdAt = getIsoTime(m.created_at || "") || "";
   if(div.dataset.key && starredMessageMap.has(div.dataset.key)){
@@ -2089,6 +2872,14 @@ function renderMsg(m, opts = {}){
     const size = opts.fileSize || "";
     const card = renderDocCard(mediaUrl, name, size);
     div.appendChild(card);
+  }
+
+  if(m.group_id && !isMe){
+    const sender = document.createElement("div");
+    sender.className = "msg-sender";
+    const cached = userCache.get(String(m.sender_id || ""));
+    sender.textContent = opts.senderName || cached?.name || fallbackNameFromUserId(m.sender_id);
+    div.appendChild(sender);
   }
 
   if(m.message){
@@ -2135,6 +2926,10 @@ function getMessagePreviewFromEl(el){
 function getMessageSenderName(el){
   if(!el) return "User";
   if(el.classList.contains("me")) return myName || "You";
+  const senderEl = el.querySelector(".msg-sender");
+  if(senderEl && senderEl.textContent){
+    return senderEl.textContent;
+  }
   return chatName ? (chatName.textContent || "User") : "User";
 }
 
@@ -2258,11 +3053,23 @@ async function deleteMessageForEveryone(el){
   const msgId = el.dataset.msgId;
   const isSender = el.classList.contains("me");
   if(!msgId || !isSender) return;
-  const { error } = await supa
-    .from("chats")
-    .delete()
-    .eq("id", msgId)
-    .eq("sender_id", myUid);
+  let error = null;
+  if(isGroupMode() && activeGroupId){
+    const result = await supa
+      .from("chat_group_messages")
+      .delete()
+      .eq("id", msgId)
+      .eq("group_id", activeGroupId)
+      .eq("sender_id", myUid);
+    error = result?.error || null;
+  }else{
+    const result = await supa
+      .from("chats")
+      .delete()
+      .eq("id", msgId)
+      .eq("sender_id", myUid);
+    error = result?.error || null;
+  }
   if(error){
     alert(error.message || "Unable to delete message.");
     return;
@@ -2320,6 +3127,9 @@ function closeMessageMenu(){
 }
 
 function startLongPress(e){
+  if(e.target && e.target.closest && e.target.closest("a.msg-link")){
+    return;
+  }
   const msg = e.target.closest(".msg");
   if(!msg || !e.touches || e.touches.length !== 1) return;
   const touch = e.touches[0];
@@ -3027,7 +3837,15 @@ function handleCallSignal(payload){
 async function sendMsg(){
   const text = msgInput.value.trim();
   if(!text && !pendingMedia) return;
-  if(!otherUid) return;
+  if(isGroupMode()){
+    if(!activeGroupId) return;
+    if(!myGroupIds.has(String(activeGroupId || ""))){
+      alert("You are no longer a member of this group.");
+      return;
+    }
+  }else if(!otherUid){
+    return;
+  }
 
   const mediaFile = pendingMedia;
   const mediaKind = pendingMediaKind || (mediaFile ? getMediaKindForFile(mediaFile) : null);
@@ -3037,7 +3855,8 @@ async function sendMsg(){
 
   const optimisticMessage = {
     sender_id: myUid,
-    receiver_id: otherUid,
+    receiver_id: isGroupMode() ? null : otherUid,
+    group_id: isGroupMode() ? activeGroupId : null,
     message: text || null,
     media_url: localPreviewUrl,
     media_type: mediaFile ? mediaKind : null,
@@ -3078,7 +3897,8 @@ async function sendMsg(){
 
   const newMessage = {
     sender_id: myUid,
-    receiver_id: otherUid,
+    receiver_id: isGroupMode() ? null : otherUid,
+    group_id: isGroupMode() ? activeGroupId : null,
     message: text || null,
     media_url: mediaUrl,
     media_type: mediaType,
@@ -3088,11 +3908,25 @@ async function sendMsg(){
   const sig = makeSignature(newMessage);
   setPendingSignature(pendingEl, sig);
 
-  const { data, error } = await supa
-    .from("chats")
-    .insert(newMessage)
-    .select(selectCols)
-    .single();
+  let data = null;
+  let error = null;
+  if(isGroupMode()){
+    const result = await supa
+      .from("chat_group_messages")
+      .insert(newMessage)
+      .select(selectGroupCols)
+      .single();
+    data = result?.data || null;
+    error = result?.error || null;
+  }else{
+    const result = await supa
+      .from("chats")
+      .insert(newMessage)
+      .select(selectCols)
+      .single();
+    data = result?.data || null;
+    error = result?.error || null;
+  }
 
   if(error || !data){
     markPendingFailed(pendingEl, error);
@@ -3102,16 +3936,20 @@ async function sendMsg(){
 
   finalizeOptimisticMessage(pendingEl, data);
   trackAutomationStep("chat", {
-    receiver_id: otherUid,
+    receiver_id: isGroupMode() ? null : otherUid,
+    group_id: isGroupMode() ? activeGroupId : null,
+    chat_mode: isGroupMode() ? "group" : "direct",
     has_media: !!mediaUrl,
     media_type: mediaType || "text"
   }).catch(()=>{});
   const msgPreview = text || (mediaType === "image" ? "Photo" : mediaType === "video" ? "Video" : mediaType === "document" ? "Document" : "Message");
-  sendRemotePush(otherUid, myName || "New message", msgPreview, {
-    type: "chat_message",
-    from_user_id: myUid,
-    link: `chat.html?uid=${encodeURIComponent(myUid)}`
-  }).catch(()=>{});
+  if(!isGroupMode()){
+    sendRemotePush(otherUid, myName || "New message", msgPreview, {
+      type: "chat_message",
+      from_user_id: myUid,
+      link: `chat.html?uid=${encodeURIComponent(myUid)}`
+    }).catch(()=>{});
+  }
   scrollToBottom(true);
 }
 
@@ -3227,7 +4065,20 @@ if(deleteForEveryoneBtn){
 }
 
 if(chatBox){
+  const openLinkFromEvent = (e) => {
+    const link = e.target && e.target.closest ? e.target.closest("a.msg-link") : null;
+    if(!link) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const href = link.dataset.href || link.getAttribute("href") || "";
+    openMessageLinkInBrowser(href);
+  };
+  chatBox.addEventListener("click", openLinkFromEvent);
+  chatBox.addEventListener("touchend", openLinkFromEvent, { passive:false });
   chatBox.addEventListener("contextmenu", (e)=>{
+    if(e.target && e.target.closest && e.target.closest("a.msg-link")){
+      return;
+    }
     const msg = e.target.closest(".msg");
     if(!msg) return;
     e.preventDefault();
@@ -3257,6 +4108,40 @@ if(videoCallBtn){
 
 if(chatMoreBtn){
   chatMoreBtn.addEventListener("click", (e)=> e.stopPropagation());
+}
+
+if(createGroupBtn){
+  createGroupBtn.addEventListener("click", createGroupChat);
+}
+
+if(manageGroupBtn){
+  manageGroupBtn.addEventListener("click", async ()=>{
+    if(!isGroupMode() || !activeGroupId){
+      return;
+    }
+    if(!isCurrentUserGroupAdmin()){
+      alert("Only group admin can manage members.");
+      return;
+    }
+    const action = String(prompt("Group action: add / remove / info", "add") || "")
+      .trim()
+      .toLowerCase();
+    if(!action) return;
+    if(action === "add"){
+      await addMembersToActiveGroup();
+      return;
+    }
+    if(action === "remove"){
+      await removeMembersFromActiveGroup();
+      return;
+    }
+    if(action === "info"){
+      const count = Math.max(1, Number(groupMemberMap.size || 0));
+      alert(`Group members: ${count}`);
+      return;
+    }
+    alert("Use add, remove, or info.");
+  });
 }
 
 if(callAcceptBtn){
@@ -3336,7 +4221,10 @@ if(chatSearch){
     const q = chatSearch.value.trim().toLowerCase();
     const filtered = allChats.filter(c =>
       (c.name || "").toLowerCase().includes(q) ||
-      (c.username || "").toLowerCase().includes(q)
+      (c.username || "").toLowerCase().includes(q) ||
+      (c.phone || "").toLowerCase().includes(q) ||
+      (c.lastMessage || "").toLowerCase().includes(q) ||
+      (c.kind === "group" && "group".includes(q))
     );
     renderChatList(filtered);
   });
@@ -3472,7 +4360,7 @@ async function loadChatList(){
 
   if(error){
     console.error("loadChatList error", error);
-    allChats = [];
+    allChats = await loadGroupChats();
     renderChatList(allChats);
     return;
   }
@@ -3496,12 +4384,16 @@ async function loadChatList(){
 
   const ids = Array.from(convoMap.keys());
   if(!ids.length){
-    allChats = [];
+    allChats = await loadGroupChats();
     renderChatList(allChats);
     return;
   }
 
   const userSelectPlans = [
+    "user_id,username,full_name,display_name,photo,email,phone_number",
+    "user_id,username,full_name,photo,email,phone_number",
+    "user_id,username,full_name,display_name,photo,phone_number",
+    "user_id,username,full_name,photo,phone_number",
     "user_id,username,full_name,display_name,photo,email",
     "user_id,username,full_name,photo,email",
     "user_id,username,full_name,display_name,photo",
@@ -3540,12 +4432,13 @@ async function loadChatList(){
       name: safeName,
       photo: u.photo || backend.photo || "",
       username: safeUsername,
+      phone: normalizePhoneNumber(u.phone_number || backend.phone_number || ""),
       verified: !!backend.verified,
       trust_score: Math.max(0, Number(backend.trust_score || 0))
     });
   });
 
-  allChats = ids.map(id => {
+  const directChats = ids.map(id => {
     const m = convoMap.get(id);
     const u = userMap.get(id) || {};
     const backend = backendMap?.[id] || {};
@@ -3557,13 +4450,20 @@ async function loadChatList(){
     const safeUsername = safeIdentityUsername(u.username || backend.username || "");
     return {
       id,
+      kind: "direct",
       name: safeName,
       username: safeUsername,
+      phone: normalizePhoneNumber(u.phone_number || backend.phone_number || ""),
       photo: u.photo || backend.photo || "",
       lastMessage: getMessagePreview(m),
       created_at: m.created_at
     };
-  }).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  });
+
+  const groupChats = await loadGroupChats();
+  allChats = directChats
+    .concat(groupChats)
+    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
   renderChatList(allChats);
 }
@@ -3601,7 +4501,7 @@ function renderContacts(list){
     row.appendChild(info);
     if(c.on_app && c.id){
       row.onclick = () => {
-        location.href = "chat.html?uid=" + encodeURIComponent(c.id);
+        location.href = buildDirectChatLink(c.id, c.phone);
       };
       row.style.cursor = "pointer";
     }else{
@@ -3615,11 +4515,23 @@ function renderContacts(list){
 function renderChatList(list){
   if(!chatList) return;
   chatList.innerHTML = "";
-  if(!list.length){
+  const entries = Array.isArray(list) ? list : [];
+  if(!entries.length){
     chatList.innerHTML = "<div style='padding:10px;color:#777;font-size:12px'>No chats yet.</div>";
     return;
   }
-  list.forEach(c => {
+
+  const directItems = entries.filter(c => c.kind !== "group");
+  const groupItems = entries.filter(c => c.kind === "group");
+
+  const appendSectionLabel = (text) => {
+    const label = document.createElement("div");
+    label.className = "chat-section-label";
+    label.textContent = text;
+    chatList.appendChild(label);
+  };
+
+  const appendRow = (c) => {
     const row = document.createElement("div");
     row.className = "chat-item";
     const img = document.createElement("img");
@@ -3630,6 +4542,12 @@ function renderChatList(list){
     const name = document.createElement("div");
     name.className = "chat-name";
     name.textContent = c.name || "User";
+    if(c.kind === "group"){
+      const badge = document.createElement("span");
+      badge.className = "chat-badge";
+      badge.textContent = "Group";
+      name.appendChild(badge);
+    }
     const last = document.createElement("div");
     last.className = "chat-last";
     last.textContent = c.lastMessage || "Message";
@@ -3640,20 +4558,37 @@ function renderChatList(list){
     time.textContent = c.created_at ? formatTime(c.created_at) : "";
     const delBtn = document.createElement("button");
     delBtn.className = "chat-delete";
-    delBtn.textContent = "Delete";
+    delBtn.textContent = c.kind === "group" ? "Leave" : "Delete";
     delBtn.onclick = (e) => {
       e.stopPropagation();
-      deleteChat(c.id);
+      if(c.kind === "group"){
+        leaveGroupChat(c.id);
+      }else{
+        deleteChat(c.id);
+      }
     };
     row.appendChild(img);
     row.appendChild(info);
     row.appendChild(time);
     row.appendChild(delBtn);
     row.onclick = () => {
-      location.href = "chat.html?uid=" + encodeURIComponent(c.id);
+      if(c.kind === "group"){
+        location.href = buildGroupChatLink(c.id);
+      }else{
+        location.href = buildDirectChatLink(c.id, c.phone);
+      }
     };
     chatList.appendChild(row);
-  });
+  };
+
+  if(directItems.length){
+    appendSectionLabel("Personal Chats");
+    directItems.forEach(appendRow);
+  }
+  if(groupItems.length){
+    appendSectionLabel("Group Chats");
+    groupItems.forEach(appendRow);
+  }
 }
 </script>
 
