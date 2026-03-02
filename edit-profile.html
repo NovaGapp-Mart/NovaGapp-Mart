@@ -86,8 +86,114 @@ const saveBtn = document.getElementById("saveBtn");
 
 let CURRENT_USER = null;
 let NEW_PHOTO_FILE = null;
+const USER_KEY_CANDIDATES = ["user_id", "id"];
 
-/* 🔐 LOAD PROFILE */
+function getSupabaseErrorText(error){
+  return [error?.message, error?.details, error?.hint].filter(Boolean).join(" ");
+}
+
+function getMissingColumnName(error){
+  const text = getSupabaseErrorText(error);
+  if(!text) return "";
+
+  const pgrstMatch = text.match(/'([a-zA-Z0-9_]+)' column/i);
+  if(pgrstMatch && pgrstMatch[1]) return String(pgrstMatch[1]).toLowerCase();
+
+  const pgMatch = text.match(/column\s+\"?([a-zA-Z0-9_.]+)\"?\s+does not exist/i);
+  if(pgMatch && pgMatch[1]){
+    const normalized = String(pgMatch[1]).replace(/\"/g, "").toLowerCase();
+    return normalized.split(".").pop() || "";
+  }
+  return "";
+}
+
+async function loadUsersProfileRow(userId){
+  for(const key of USER_KEY_CANDIDATES){
+    const { data, error } = await supa
+      .from("users")
+      .select("*")
+      .eq(key, userId)
+      .maybeSingle();
+
+    if(!error){
+      return { data: data || null, error:null };
+    }
+
+    const missing = getMissingColumnName(error);
+    if(missing && missing === key){
+      continue;
+    }
+    return { data:null, error };
+  }
+  return { data:null, error:null };
+}
+
+async function updateUsersProfileRow(userId, basePayload){
+  for(const key of USER_KEY_CANDIDATES){
+    let payload = { ...basePayload };
+    for(let attempt = 0; attempt < 16; attempt += 1){
+      const { data, error } = await supa
+        .from("users")
+        .update(payload)
+        .eq(key, userId)
+        .select();
+
+      if(!error){
+        return { data:Array.isArray(data) ? data : [], error:null, payload };
+      }
+
+      const missing = getMissingColumnName(error);
+      if(missing){
+        if(missing === key){
+          break;
+        }
+        if(Object.prototype.hasOwnProperty.call(payload, missing)){
+          delete payload[missing];
+          continue;
+        }
+      }
+      return { data:null, error, payload };
+    }
+  }
+  return {
+    data:null,
+    error:new Error("Unable to update users row."),
+    payload: { ...basePayload }
+  };
+}
+
+async function insertUsersProfileRow(userId, basePayload){
+  for(const key of USER_KEY_CANDIDATES){
+    let payload = {
+      [key]: userId,
+      ...basePayload
+    };
+    for(let attempt = 0; attempt < 16; attempt += 1){
+      const { error } = await supa
+        .from("users")
+        .insert(payload);
+
+      if(!error){
+        return { error:null };
+      }
+
+      const missing = getMissingColumnName(error);
+      if(missing){
+        if(missing === key){
+          break;
+        }
+        if(Object.prototype.hasOwnProperty.call(payload, missing)){
+          delete payload[missing];
+          continue;
+        }
+      }
+      return { error };
+    }
+  }
+  return { error:new Error("Unable to insert users row.") };
+}
+
+/* LOAD PROFILE */
 async function loadProfile(){
 
   const { data } = await supa.auth.getSession();
@@ -99,11 +205,11 @@ async function loadProfile(){
   CURRENT_USER = data.session.user;
   saveBtn.disabled = false;
 
-  const { data: profile } = await supa
-    .from("users")
-    .select("username, photo, full_name, bio, contact_info")
-    .eq("user_id", CURRENT_USER.id)
-    .maybeSingle();
+  const profileRead = await loadUsersProfileRow(CURRENT_USER.id);
+  if(profileRead.error){
+    console.warn("profile_load_error:", profileRead.error);
+  }
+  const profile = profileRead.data || null;
 
   const metaName =
     CURRENT_USER.user_metadata?.full_name ||
@@ -114,11 +220,16 @@ async function loadProfile(){
     CURRENT_USER.user_metadata?.picture ||
     null;
 
-  if(profile){
-    username.value = profile.username || metaName || "";
-    fullName.value = profile.full_name || metaName || "";
+  if(profile && typeof profile === "object"){
+    username.value = profile.username || profile.name || metaName || "";
+    fullName.value = profile.full_name || profile.name || metaName || "";
     bio.value = profile.bio || "";
-    contactInfo.value = profile.contact_info || "";
+    contactInfo.value =
+      profile.contact_info ||
+      profile.phone_number ||
+      profile.phone ||
+      profile.email ||
+      "";
     if(profile.photo) avatar.src = profile.photo;
     else if(metaPhoto) avatar.src = metaPhoto;
   }else{
@@ -128,7 +239,7 @@ async function loadProfile(){
   }
 }
 
-/* 📸 PREVIEW */
+/* PREVIEW */
 photoFile.onchange = e=>{
   NEW_PHOTO_FILE = e.target.files[0];
   if(NEW_PHOTO_FILE){
@@ -136,7 +247,7 @@ photoFile.onchange = e=>{
   }
 };
 
-/* 💾 SAVE */
+/* SAVE */
 saveBtn.onclick = async ()=>{
 
   const usernameVal = username.value.trim();
@@ -162,39 +273,30 @@ saveBtn.onclick = async ()=>{
   const payload = {
     username: usernameVal,
     full_name: fullNameVal,
+    name: fullNameVal,
     bio: bioVal,
-    contact_info: contactInfoVal
+    contact_info: contactInfoVal,
+    phone_number: contactInfoVal,
+    phone: contactInfoVal
   };
 
   if(photoURL) payload.photo = photoURL;
 
-  /* ✅ FIRST TRY UPDATE (CORRECT WAY) */
-  const { error, data } = await supa
-    .from("users")
-    .update(payload)
-    .eq("user_id", CURRENT_USER.id)
-    .select();
-
-  /* ✅ FALLBACK: AGAR ROW NA HO TO INSERT */
-  if(!data || data.length === 0){
-    const insertPayload = {
-      user_id: CURRENT_USER.id,
-      ...payload
-    };
-
-    const { error: insertError } = await supa
-      .from("users")
-      .insert(insertPayload);
-
-    if(insertError){
-      alert(insertError.message);
-      return;
-    }
+  const updateResult = await updateUsersProfileRow(CURRENT_USER.id, payload);
+  if(updateResult.error){
+    alert(updateResult.error.message || "Profile update failed");
+    return;
   }
 
-  if(error){
-    alert(error.message);
-    return;
+  if(!updateResult.data || updateResult.data.length === 0){
+    const insertResult = await insertUsersProfileRow(
+      CURRENT_USER.id,
+      updateResult.payload || payload
+    );
+    if(insertResult.error){
+      alert(insertResult.error.message || "Profile update failed");
+      return;
+    }
   }
 
   alert("Profile updated successfully");
