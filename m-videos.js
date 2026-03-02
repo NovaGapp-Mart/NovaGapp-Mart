@@ -192,6 +192,43 @@
     uniq(arr){ return Array.from(new Set((Array.isArray(arr) ? arr : []).map(v => util.safe(v)).filter(Boolean))); }
   };
 
+  function getScreenOrientationController(){
+    try{
+      return window.screen && window.screen.orientation ? window.screen.orientation : null;
+    }catch(_){
+      return null;
+    }
+  }
+
+  function isPlayerInFullscreen(){
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement || null;
+    return !!(fsEl && dom.player && fsEl === dom.player);
+  }
+
+  async function lockLandscapeOnFullscreen(){
+    const orientation = getScreenOrientationController();
+    if(!orientation || typeof orientation.lock !== "function") return;
+    try{
+      await orientation.lock("landscape");
+    }catch(_){ }
+  }
+
+  function unlockOrientationAfterFullscreen(){
+    const orientation = getScreenOrientationController();
+    if(!orientation || typeof orientation.unlock !== "function") return;
+    try{
+      orientation.unlock();
+    }catch(_){ }
+  }
+
+  function handlePlayerFullscreenChange(){
+    if(isPlayerInFullscreen()){
+      lockLandscapeOnFullscreen().catch(() => {});
+      return;
+    }
+    unlockOrientationAfterFullscreen();
+  }
+
   const store = {
     read(key, fallback){ try{ const raw = localStorage.getItem(key); if(!raw) return fallback; const parsed = JSON.parse(raw); return parsed === null || parsed === undefined ? fallback : parsed; }catch(_){ return fallback; } },
     write(key, value){ try{ localStorage.setItem(key, JSON.stringify(value)); }catch(_){ } },
@@ -3442,6 +3479,14 @@
         const channelId = util.safe(node.dataset.channelId || currentVideo()?.user_id);
         if(channelId) openChannelPage(channelId);
       });
+    });
+    document.addEventListener("fullscreenchange", handlePlayerFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handlePlayerFullscreenChange);
+    dom.player.addEventListener("webkitbeginfullscreen", () => {
+      lockLandscapeOnFullscreen().catch(() => {});
+    });
+    dom.player.addEventListener("webkitendfullscreen", () => {
+      unlockOrientationAfterFullscreen();
     });
     dom.player.addEventListener("loadstart", () => setPlayerLoading(true, true));
     dom.player.addEventListener("waiting", () => setPlayerLoading(true, util.num(dom.player.currentTime) < 0.2));
