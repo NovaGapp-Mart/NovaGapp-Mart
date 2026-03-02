@@ -13,6 +13,7 @@
   const VIDEO_SELECT = "id,user_id,title,description,video_url,thumbnail_url,views,likes_count,dislikes_count,monetized,created_at,category,tags,duration_seconds";
   const VIDEO_MIME_TYPES = new Set(["video/mp4","video/webm","video/quicktime","video/x-matroska","video/ogg","video/mpeg"]);
   const THUMB_MIME_TYPES = new Set(["image/jpeg","image/png","image/webp"]);
+  const FALLBACK_THUMBNAIL = "Images/no-image.png";
   const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
   const MONETIZATION_MIN_FOLLOWERS = 5000;
   const MONETIZATION_UNLOCK_USD = 10;
@@ -622,7 +623,7 @@
     }
 
     if(kind === "thumb"){
-      push("Images/no-image.jpg");
+      push(FALLBACK_THUMBNAIL);
     }
 
     return list;
@@ -632,7 +633,7 @@
     if(!image) return;
     const queue = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
     if(!queue.length){
-      queue.push("Images/no-image.jpg");
+      queue.push(FALLBACK_THUMBNAIL);
     }
     let index = 0;
     image.onerror = () => {
@@ -1457,7 +1458,7 @@
     }
     const channel = getChannel(item.user_id);
     const thumbCandidates = buildAssetCandidates(item.thumbnail_url_raw || item.thumbnail_url, "thumb");
-    const thumbSrc = thumbCandidates[0] || "Images/no-image.jpg";
+    const thumbSrc = thumbCandidates[0] || FALLBACK_THUMBNAIL;
     const card = document.createElement("article");
     card.className = "mv-card";
     card.dataset.videoId = item.id;
@@ -1723,7 +1724,7 @@
     const channel = getChannel(video.user_id);
 
     const posterCandidates = buildAssetCandidates(video.thumbnail_url_raw || video.thumbnail_url, "thumb");
-    const posterUrl = posterCandidates[0] || "Images/no-image.jpg";
+    const posterUrl = posterCandidates[0] || FALLBACK_THUMBNAIL;
     const sourceCandidates = buildVideoSourceCandidates(video.video_url_raw || video.video_url);
     const initialSource = sourceCandidates[0] || "";
     state.playerSources = sourceCandidates;
@@ -2579,7 +2580,7 @@
       list.forEach(item => {
         const channel = getChannel(item.user_id);
         const thumbCandidates = buildAssetCandidates(item.thumbnail_url_raw || item.thumbnail_url, "thumb");
-        const thumbSrc = thumbCandidates[0] || "Images/no-image.jpg";
+        const thumbSrc = thumbCandidates[0] || FALLBACK_THUMBNAIL;
         const button = document.createElement("button");
         button.type = "button";
         button.className = "mv-rec-item";
@@ -2953,6 +2954,12 @@
 
   function explainUploadError(err){
     const text = util.safe(err?.message || err?.error_description || err?.details).toLowerCase();
+    if(text.includes("thumbnail_upload_url_missing")){
+      return "Thumbnail upload failed. Video was not saved so your selected thumbnail is not lost.";
+    }
+    if(text.includes("video_upload_url_missing")){
+      return "Video upload URL missing. Retry upload once.";
+    }
     if(text.includes("maximum allowed size") || text.includes("object exceeded") || text.includes("payload too large")){
       return "Upload blocked by Supabase file size limit. Check Storage Settings global file size limit (Free plan max is 50MB).";
     }
@@ -3065,6 +3072,13 @@
           videoUrl = toAbsoluteAssetUrl(serverUpload?.video_url);
           thumbUrl = toAbsoluteAssetUrl(serverUpload?.thumbnail_url);
         }
+      }
+
+      if(!videoUrl){
+        throw new Error("video_upload_url_missing");
+      }
+      if(state.uploadThumbFile && !thumbUrl){
+        throw new Error("thumbnail_upload_url_missing");
       }
 
       setUploadProgress(82, "Saving video record...");
@@ -3337,7 +3351,7 @@
 
         if(item.kind === "history"){
           button.innerHTML =
-            '<div class="mv-suggest-thumb"><img src="Images/no-image.jpg" alt="Recent search"></div>' +
+            '<div class="mv-suggest-thumb"><img src="' + util.esc(FALLBACK_THUMBNAIL) + '" alt="Recent search"></div>' +
             '<div class="mv-suggest-meta"><p class="mv-suggest-title">' + util.esc(item.term) + '</p><p class="mv-suggest-sub">Recent search</p></div>';
           button.addEventListener("click", async () => {
             dom.searchInput.value = item.term;
@@ -3348,7 +3362,7 @@
           const video = item.video;
           const channel = getChannel(video.user_id);
           button.innerHTML =
-            '<div class="mv-suggest-thumb"><img src="' + util.esc(video.thumbnail_url || "Images/no-image.jpg") + '" alt="' + util.esc(video.title) + '"></div>' +
+            '<div class="mv-suggest-thumb"><img src="' + util.esc(video.thumbnail_url || FALLBACK_THUMBNAIL) + '" alt="' + util.esc(video.title) + '"></div>' +
             '<div class="mv-suggest-meta"><p class="mv-suggest-title">' + util.esc(video.title) + '</p><p class="mv-suggest-sub">' + util.esc(channel.name) + '</p></div>';
           button.addEventListener("click", () => {
             dom.suggestBox.classList.add("mv-hidden");

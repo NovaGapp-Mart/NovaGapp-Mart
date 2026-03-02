@@ -299,7 +299,7 @@
       card.innerHTML =
         '<button type="button" class="mc-thumb" data-action="watch">' +
           '<div class="mc-thumb-wrap">' +
-            '<img src="' + util.esc(video.thumbnail_url || "Images/no-image.jpg") + '" alt="' + util.esc(video.title) + '">' +
+            '<img src="' + util.esc(video.thumbnail_url || "Images/no-image.png") + '" alt="' + util.esc(video.title) + '">' +
             '<span class="mc-duration">' + util.esc(util.duration(video.duration_seconds)) + '</span>' +
           '</div>' +
         '</button>' +
