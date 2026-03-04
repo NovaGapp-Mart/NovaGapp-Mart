@@ -2,6 +2,7 @@
   const supa = window.supa || (typeof window.novaCreateSupabaseClient === "function" ? window.novaCreateSupabaseClient() : null);
   const params = new URLSearchParams(location.search);
   const receiverId = String(params.get("id") || "").trim();
+  const isGroupChat = String(params.get("isGroup") || "").trim().toLowerCase() === "true";
   const receiverNameParam = decodeURIComponent(params.get("name") || "User");
   const receiverPicParam = String(params.get("img") || "").trim();
   const autoAnswer = {
@@ -22,6 +23,10 @@
   const replyPreviewText = document.getElementById("replyPreviewText");
   const messageContextMenu = document.getElementById("messageContextMenu");
   const deleteChoiceModal = document.getElementById("deleteChoiceModal");
+  const mediaPreviewModal = document.getElementById("mediaPreviewModal");
+  const mediaPreviewImage = document.getElementById("mediaPreviewImage");
+  const mediaPreviewVideo = document.getElementById("mediaPreviewVideo");
+  const mediaPreviewDownloadBtn = document.getElementById("mediaPreviewDownloadBtn");
   const incomingCallBar = document.getElementById("incomingCallBar");
   const incomingCallText = document.getElementById("incomingCallText");
   const callOverlay = document.getElementById("callOverlay");
@@ -62,6 +67,8 @@
   let storageClearKey = "";
   let storageBlockKey = "";
   let longPressTimer = null;
+  let previewMediaUrl = "";
+  let previewMediaType = "";
 
   function isUuid(value){
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
@@ -232,12 +239,98 @@
     return false;
   }
 
+  function mediaExtFromMime(type){
+    const map = {
+      "image/jpeg": "jpg",
+      "image/jpg": "jpg",
+      "image/png": "png",
+      "image/webp": "webp",
+      "image/gif": "gif",
+      "video/mp4": "mp4",
+      "video/webm": "webm",
+      "video/ogg": "ogg",
+      "video/quicktime": "mov"
+    };
+    return map[String(type || "").toLowerCase()] || "";
+  }
+
+  function inferDownloadName(url, mediaType, mimeType){
+    const cleanUrl = String(url || "").split("?")[0];
+    const fromPath = cleanUrl.split("/").pop() || "";
+    if(fromPath.includes(".")) return fromPath;
+    const ext = mediaExtFromMime(mimeType) || (mediaType === "video" ? "mp4" : "jpg");
+    return `chat-${Date.now()}.${ext}`;
+  }
+
+  function openMediaPreview(url, mediaType){
+    const src = String(url || "").trim();
+    if(!src) return;
+    previewMediaUrl = src;
+    previewMediaType = mediaType === "video" ? "video" : "image";
+    mediaPreviewModal.style.display = "flex";
+    if(previewMediaType === "video"){
+      mediaPreviewImage.classList.add("hidden");
+      mediaPreviewVideo.classList.remove("hidden");
+      mediaPreviewVideo.src = src;
+      mediaPreviewVideo.currentTime = 0;
+      mediaPreviewVideo.play().catch(() => {});
+      return;
+    }
+    mediaPreviewVideo.pause();
+    mediaPreviewVideo.src = "";
+    mediaPreviewVideo.classList.add("hidden");
+    mediaPreviewImage.classList.remove("hidden");
+    mediaPreviewImage.src = src;
+  }
+
+  function closeMediaPreview(){
+    mediaPreviewModal.style.display = "none";
+    previewMediaUrl = "";
+    previewMediaType = "";
+    mediaPreviewImage.src = "";
+    mediaPreviewVideo.pause();
+    mediaPreviewVideo.src = "";
+  }
+
+  async function downloadPreviewMedia(){
+    const url = String(previewMediaUrl || "").trim();
+    if(!url) return;
+    mediaPreviewDownloadBtn.disabled = true;
+    mediaPreviewDownloadBtn.textContent = "Downloading...";
+    try{
+      const response = await fetch(url, { cache: "no-store" });
+      if(!response.ok) throw new Error(`download_http_${response.status}`);
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = blobUrl;
+      anchor.download = inferDownloadName(url, previewMediaType, blob.type);
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(blobUrl);
+    }catch(err){
+      console.error("media_download_failed", err);
+      const fallbackAnchor = document.createElement("a");
+      fallbackAnchor.href = url;
+      fallbackAnchor.download = inferDownloadName(url, previewMediaType, "");
+      fallbackAnchor.target = "_blank";
+      fallbackAnchor.rel = "noopener";
+      document.body.appendChild(fallbackAnchor);
+      fallbackAnchor.click();
+      fallbackAnchor.remove();
+    }finally{
+      mediaPreviewDownloadBtn.disabled = false;
+      mediaPreviewDownloadBtn.textContent = "Download";
+    }
+  }
+
   function scrollBottom(){
     chatWindow.scrollTop = chatWindow.scrollHeight + 900;
   }
 
   function renderPeerHeader(){
-    const name = getDisplayName(peerProfile, receiverNameParam || "User");
+    const name = getDisplayName(peerProfile, receiverNameParam || (isGroupChat ? "Group" : "User"));
     const photo = getProfilePhoto(peerProfile, receiverPicParam);
     document.getElementById("userName").textContent = name;
     document.getElementById("infoName").textContent = name;
@@ -340,19 +433,31 @@
     if(!attachment) return null;
     const box = document.createElement("div");
     box.className = "attachment";
+    box.style.cursor = "pointer";
     if(isImageUrl(attachment)){
       const img = document.createElement("img");
       img.src = attachment;
       img.alt = "attachment";
       img.loading = "lazy";
+      img.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openMediaPreview(attachment, "image");
+      });
       box.appendChild(img);
       return box;
     }
     if(isVideoUrl(attachment)){
       const video = document.createElement("video");
       video.src = attachment;
-      video.controls = true;
+      video.muted = true;
+      video.playsInline = true;
       video.preload = "metadata";
+      video.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openMediaPreview(attachment, "video");
+      });
       box.appendChild(video);
       return box;
     }
@@ -362,6 +467,12 @@
     link.rel = "noopener";
     link.className = "text-xs text-blue-700 underline break-all";
     link.textContent = attachment;
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const type = isVideoUrl(attachment) ? "video" : "image";
+      openMediaPreview(attachment, type);
+    });
     box.appendChild(link);
     return box;
   }
@@ -480,19 +591,29 @@
     return data?.user || null;
   }
 
-  async function queryThreadMessages(condition){
+  async function queryThreadMessages(condition, fields){
     return await supa
       .from("messages")
-      .select("id,sender_id,receiver_id,content,created_at")
+      .select(fields)
       .or(condition)
       .order("created_at", { ascending: true });
   }
 
   async function fetchThreadRows(condition){
     try{
-      const { data, error } = await queryThreadMessages(condition);
-      if(error) return { data: [], error };
-      return { data: data || [], error: null };
+      const selections = [
+        "id,sender_id,receiver_id,content,created_at,attachment_url,message_type,reply_to_id,reply_preview,deleted_for_everyone,is_starred,deleted_by_name",
+        "id,sender_id,receiver_id,content,created_at,attachment_url,message_type,reply_to_id,deleted_for_everyone",
+        "id,sender_id,receiver_id,content,created_at"
+      ];
+      for(const fields of selections){
+        const { data, error } = await queryThreadMessages(condition, fields);
+        if(!error) return { data: data || [], error: null };
+        if(!maybeMissingColumn(error)) return { data: [], error };
+      }
+      const fallback = await queryThreadMessages(condition, "id,sender_id,receiver_id,content,created_at");
+      if(fallback.error) return { data: [], error: fallback.error };
+      return { data: fallback.data || [], error: null };
     }catch(err){
       console.error("thread_query_failed", err);
       return { data: [], error: err || new Error("thread_query_failed") };
@@ -1383,10 +1504,16 @@
 
   async function initPage(){
     if(!supa){
-      alert("Supabase not configured. Please refresh.");
+      console.error("supabase_client_missing");
+      msgHolder.innerHTML = "<p class='text-center text-xs text-red-500'>Chat unavailable. Please refresh.</p>";
       return;
     }
-    if(!isUuid(receiverId)){
+    if(!receiverId){
+      alert("Invalid chat user.");
+      location.href = "chat.html";
+      return;
+    }
+    if(!isGroupChat && !isUuid(receiverId)){
       alert("Invalid chat user.");
       location.href = "chat.html";
       return;
@@ -1402,9 +1529,23 @@
       location.href = "login.html";
       return;
     }
-    if(myId === receiverId){
+    if(!isGroupChat && myId === receiverId){
       alert("Cannot open self-chat.");
       location.href = "chat.html";
+      return;
+    }
+    if(isGroupChat){
+      peerProfile = { display_name: receiverNameParam || "Group", photo: receiverPicParam };
+      renderPeerHeader();
+      msgHolder.innerHTML = "<p class='text-center text-xs text-gray-400'>Group room opened.</p>";
+      mainInput.disabled = true;
+      sendBtn.disabled = true;
+      mainInput.placeholder = "Group messages are disabled on this screen";
+      audioCallBtn.disabled = true;
+      videoCallBtn.disabled = true;
+      audioCallBtn.classList.add("opacity-50");
+      videoCallBtn.classList.add("opacity-50");
+      sendBtn.classList.add("opacity-50");
       return;
     }
     loadThreadLocalState();
@@ -1440,6 +1581,15 @@
     }
     if(deleteChoiceModal.style.display === "flex" && target === deleteChoiceModal){
       closeDeleteChoice();
+    }
+    if(mediaPreviewModal.style.display === "flex" && target === mediaPreviewModal){
+      closeMediaPreview();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if(event.key === "Escape" && mediaPreviewModal.style.display === "flex"){
+      closeMediaPreview();
     }
   });
 
@@ -1482,6 +1632,8 @@
   window.deleteForMe = deleteForMe;
   window.deleteForEveryone = deleteForEveryone;
   window.closeDeleteChoice = closeDeleteChoice;
+  window.closeMediaPreview = closeMediaPreview;
+  window.downloadPreviewMedia = downloadPreviewMedia;
   window.startOutgoingCall = startOutgoingCall;
   window.answerIncomingCall = answerIncomingCall;
   window.declineIncomingCall = declineIncomingCall;

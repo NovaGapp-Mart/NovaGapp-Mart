@@ -179,6 +179,7 @@
             if(options.img) qp.set("img", String(options.img));
             if(options.callAction) qp.set("call_action", String(options.callAction));
             if(options.callId) qp.set("call_id", String(options.callId));
+            if(options.isGroup) qp.set("isGroup", "true");
             return `open-chat.html?${qp.toString()}`;
         }
 
@@ -287,7 +288,11 @@
                     if(selectedContact) return;
                     localStorage.setItem(unseenKey, "0");
                     if(isGroup){
-                        alert("Group chat screen is not mapped to open-chat yet.");
+                        location.href = buildOpenChatUrl(item.id, {
+                            name: name || "Group",
+                            img: img || "",
+                            isGroup: true
+                        });
                         return;
                     }
                     if(!isUuid(item.id)){
