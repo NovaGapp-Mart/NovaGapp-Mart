@@ -13,6 +13,7 @@
   const msgHolder = document.getElementById("msgHolder");
   const chatWindow = document.getElementById("chatWindow");
   const mainInput = document.getElementById("mainInput");
+  const fileIn = document.getElementById("fileIn");
   const sendBtn = document.getElementById("sendBtn");
   const audioCallBtn = document.getElementById("audioCallBtn");
   const videoCallBtn = document.getElementById("videoCallBtn");
@@ -75,6 +76,7 @@
   let previewMediaType = "";
   let groupInfo = null;
   let groupMembers = [];
+  let noticeTimer = null;
 
   function isUuid(value){
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
@@ -244,6 +246,36 @@
     return getDisplayName(peerProfile, receiverNameParam);
   }
 
+  function getGroupMemberProfile(senderId){
+    const sid = String(senderId || "").trim();
+    if(!sid) return null;
+    return groupMembers.find(member => String(member?.user_id || "").trim() === sid) || null;
+  }
+
+  function getSenderDisplayName(row){
+    const senderId = String(row?.sender_id || "").trim();
+    if(senderId === myId){
+      return getDisplayName(myUser, "You");
+    }
+    if(isGroupChat){
+      const member = getGroupMemberProfile(senderId);
+      return getDisplayName(member, String(row?.sender_name || row?.user_name || "Member"));
+    }
+    return getDisplayName(peerProfile, receiverNameParam);
+  }
+
+  function getSenderPhoto(row){
+    const senderId = String(row?.sender_id || "").trim();
+    if(senderId === myId){
+      return getProfilePhoto(myUser, "");
+    }
+    if(isGroupChat){
+      const member = getGroupMemberProfile(senderId);
+      return getProfilePhoto(member, String(row?.sender_avatar || row?.user_avatar || ""));
+    }
+    return getProfilePhoto(peerProfile, receiverPicParam);
+  }
+
   function isMessageDeletedEverywhere(row){
     if(row?.deleted_for_everyone === true) return true;
     const content = textOrEmpty(row?.content);
@@ -258,8 +290,35 @@
     return textOrEmpty(row?.reply_preview || row?.reply_text || row?.reply_content);
   }
 
+  function parseAttachmentUrls(raw){
+    if(Array.isArray(raw)){
+      return raw.map(v => String(v || "").trim()).filter(Boolean);
+    }
+    if(typeof raw === "string"){
+      const txt = raw.trim();
+      if(!txt) return [];
+      if((txt.startsWith("[") && txt.endsWith("]")) || (txt.startsWith("{") && txt.endsWith("}"))){
+        try{
+          const parsed = JSON.parse(txt);
+          if(Array.isArray(parsed)){
+            return parsed.map(v => String(v || "").trim()).filter(Boolean);
+          }
+        }catch(_){ }
+      }
+      return [txt];
+    }
+    return [];
+  }
+
   function getAttachmentUrl(row){
     return textOrEmpty(row?.attachment_url || row?.media_url || row?.file_url);
+  }
+
+  function getAttachmentUrls(row){
+    const urls = parseAttachmentUrls(row?.attachment_urls);
+    const single = getAttachmentUrl(row);
+    if(single && !urls.includes(single)) urls.unshift(single);
+    return urls.filter(Boolean);
   }
 
   function isImageUrl(url){
@@ -271,11 +330,24 @@
   }
 
   function getMessageTextForPreview(row){
-    const attachment = getAttachmentUrl(row);
-    if(attachment){
-      return isVideoUrl(attachment) ? "Video attachment" : "Attachment";
+    const attachments = getAttachmentUrls(row);
+    if(attachments.length > 1){
+      return `${attachments.length} attachments`;
+    }
+    if(attachments.length === 1){
+      return isVideoUrl(attachments[0]) ? "Video attachment" : "Attachment";
     }
     return textOrEmpty(row?.content || row?.message || "Message");
+  }
+
+  function getThreadTargetKey(){
+    return isGroupChat ? "group_id" : "receiver_id";
+  }
+
+  function buildThreadPayload(){
+    return isGroupChat
+      ? { group_id: receiverId }
+      : { receiver_id: receiverId };
   }
 
   function getDeletedMessageText(row){
@@ -380,6 +452,18 @@
 
   function scrollBottom(){
     chatWindow.scrollTop = chatWindow.scrollHeight + 900;
+  }
+
+  function showNotice(message){
+    const text = String(message || "").trim();
+    if(!text || !mainInput) return;
+    mainInput.placeholder = text;
+    if(noticeTimer) clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => {
+      if(mainInput && !mainInput.value){
+        mainInput.placeholder = isPeerBlocked ? "User is blocked" : "Type a message";
+      }
+    }, 2800);
   }
 
   function renderGroupMembers(){
@@ -505,7 +589,7 @@
     }
     const content = textOrEmpty(row.content || row.message);
     if(!content && !getAttachmentUrl(row)) return;
-    const syntheticId = `${row.sender_id || ""}:${row.receiver_id || ""}:${row.created_at || ""}:${content.slice(0, 30)}`;
+    const syntheticId = `${row.sender_id || ""}:${row.receiver_id || ""}:${row.group_id || ""}:${row.created_at || ""}:${content.slice(0, 30)}`;
     if(!rememberMessageId(syntheticId)) return;
     messageRows.push({ ...row, __synthetic_id: syntheticId });
   }
@@ -528,55 +612,57 @@
   }
 
   function createAttachmentBlock(row){
-    const attachment = getAttachmentUrl(row);
-    if(!attachment) return null;
-    const mediaType = String(row?.message_type || "").trim().toLowerCase();
-    const treatAsVideo = mediaType === "video" || isVideoUrl(attachment);
-    const treatAsImage = mediaType === "image" || isImageUrl(attachment) || (!treatAsVideo && !mediaType);
-    const box = document.createElement("div");
-    box.className = "attachment";
-    box.style.cursor = "pointer";
-    if(treatAsImage){
-      const img = document.createElement("img");
-      img.src = attachment;
-      img.alt = "attachment";
-      img.loading = "lazy";
-      img.addEventListener("click", (event) => {
+    const attachments = getAttachmentUrls(row);
+    if(!attachments.length) return null;
+
+    const makeTile = (url, index, total) => {
+      const cleanUrl = String(url || "").trim();
+      const tile = document.createElement("button");
+      tile.type = "button";
+      tile.className = "attachment-tile";
+      tile.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        openMediaPreview(attachment, "image");
+        openMediaPreview(cleanUrl, isVideoUrl(cleanUrl) ? "video" : "image");
       });
-      box.appendChild(img);
+
+      if(isVideoUrl(cleanUrl)){
+        const video = document.createElement("video");
+        video.src = cleanUrl;
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = "metadata";
+        tile.appendChild(video);
+      }else{
+        const img = document.createElement("img");
+        img.src = cleanUrl;
+        img.alt = "attachment";
+        img.loading = "lazy";
+        tile.appendChild(img);
+      }
+
+      if(index === 3 && total > 4){
+        const overlay = document.createElement("div");
+        overlay.className = "attachment-more";
+        overlay.textContent = `+${total - 4}`;
+        tile.appendChild(overlay);
+      }
+      return tile;
+    };
+
+    if(attachments.length === 1){
+      const box = document.createElement("div");
+      box.className = "attachment";
+      box.appendChild(makeTile(attachments[0], 0, 1));
       return box;
     }
-    if(treatAsVideo){
-      const video = document.createElement("video");
-      video.src = attachment;
-      video.muted = true;
-      video.playsInline = true;
-      video.preload = "metadata";
-      video.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        openMediaPreview(attachment, "video");
-      });
-      box.appendChild(video);
-      return box;
-    }
-    const link = document.createElement("a");
-    link.href = attachment;
-    link.target = "_blank";
-    link.rel = "noopener";
-    link.className = "text-xs text-blue-700 underline break-all";
-    link.textContent = attachment;
-    link.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const type = treatAsVideo ? "video" : "image";
-      openMediaPreview(attachment, type);
+
+    const grid = document.createElement("div");
+    grid.className = "attachment attachment-grid";
+    attachments.slice(0, 4).forEach((url, index) => {
+      grid.appendChild(makeTile(url, index, attachments.length));
     });
-    box.appendChild(link);
-    return box;
+    return grid;
   }
 
   function createMessageMainContent(row, outgoing){
@@ -584,7 +670,7 @@
     if(!outgoing){
       const sender = document.createElement("div");
       sender.className = "text-[10px] text-orange-700 font-semibold";
-      sender.textContent = getDisplayName(peerProfile, receiverNameParam);
+      sender.textContent = getSenderDisplayName(row);
       contentWrap.appendChild(sender);
     }
 
@@ -625,7 +711,7 @@
       wrap.className = "flex items-start gap-2";
       const avatar = document.createElement("div");
       avatar.className = "msg-mini-avatar";
-      setAvatar(avatar, getProfilePhoto(peerProfile, receiverPicParam), getDisplayName(peerProfile, receiverNameParam));
+      setAvatar(avatar, getSenderPhoto(row), getSenderDisplayName(row));
       const textWrap = document.createElement("div");
       textWrap.className = "flex-1";
       textWrap.appendChild(createMessageMainContent(row, false));
@@ -693,27 +779,37 @@
     return data?.user || null;
   }
 
-  async function queryThreadMessages(condition, fields){
-    return await supa
-      .from("messages")
-      .select(fields)
-      .or(condition)
-      .order("created_at", { ascending: true });
+  function buildDirectThreadCondition(){
+    return `and(sender_id.eq.${myId},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${myId})`;
   }
 
-  async function fetchThreadRows(condition){
+  async function queryThreadMessages(fields){
+    let query = supa
+      .from("messages")
+      .select(fields)
+      .order("created_at", { ascending: true });
+    if(isGroupChat){
+      query = query.eq("group_id", receiverId);
+    }else{
+      query = query.or(buildDirectThreadCondition());
+    }
+    return await query;
+  }
+
+  async function fetchThreadRows(){
     try{
       const selections = [
-        "id,sender_id,receiver_id,content,created_at,attachment_url,message_type,reply_to_id,reply_preview,deleted_for_everyone,is_starred,deleted_by_name",
-        "id,sender_id,receiver_id,content,created_at,attachment_url,message_type,reply_to_id,deleted_for_everyone",
-        "id,sender_id,receiver_id,content,created_at"
+        "id,sender_id,receiver_id,group_id,content,created_at,attachment_urls,attachment_url,message_type,reply_to_id,reply_preview,deleted_for_everyone,is_starred,deleted_by_name",
+        "id,sender_id,receiver_id,group_id,content,created_at,attachment_urls,attachment_url,message_type,reply_to_id,deleted_for_everyone,is_starred",
+        "id,sender_id,receiver_id,group_id,content,created_at,attachment_urls,attachment_url,message_type",
+        "id,sender_id,receiver_id,group_id,content,created_at"
       ];
       for(const fields of selections){
-        const { data, error } = await queryThreadMessages(condition, fields);
+        const { data, error } = await queryThreadMessages(fields);
         if(!error) return { data: data || [], error: null };
         if(!maybeMissingColumn(error)) return { data: [], error };
       }
-      const fallback = await queryThreadMessages(condition, "id,sender_id,receiver_id,content,created_at");
+      const fallback = await queryThreadMessages("id,sender_id,receiver_id,group_id,content,created_at");
       if(fallback.error) return { data: [], error: fallback.error };
       return { data: fallback.data || [], error: null };
     }catch(err){
@@ -724,10 +820,8 @@
 
   async function loadMessages(){
     msgHolder.innerHTML = "<p class='text-center text-xs text-gray-400'>Syncing messages...</p>";
-    const condition = `and(sender_id.eq.${myId},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${myId})`;
-    const { data, error } = await fetchThreadRows(condition);
+    const { data, error } = await fetchThreadRows();
     if(error){
-      console.error("message_load_failed", error);
       msgHolder.innerHTML = "<p class='text-center text-xs text-red-500'>Unable to load messages.</p>";
       return;
     }
@@ -743,15 +837,20 @@
     variants.push({ ...payload });
     if("reply_preview" in payload){ const v = { ...payload }; delete v.reply_preview; variants.push(v); }
     if("reply_to_id" in payload){ const v = { ...payload }; delete v.reply_to_id; variants.push(v); }
+    if("attachment_urls" in payload){ const v = { ...payload }; delete v.attachment_urls; variants.push(v); }
     if("attachment_url" in payload){ const v = { ...payload }; delete v.attachment_url; variants.push(v); }
     if("message_type" in payload){ const v = { ...payload }; delete v.message_type; variants.push(v); }
-    variants.push({ sender_id: payload.sender_id, receiver_id: payload.receiver_id, content: payload.content });
+    variants.push({
+      sender_id: payload.sender_id,
+      ...buildThreadPayload(),
+      content: payload.content
+    });
 
     for(const candidate of variants){
       const { data, error } = await supa
         .from("messages")
         .insert(candidate)
-        .select("id,sender_id,receiver_id,content,created_at")
+        .select("id,sender_id,receiver_id,group_id,content,created_at,attachment_urls,attachment_url,message_type,reply_to_id,reply_preview")
         .maybeSingle();
       if(!error) return { data: data ? { ...candidate, ...data } : null, error: null };
       if(!maybeMissingColumn(error)) return { data: null, error };
@@ -790,18 +889,19 @@
   }
 
   async function sendMessageWithPayload(rawPayload, restoreText){
-    if(!isUuid(myId) || !isUuid(receiverId)){
-      alert("Invalid sender/receiver id.");
+    const hasValidThread = isGroupChat ? !!receiverId : isUuid(receiverId);
+    if(!isUuid(myId) || !hasValidThread){
+      showNotice("Invalid chat id.");
       return false;
     }
-    if(isPeerBlocked){
-      alert("You blocked this user.");
+    if(!isGroupChat && isPeerBlocked){
+      showNotice("User is blocked.");
       return false;
     }
     const { data, error } = await insertMessageWithFallback(rawPayload);
     if(error){
       console.error("message_send_failed", error);
-      alert("Message failed to send.");
+      showNotice("Message failed to send.");
       if(typeof restoreText === "string") mainInput.value = restoreText;
       return false;
     }
@@ -818,7 +918,7 @@
     mainInput.value = "";
     const payload = {
       sender_id: myId,
-      receiver_id: receiverId,
+      ...buildThreadPayload(),
       content: text,
       ...getReplyPayload()
     };
@@ -834,7 +934,10 @@
     const processPayload = (row, type) => {
       const s = String(row?.sender_id || "");
       const r = String(row?.receiver_id || "");
-      const inThread = (s === myId && r === receiverId) || (s === receiverId && r === myId);
+      const g = String(row?.group_id || "");
+      const inThread = isGroupChat
+        ? g === receiverId
+        : ((s === myId && r === receiverId) || (s === receiverId && r === myId));
       if(!inThread) return;
       if(type === "DELETE"){
         const id = getMessageId(row);
@@ -849,7 +952,7 @@
       scrollBottom();
     };
 
-    realtimeChannel = supa.channel(`dm_${myId}_${receiverId}_${Date.now()}`)
+    realtimeChannel = supa.channel(`${isGroupChat ? "group" : "dm"}_${myId}_${receiverId}_${Date.now()}`)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, payload => {
         processPayload(payload?.new || {}, "INSERT");
       })
@@ -1043,7 +1146,7 @@
       });
     }catch(err){
       console.error("media_permission_failed", err);
-      alert("Microphone/Camera permission denied.");
+      showNotice("Microphone/Camera permission denied.");
       return null;
     }
   }
@@ -1125,11 +1228,11 @@
 
   async function startOutgoingCall(mediaType){
     if(!isUuid(myId) || !isUuid(receiverId)) return;
-    if(isPeerBlocked){
-      alert("You blocked this user.");
+    if(!isGroupChat && isPeerBlocked){
+      showNotice("User is blocked.");
       return;
     }
-    if(activeCall){ alert("A call is already active."); return; }
+    if(activeCall){ showNotice("A call is already active."); return; }
     hideIncomingOffer();
     const localStream = await getLocalStream(mediaType);
     if(!localStream) return;
@@ -1151,7 +1254,7 @@
       });
       if(!ok){
         await endActiveCall(false, "Signaling failed");
-        alert("Unable to reach call server.");
+        setCallStatus("Unable to reach call server");
         return;
       }
       setCallStatus("Ringing...");
@@ -1428,16 +1531,20 @@
   }
 
   async function blockCurrentUser(){
+    if(isGroupChat){
+      closeHeaderMenu();
+      return;
+    }
     closeHeaderMenu();
     if(isPeerBlocked){
-      alert("User already blocked.");
+      showNotice("User already blocked.");
       return;
     }
     if(!confirm("Block this user?")) return;
     await persistBlockInDatabase();
     setBlockedLocalState(true);
     applyBlockedUi();
-    alert("User blocked.");
+    showNotice("User blocked.");
   }
 
   function getContextMessage(){
@@ -1535,11 +1642,12 @@
       content: deleteText,
       deleted_for_everyone: true,
       deleted_by_name: getDisplayName(myUser, "User"),
+      attachment_urls: [],
       attachment_url: "",
       message_type: "text"
     });
     await updateMessageRowWithFallback(id, [
-      { content: deleteText, deleted_for_everyone: true, deleted_by_name: getDisplayName(myUser, "User"), attachment_url: null, message_type: "text" },
+      { content: deleteText, deleted_for_everyone: true, deleted_by_name: getDisplayName(myUser, "User"), attachment_urls: [], attachment_url: null, message_type: "text" },
       { content: deleteText, deleted_for_everyone: true, deleted_by_name: getDisplayName(myUser, "User") },
       { content: deleteText }
     ]);
@@ -1570,38 +1678,48 @@
   }
 
   async function handleMediaUpload(el){
-    const file = el?.files?.[0];
-    if(!file) return;
+    const files = Array.from(el?.files || []);
+    if(!files.length) return;
     try{
-      if(isPeerBlocked){
+      if(!isGroupChat && isPeerBlocked){
         console.warn("attachment_blocked_user");
         return;
       }
-      const fileName = `${myId}/${Date.now()}_${sanitizeFileName(file.name)}`;
-      const { error: uploadError } = await supa
-        .storage
-        .from("chat-attachments")
-        .upload(fileName, file, { cacheControl: "3600", upsert: false, contentType: file.type || undefined });
-      if(uploadError){
-        console.error("attachment_upload_failed", uploadError);
+      const uploaded = [];
+      const mediaTypes = [];
+      for(let i = 0; i < files.length; i += 1){
+        const file = files[i];
+        const fileName = `${myId}/${Date.now()}_${i}_${sanitizeFileName(file.name)}`;
+        const { error: uploadError } = await supa
+          .storage
+          .from("chat-attachments")
+          .upload(fileName, file, { cacheControl: "3600", upsert: false, contentType: file.type || undefined });
+        if(uploadError){
+          console.error("attachment_upload_failed", uploadError);
+          continue;
+        }
+        const { data } = supa.storage.from("chat-attachments").getPublicUrl(fileName);
+        const fileUrl = String(data?.publicUrl || "").trim();
+        if(!fileUrl) continue;
+        uploaded.push(fileUrl);
+        mediaTypes.push(String(file.type || "").toLowerCase());
+      }
+      if(!uploaded.length){
+        showNotice("Upload failed.");
         return;
       }
-      const { data } = supa.storage.from("chat-attachments").getPublicUrl(fileName);
-      const fileUrl = String(data?.publicUrl || "").trim();
-      if(!fileUrl){
-        console.error("attachment_public_url_missing");
-        return;
-      }
-      const type = String(file.type || "").toLowerCase();
-      const isVideo = type.startsWith("video/");
-      const isImage = type.startsWith("image/");
-      const content = isVideo ? "Video attachment" : (isImage ? "Image attachment" : (file.name || "Attachment"));
+      const allVideos = mediaTypes.length > 0 && mediaTypes.every(t => t.startsWith("video/"));
+      const allImages = mediaTypes.length > 0 && mediaTypes.every(t => t.startsWith("image/"));
+      const content = uploaded.length > 1
+        ? `${uploaded.length} attachments`
+        : (allVideos ? "Video attachment" : (allImages ? "Image attachment" : "Attachment"));
       const payload = {
         sender_id: myId,
-        receiver_id: receiverId,
+        ...buildThreadPayload(),
         content,
-        attachment_url: fileUrl,
-        message_type: isVideo ? "video" : (isImage ? "image" : "file"),
+        attachment_urls: uploaded,
+        attachment_url: uploaded[0],
+        message_type: allVideos ? "video" : (allImages ? "image" : "file"),
         ...getReplyPayload()
       };
       const ok = await sendMessageWithPayload(payload, "");
@@ -1617,13 +1735,12 @@
       msgHolder.innerHTML = "<p class='text-center text-xs text-red-500'>Chat unavailable. Please refresh.</p>";
       return;
     }
+    if(fileIn) fileIn.multiple = true;
     if(!receiverId){
-      alert("Invalid chat user.");
       location.href = "chat.html";
       return;
     }
     if(!isGroupChat && !isUuid(receiverId)){
-      alert("Invalid chat user.");
       location.href = "chat.html";
       return;
     }
@@ -1634,12 +1751,10 @@
     }
     myId = String(myUser?.id || "").trim();
     if(!isUuid(myId)){
-      alert("Please login with a valid account.");
       location.href = "login.html";
       return;
     }
     if(!isGroupChat && myId === receiverId){
-      alert("Cannot open self-chat.");
       location.href = "chat.html";
       return;
     }
@@ -1662,15 +1777,16 @@
         photo: groupInfo?.icon_url || receiverPicParam
       };
       renderPeerHeader();
-      msgHolder.innerHTML = "<p class='text-center text-xs text-gray-400'>Group room opened.</p>";
-      mainInput.disabled = true;
-      sendBtn.disabled = true;
-      mainInput.placeholder = "Group messages are disabled on this screen";
+      mainInput.disabled = false;
+      sendBtn.disabled = false;
+      mainInput.placeholder = "Type a message";
+      blockedBanner.classList.remove("show");
       audioCallBtn.disabled = true;
       videoCallBtn.disabled = true;
       audioCallBtn.classList.add("opacity-50");
       videoCallBtn.classList.add("opacity-50");
-      sendBtn.classList.add("opacity-50");
+      await loadMessages();
+      subscribeToMessages();
       return;
     }
     loadThreadLocalState();
