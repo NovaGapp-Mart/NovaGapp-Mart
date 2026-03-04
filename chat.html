@@ -123,188 +123,388 @@
     </div>
 
     <script>
+        const supa = window.supa;
         let selectedImgData = "";
         let selectedContact = null;
         let pressTimer;
-        const supa = window.supa;
+        let currentUser = null;
+        let currentUserId = "";
+        let realtimeListChannel = null;
+        let chatCache = [];
 
-        /* REAL-TIME DATABASE FETCH */
-        async function renderChats() {
-            const list = document.getElementById('chatList');
-            list.innerHTML = "<p class='text-center p-10 text-gray-400 animate-pulse'>Loading NovaGapp Chats...</p>";
+        function isUuid(value){
+            return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
+        }
 
-            // Fetching users from Supabase (Real Backend)
-            const { data: users, error } = await supa
-                .from("users")
-                .select("user_id, username, avatar_url")
-                .limit(20);
+        function maybeMissingColumn(error){
+            const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+            return text.includes("column") && text.includes("does not exist");
+        }
 
-            // Fetching groups from Supabase
-            const { data: groups } = await supa
-                .from("groups")
-                .select("*");
+        function displayName(user){
+            return String(user?.display_name || user?.full_name || user?.username || "User").trim() || "User";
+        }
 
-            if(error) {
-                list.innerHTML = "<p class='text-center p-10'>Backend connection failed.</p>";
-                return;
+        function avatarUrl(user){
+            return String(user?.photo || user?.avatar_url || "").trim();
+        }
+
+        function itemKey(item){
+            return item?.isGroup ? `group:${item.id}` : `user:${item.id}`;
+        }
+
+        function getStoredArray(key){
+            try{
+                const parsed = JSON.parse(localStorage.getItem(key) || "[]");
+                return Array.isArray(parsed) ? parsed : [];
+            }catch(_){
+                return [];
             }
+        }
 
+        async function resolveCurrentUser(){
+            if(window.NOVA && typeof window.NOVA.requireUser === "function"){
+                return await window.NOVA.requireUser();
+            }
+            const { data, error } = await supa.auth.getUser();
+            if(error) throw error;
+            return data?.user || null;
+        }
+
+        function buildOpenChatUrl(id, opts){
+            const options = opts || {};
+            const qp = new URLSearchParams();
+            qp.set("id", String(id || "").trim());
+            if(options.name) qp.set("name", String(options.name));
+            if(options.img) qp.set("img", String(options.img));
+            if(options.callAction) qp.set("call_action", String(options.callAction));
+            if(options.callId) qp.set("call_id", String(options.callId));
+            return `open-chat.html?${qp.toString()}`;
+        }
+
+        async function fetchUserById(uid){
+            const attempts = [
+                "user_id,username,full_name,display_name,photo,avatar_url",
+                "user_id,username,full_name,display_name,photo",
+                "user_id,username,full_name,photo",
+                "user_id,username,full_name"
+            ];
+            for(const fields of attempts){
+                const { data, error } = await supa.from("users").select(fields).eq("user_id", uid).maybeSingle();
+                if(!error) return data || null;
+                if(!maybeMissingColumn(error)) break;
+            }
+            return null;
+        }
+
+        async function fetchUsersForChatList(){
+            const attempts = [
+                "user_id,username,full_name,display_name,photo,avatar_url",
+                "user_id,username,full_name,display_name,photo",
+                "user_id,username,full_name,photo",
+                "user_id,username,full_name"
+            ];
+            for(const fields of attempts){
+                let query = supa.from("users").select(fields).limit(200);
+                if(isUuid(currentUserId)){
+                    query = query.neq("user_id", currentUserId);
+                }
+                const { data, error } = await query;
+                if(!error) return data || [];
+                if(!maybeMissingColumn(error)){
+                    console.error("users_fetch_failed", error);
+                    return [];
+                }
+            }
+            return [];
+        }
+
+        async function maybeRouteDirectChat(){
+            const q = new URLSearchParams(location.search);
+            const uid = String(q.get("uid") || "").trim();
+            if(!uid) return false;
+            if(!isUuid(uid) || uid === currentUserId){
+                alert("Invalid chat user.");
+                return false;
+            }
+            const profile = await fetchUserById(uid);
+            location.replace(buildOpenChatUrl(uid, {
+                name: displayName(profile),
+                img: avatarUrl(profile),
+                callAction: q.get("call_action") || "",
+                callId: q.get("call_id") || ""
+            }));
+            return true;
+        }
+
+        function renderChatRows(items){
+            const list = document.getElementById("chatList");
             list.innerHTML = "";
-            let blocked = JSON.parse(localStorage.getItem('blockedContacts') || "[]");
-            let hidden = JSON.parse(localStorage.getItem('hiddenChats') || "[]");
+            const blocked = new Set(getStoredArray("blockedContacts"));
+            const hidden = new Set(getStoredArray("hiddenChats"));
 
-            // Combine Real Users and Real Groups
-            let allItems = [
-                ...(groups || []).map(g => ({ ...g, name: g.name, isGroup: true, id: g.id })),
-                ...users.map(u => ({ name: u.username, img: u.avatar_url, id: u.user_id }))
-            ].filter(c => !blocked.includes(c.name) && !hidden.includes(c.name));
+            const visibleItems = (items || []).filter(item => {
+                const key = itemKey(item);
+                return !blocked.has(key) && !hidden.has(key);
+            });
 
-            allItems.forEach(c => {
-                const unseenKey = "unseen_" + c.name.replace(/\s/g, "_");
-                let unreadCount = parseInt(localStorage.getItem(unseenKey) || "0");
-                
-                let avatarHTML = (c.img) 
-                    ? `<div class="avatar" style="background-image: url('${c.img}')"></div>`
-                    : `<div class="avatar" style="background-color: #ff6a00">${c.name[0]}</div>`;
+            visibleItems.forEach(item => {
+                const key = itemKey(item);
+                const unseenKey = "unseen_" + key.replace(/[^a-z0-9_-]/gi, "_");
+                const unreadCount = parseInt(localStorage.getItem(unseenKey) || "0", 10) || 0;
+                const name = String(item.name || "User");
+                const img = String(item.img || "");
+                const isGroup = !!item.isGroup;
 
-                let groupBadge = (c.isGroup) ? `<span class="group-badge">Group</span>` : "";
+                const avatarHTML = img
+                    ? `<div class="avatar" style="background-image:url('${img.replace(/'/g, "%27")}')"></div>`
+                    : `<div class="avatar" style="background-color:#ff6a00">${name[0] || "U"}</div>`;
+                const badge = isGroup ? `<span class="group-badge">Group</span>` : "";
 
-                let item = document.createElement('div');
-                item.className = "chat-item";
-                item.id = "chat-" + c.name.replace(/\s/g, '_');
-                item.innerHTML = `
+                const row = document.createElement("div");
+                row.className = "chat-item";
+                row.id = "chat-" + key.replace(/[^a-z0-9_-]/gi, "_");
+                row.innerHTML = `
                     ${avatarHTML}
                     <div class="ml-4 flex-1">
                         <div class="flex justify-between items-center">
-                            <span class="font-bold text-gray-800">${c.name}${groupBadge}</span>
+                            <span class="font-bold text-gray-800">${name}${badge}</span>
                             <span class="text-xs text-gray-400">Realtime</span>
                         </div>
                         <div class="flex justify-between items-center">
-                            <div class="text-sm text-gray-500 truncate w-4/5">Tap to chat...</div>
-                            ${unreadCount > 0 ? `<div class="unread-badge">${unreadCount}</div>` : ''}
+                            <div class="text-sm text-gray-500 truncate w-4/5">${isGroup ? "Group chat" : "Tap to chat..."}</div>
+                            ${unreadCount > 0 ? `<div class="unread-badge">${unreadCount}</div>` : ""}
                         </div>
                     </div>
                 `;
 
-                item.onmousedown = () => pressTimer = setTimeout(() => startSelection(c.name), 600);
-                item.onmouseup = () => clearTimeout(pressTimer);
-                item.onclick = () => { 
-                    if(!selectedContact) { 
-                        localStorage.setItem(unseenKey, "0"); 
-                        openChat(c.name, '#ff6a00', c.img, c.id); 
-                    } 
+                row.onmousedown = () => {
+                    pressTimer = setTimeout(() => startSelection(item), 600);
+                };
+                row.onmouseup = () => clearTimeout(pressTimer);
+                row.onmouseleave = () => clearTimeout(pressTimer);
+                row.onclick = () => {
+                    if(selectedContact) return;
+                    localStorage.setItem(unseenKey, "0");
+                    if(isGroup){
+                        alert("Group chat screen is not mapped to open-chat yet.");
+                        return;
+                    }
+                    if(!isUuid(item.id)){
+                        alert("Invalid user id.");
+                        return;
+                    }
+                    openChat(name, img, item.id);
                 };
 
-                list.appendChild(item);
+                list.appendChild(row);
             });
         }
 
-        function startSelection(name) {
-            selectedContact = name;
-            const el = document.getElementById('chat-' + name.replace(/\s/g, '_'));
-            if(el) el.classList.add('selected');
-            document.getElementById('mainHeader').classList.add('header-selection');
-            document.getElementById('normalNav').classList.add('hidden');
-            document.getElementById('selectionNav').classList.remove('hidden');
-            document.getElementById('fabBtn').classList.add('hidden');
+        async function renderChats(){
+            const list = document.getElementById("chatList");
+            list.innerHTML = "<p class='text-center p-10 text-gray-400 animate-pulse'>Loading NovaGapp Chats...</p>";
+            const [users, groupsRes] = await Promise.all([
+                fetchUsersForChatList(),
+                supa.from("groups").select("*").limit(120)
+            ]);
+            const groups = groupsRes?.data || [];
+            const mappedUsers = (users || [])
+                .map(row => ({
+                    id: String(row?.user_id || "").trim(),
+                    name: displayName(row),
+                    img: avatarUrl(row),
+                    isGroup: false
+                }))
+                .filter(row => isUuid(row.id));
+
+            const mappedGroups = (groups || []).map(g => ({
+                id: String(g?.id || "").trim(),
+                name: String(g?.name || "Group").trim() || "Group",
+                img: String(g?.icon_url || "").trim(),
+                isGroup: true
+            }));
+
+            chatCache = mappedGroups.concat(mappedUsers);
+            renderChatRows(chatCache);
         }
 
-        function cancelSelection() {
-            if(selectedContact) {
-                let el = document.getElementById('chat-' + selectedContact.replace(/\s/g, '_'));
-                if(el) el.classList.remove('selected');
+        function startSelection(item){
+            selectedContact = item;
+            const key = itemKey(item);
+            const row = document.getElementById("chat-" + key.replace(/[^a-z0-9_-]/gi, "_"));
+            if(row) row.classList.add("selected");
+            document.getElementById("mainHeader").classList.add("header-selection");
+            document.getElementById("normalNav").classList.add("hidden");
+            document.getElementById("selectionNav").classList.remove("hidden");
+            document.getElementById("fabBtn").classList.add("hidden");
+            document.getElementById("selectCount").textContent = "1";
+        }
+
+        function cancelSelection(){
+            if(selectedContact){
+                const key = itemKey(selectedContact);
+                const row = document.getElementById("chat-" + key.replace(/[^a-z0-9_-]/gi, "_"));
+                if(row) row.classList.remove("selected");
             }
             selectedContact = null;
-            document.getElementById('mainHeader').classList.remove('header-selection');
-            document.getElementById('normalNav').classList.remove('hidden');
-            document.getElementById('selectionNav').classList.add('hidden');
-            document.getElementById('fabBtn').classList.remove('hidden');
+            document.getElementById("mainHeader").classList.remove("header-selection");
+            document.getElementById("normalNav").classList.remove("hidden");
+            document.getElementById("selectionNav").classList.add("hidden");
+            document.getElementById("fabBtn").classList.remove("hidden");
         }
 
-        function handleQuickAction(action) {
+        function handleQuickAction(action){
             if(!selectedContact) return;
-            let listName = action === 'block' ? 'blockedContacts' : 'hiddenChats';
-            let list = JSON.parse(localStorage.getItem(listName) || "[]");
-            list.push(selectedContact);
+            const key = itemKey(selectedContact);
+            const listName = action === "block" ? "blockedContacts" : "hiddenChats";
+            const list = getStoredArray(listName);
+            if(!list.includes(key)) list.push(key);
             localStorage.setItem(listName, JSON.stringify(list));
             cancelSelection();
-            renderChats();
+            renderChatRows(chatCache);
         }
 
-        function previewImage(input) {
-            if (input.files && input.files[0]) {
+        function previewImage(input){
+            if(input.files && input.files[0]){
                 const reader = new FileReader();
                 reader.onload = e => {
                     selectedImgData = e.target.result;
-                    document.getElementById('groupIconPreview').innerHTML = `<img src="${selectedImgData}" class="w-full h-full object-cover">`;
+                    document.getElementById("groupIconPreview").innerHTML = `<img src="${selectedImgData}" class="w-full h-full object-cover">`;
                 };
                 reader.readAsDataURL(input.files[0]);
             }
         }
 
-        /* BACKEND GROUP CREATION */
-        async function finishGroupCreation() {
-            const gName = document.getElementById('groupNameInp').value.trim();
-            const gSlogan = document.getElementById('groupSloganInp').value.trim();
-            const isAdminOnly = document.getElementById('adminOnlyCheck').checked;
-
+        async function finishGroupCreation(){
+            const gName = document.getElementById("groupNameInp").value.trim();
+            const gSlogan = document.getElementById("groupSloganInp").value.trim();
+            const isAdminOnly = document.getElementById("adminOnlyCheck").checked;
             if(!gName) return alert("Please enter Group Name!");
-
-            // REAL BACKEND INSERT
             const { error } = await supa.from("groups").insert([{
                 name: gName,
                 slogan: gSlogan,
                 is_admin_only: isAdminOnly,
-                icon_url: selectedImgData // Note: Ideally upload to bucket first
+                icon_url: selectedImgData
             }]);
-
-            if(!error) {
-                document.getElementById('groupStep1').style.display = 'none';
-                document.getElementById('groupStep2').style.display = 'none';
-                renderChats();
-            } else {
+            if(error){
                 alert("Error creating group on backend");
+                return;
             }
+            document.getElementById("groupStep1").style.display = "none";
+            document.getElementById("groupStep2").style.display = "none";
+            await renderChats();
         }
 
-        function openChat(n, c, img, id) {
-            let safeImg = (img && img.length > 50) ? encodeURIComponent(img) : "";
-            window.location.href = `open-chat.html?name=${encodeURIComponent(n)}&id=${id}&img=${safeImg}`;
+        function openChat(name, img, id){
+            if(!isUuid(id)) return;
+            location.href = buildOpenChatUrl(id, {
+                name: name || "User",
+                img: img || ""
+            });
         }
 
-        function toggleMenu(id) { 
+        function toggleMenu(id){
             closeAllMenus();
-            document.getElementById(id).style.display = 'block'; 
+            const el = document.getElementById(id);
+            if(el) el.style.display = "block";
         }
-        function closeAllMenus() { 
-            if(document.getElementById('mainMenu')) document.getElementById('mainMenu').style.display = 'none'; 
-            if(document.getElementById('selectionMenu')) document.getElementById('selectionMenu').style.display = 'none'; 
+
+        function closeAllMenus(){
+            const m1 = document.getElementById("mainMenu");
+            const m2 = document.getElementById("selectionMenu");
+            if(m1) m1.style.display = "none";
+            if(m2) m2.style.display = "none";
         }
-        function startGroupCreation() { document.getElementById('groupStep1').style.display='flex'; loadSelectionContacts(); }
-        
-        async function loadSelectionContacts() {
-            const selList = document.getElementById('contactSelectionList');
+
+        function startGroupCreation(){
+            document.getElementById("groupStep1").style.display = "flex";
+            loadSelectionContacts().catch(() => {});
+        }
+
+        async function loadSelectionContacts(){
+            const selList = document.getElementById("contactSelectionList");
             selList.innerHTML = "<p class='p-4'>Loading contacts...</p>";
-            
-            const { data } = await supa.from("users").select("username, avatar_url").limit(10);
-            
+            const rows = await fetchUsersForChatList();
             selList.innerHTML = "";
-            (data || []).forEach(c => {
+            rows.forEach(row => {
+                const name = displayName(row);
+                const img = avatarUrl(row);
                 selList.innerHTML += `
                 <div class="flex items-center p-4 border-b">
                     <input type="checkbox" class="w-5 h-5 mr-4 accent-orange-600">
-                    <div class="avatar w-10 h-10 text-sm" style="background-image: url('${c.avatar_url || ''}'); background-color:#ff6a00">${c.avatar_url ? '' : c.username[0]}</div>
-                    <span class="ml-4 font-bold">${c.username}</span>
+                    <div class="avatar w-10 h-10 text-sm" style="background-image:url('${(img || "").replace(/'/g, "%27")}');background-color:#ff6a00">${img ? "" : (name[0] || "U")}</div>
+                    <span class="ml-4 font-bold">${name}</span>
                 </div>`;
             });
         }
 
-        function openGroupDetails() { document.getElementById('groupStep2').style.display='flex'; }
-        function closeGroupModal() { document.getElementById('groupStep1').style.display='none'; }
-        function clearAllData() { if(confirm("Clear local cache?")) { localStorage.clear(); location.reload(); } }
-        function toggleSearch() { document.getElementById('searchBox').classList.toggle('hidden'); }
+        function openGroupDetails(){ document.getElementById("groupStep2").style.display = "flex"; }
+        function closeGroupModal(){ document.getElementById("groupStep1").style.display = "none"; }
+        function clearAllData(){ if(confirm("Clear local cache?")){ localStorage.clear(); location.reload(); } }
+        function toggleSearch(){ document.getElementById("searchBox").classList.toggle("hidden"); }
 
-        window.onload = renderChats;
+        function filterChats(){
+            const q = String(document.getElementById("searchInput").value || "").trim().toLowerCase();
+            if(!q){
+                renderChatRows(chatCache);
+                return;
+            }
+            const filtered = chatCache.filter(item => String(item.name || "").toLowerCase().includes(q));
+            renderChatRows(filtered);
+        }
+
+        function subscribeListRealtime(){
+            if(realtimeListChannel){
+                try{ supa.removeChannel(realtimeListChannel); }catch(_){ }
+            }
+            realtimeListChannel = supa
+                .channel(`chat_list_${currentUserId}_${Date.now()}`)
+                .on("postgres_changes", { event:"INSERT", schema:"public", table:"messages" }, () => {
+                    renderChats().catch(() => {});
+                })
+                .subscribe();
+        }
+
+        async function initPage(){
+            if(!supa){
+                alert("Supabase unavailable. Please refresh.");
+                return;
+            }
+            try{
+                currentUser = await resolveCurrentUser();
+            }catch(err){
+                console.error("chat_current_user_failed", err);
+            }
+            currentUserId = String(currentUser?.id || "").trim();
+            if(!isUuid(currentUserId)){
+                alert("Please login with a valid account.");
+                location.href = "login.html";
+                return;
+            }
+            if(await maybeRouteDirectChat()){
+                return;
+            }
+            await renderChats();
+            subscribeListRealtime();
+        }
+
+        window.startSelection = startSelection;
+        window.cancelSelection = cancelSelection;
+        window.handleQuickAction = handleQuickAction;
+        window.previewImage = previewImage;
+        window.finishGroupCreation = finishGroupCreation;
+        window.toggleMenu = toggleMenu;
+        window.closeAllMenus = closeAllMenus;
+        window.startGroupCreation = startGroupCreation;
+        window.loadSelectionContacts = loadSelectionContacts;
+        window.openGroupDetails = openGroupDetails;
+        window.closeGroupModal = closeGroupModal;
+        window.clearAllData = clearAllData;
+        window.toggleSearch = toggleSearch;
+        window.filterChats = filterChats;
+
+        window.onload = initPage;
     </script>
 </body>
 </html>

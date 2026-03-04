@@ -827,7 +827,8 @@ window.translateProductName = function(name){
 ===================================== */
 (function(){
   try{
-    if(/\/chat\.html$/i.test(String(location.pathname || ""))){
+    const path = String(location.pathname || "");
+    if(/\/chat\.html$/i.test(path) || /\/open-chat\.html$/i.test(path)){
       return;
     }
   }catch(_){ }
