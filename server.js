@@ -3536,6 +3536,90 @@ app.use((err, req, res, next) => {
   return next(err);
 });
 
+// --- DISCOVER USERS API ---
+app.get("/api/users/discover", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const rawQuery = String(req.query?.q || "").trim();
+  const cleanQuery = rawQuery.replace(/[%*,()]/g, " ").trim().slice(0, 80);
+  const limit = clampInt(req.query?.limit, 1, 120, 20);
+
+  try{
+    const supabaseBase = String(CONTEST_SUPABASE_URL || PUBLIC_SUPABASE_URL || "").trim().replace(/\/+$/g, "");
+    const supabaseKey = String(
+      CONTEST_SUPABASE_SERVICE_ROLE_KEY ||
+      VIDEO_ASSET_SUPABASE_KEY ||
+      PUBLIC_SUPABASE_ANON_KEY ||
+      ""
+    ).trim();
+
+    if(!supabaseBase || !supabaseKey){
+      throw new Error("discover_supabase_not_configured");
+    }
+
+    const headers = {
+      apikey: supabaseKey,
+      Authorization: `Bearer ${supabaseKey}`
+    };
+
+    const makeSearch = (table, selectFields) => {
+      const params = new URLSearchParams();
+      params.set("select", selectFields);
+      params.set("limit", String(limit));
+      if(cleanQuery){
+        params.set("or", `(username.ilike.*${cleanQuery}*,full_name.ilike.*${cleanQuery}*)`);
+      }
+      return `${supabaseBase}/rest/v1/${table}?${params.toString()}`;
+    };
+
+    const fetchRows = async (table, selectFields) => {
+      const endpoint = makeSearch(table, selectFields);
+      const response = await fetch(endpoint, { headers, cache: "no-store" });
+      const bodyText = await response.text().catch(() => "");
+      if(!response.ok){
+        return { ok:false, rows:[], error:bodyText, status:response.status };
+      }
+      let parsed = [];
+      try{
+        parsed = bodyText ? JSON.parse(bodyText) : [];
+      }catch(_){
+        parsed = [];
+      }
+      return {
+        ok:true,
+        rows:Array.isArray(parsed) ? parsed : [],
+        error:"",
+        status:response.status
+      };
+    };
+
+    let result = await fetchRows("profiles", "id,username,full_name,avatar_url");
+    if(!result.ok){
+      result = await fetchRows("users", "user_id,username,full_name,display_name,photo");
+      if(!result.ok){
+        throw new Error(`discover_fetch_failed:${result.status}:${String(result.error || "").slice(0, 220)}`);
+      }
+      const users = result.rows.map(row => ({
+        id: String(row?.user_id || "").trim(),
+        username: String(row?.username || "").trim(),
+        full_name: String(row?.display_name || row?.full_name || row?.username || "").trim(),
+        avatar_url: String(row?.photo || "").trim()
+      })).filter(row => row.id);
+      return res.json(users);
+    }
+
+    const profiles = result.rows.map(row => ({
+      id: String(row?.id || "").trim(),
+      username: String(row?.username || "").trim(),
+      full_name: String(row?.full_name || row?.username || "").trim(),
+      avatar_url: String(row?.avatar_url || "").trim()
+    })).filter(row => row.id);
+    return res.json(profiles);
+  }catch(err){
+    console.error("Discover API Error:", err?.stack || err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 // --- YE CODE ADD KARO (SUMMARY API KE LIYE) ---
 app.get("/api/users/summary", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
