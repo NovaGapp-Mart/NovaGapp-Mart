@@ -19,10 +19,14 @@
   const chatHeaderMenu = document.getElementById("chatHeaderMenu");
   const filterBanner = document.getElementById("filterBanner");
   const blockedBanner = document.getElementById("blockedBanner");
+  const userMeta = document.getElementById("userMeta");
   const replyPreview = document.getElementById("replyPreview");
   const replyPreviewText = document.getElementById("replyPreviewText");
   const messageContextMenu = document.getElementById("messageContextMenu");
   const deleteChoiceModal = document.getElementById("deleteChoiceModal");
+  const infoMeta = document.getElementById("infoMeta");
+  const groupMembersSection = document.getElementById("groupMembersSection");
+  const groupMembersList = document.getElementById("groupMembersList");
   const mediaPreviewModal = document.getElementById("mediaPreviewModal");
   const mediaPreviewImage = document.getElementById("mediaPreviewImage");
   const mediaPreviewVideo = document.getElementById("mediaPreviewVideo");
@@ -69,6 +73,8 @@
   let longPressTimer = null;
   let previewMediaUrl = "";
   let previewMediaType = "";
+  let groupInfo = null;
+  let groupMembers = [];
 
   function isUuid(value){
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
@@ -87,6 +93,133 @@
   function getProfilePhoto(profile, fallback){
     const row = profile || {};
     return String(row.photo || row.avatar_url || fallback || "").trim();
+  }
+
+  function normalizeMemberCount(value){
+    const count = Number(value);
+    return Number.isFinite(count) && count >= 0 ? Math.floor(count) : 0;
+  }
+
+  function extractMemberIdsFromRows(rows){
+    const ids = [];
+    (rows || []).forEach(row => {
+      const value = row && typeof row === "object" ? row : {};
+      const id = String(
+        value.user_id ||
+        value.member_id ||
+        value.profile_id ||
+        value.uid ||
+        value.id ||
+        ""
+      ).trim();
+      if(isUuid(id)) ids.push(id);
+    });
+    return Array.from(new Set(ids));
+  }
+
+  function extractMemberIdsFromGroup(groupRow){
+    const list = [];
+    const members = groupRow?.members;
+    if(Array.isArray(members)){
+      members.forEach(item => {
+        if(typeof item === "string" && isUuid(item)) list.push(item);
+        if(item && typeof item === "object"){
+          const id = String(item.user_id || item.member_id || item.id || "").trim();
+          if(isUuid(id)) list.push(id);
+        }
+      });
+    }
+    return Array.from(new Set(list));
+  }
+
+  async function fetchUsersByIds(userIds){
+    const ids = Array.from(new Set((userIds || []).filter(isUuid)));
+    if(!ids.length) return [];
+    const selects = [
+      "user_id,username,full_name,display_name,photo,avatar_url",
+      "user_id,username,full_name,display_name,photo",
+      "user_id,username,full_name,photo",
+      "user_id,username,full_name"
+    ];
+    for(const fields of selects){
+      const { data, error } = await supa.from("users").select(fields).in("user_id", ids);
+      if(!error){
+        const map = new Map((data || []).map(row => [String(row?.user_id || "").trim(), row]));
+        return ids.map(id => map.get(id) || { user_id: id, display_name: "Member" });
+      }
+      if(!maybeMissingColumn(error)){
+        console.error("group_member_users_fetch_failed", error);
+        return ids.map(id => ({ user_id: id, display_name: "Member" }));
+      }
+    }
+    return ids.map(id => ({ user_id: id, display_name: "Member" }));
+  }
+
+  async function fetchGroupMembers(groupId, groupRow){
+    const memberTableAttempts = [
+      { table: "group_members", matchColumn: "group_id" },
+      { table: "groups_members", matchColumn: "group_id" },
+      { table: "group_participants", matchColumn: "group_id" }
+    ];
+    for(const attempt of memberTableAttempts){
+      try{
+        const { data, error } = await supa.from(attempt.table).select("*").eq(attempt.matchColumn, groupId).limit(500);
+        if(error){
+          const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+          if(text.includes("does not exist")) continue;
+          if(maybeMissingColumn(error)) continue;
+          console.error("group_member_table_fetch_failed", error);
+          continue;
+        }
+        const ids = extractMemberIdsFromRows(data);
+        if(ids.length) return await fetchUsersByIds(ids);
+        if(Array.isArray(data) && data.length){
+          return data.map((row, index) => ({
+            user_id: String(row?.user_id || row?.member_id || row?.id || `member_${index}`),
+            display_name: String(row?.display_name || row?.full_name || row?.name || row?.username || "Member").trim() || "Member",
+            photo: String(row?.photo || row?.avatar_url || row?.icon_url || "").trim()
+          }));
+        }
+      }catch(err){
+        console.error("group_member_table_fetch_exception", err);
+      }
+    }
+    const fallbackIds = extractMemberIdsFromGroup(groupRow);
+    if(fallbackIds.length) return await fetchUsersByIds(fallbackIds);
+    return [];
+  }
+
+  async function fetchGroupInfo(groupId){
+    const fieldsAttempts = [
+      "id,name,icon_url,member_count,members",
+      "id,name,icon_url,members",
+      "id,name,icon_url"
+    ];
+    let groupRow = null;
+    for(const fields of fieldsAttempts){
+      const { data, error } = await supa.from("groups").select(fields).eq("id", groupId).maybeSingle();
+      if(!error){
+        groupRow = data || null;
+        break;
+      }
+      if(!maybeMissingColumn(error)){
+        console.error("group_fetch_failed", error);
+        break;
+      }
+    }
+    const members = await fetchGroupMembers(groupId, groupRow);
+    const calculatedCount = Math.max(
+      members.length,
+      extractMemberIdsFromGroup(groupRow).length,
+      normalizeMemberCount(groupRow?.member_count)
+    );
+    return {
+      id: groupId,
+      name: String(groupRow?.name || receiverNameParam || "Group").trim() || "Group",
+      icon_url: String(groupRow?.icon_url || receiverPicParam || "").trim(),
+      member_count: calculatedCount,
+      members
+    };
   }
 
   function getInitial(text){
@@ -329,13 +462,59 @@
     chatWindow.scrollTop = chatWindow.scrollHeight + 900;
   }
 
+  function renderGroupMembers(){
+    if(!groupMembersSection || !groupMembersList) return;
+    if(!isGroupChat){
+      groupMembersSection.classList.add("hidden");
+      groupMembersList.innerHTML = "";
+      return;
+    }
+    groupMembersSection.classList.remove("hidden");
+    groupMembersList.innerHTML = "";
+    if(!groupMembers.length){
+      groupMembersList.innerHTML = "<p class='text-sm text-gray-500'>No members found.</p>";
+      return;
+    }
+    groupMembers.forEach(member => {
+      const row = member && typeof member === "object" ? member : {};
+      const name = getDisplayName(row, "Member");
+      const photo = getProfilePhoto(row, "");
+      const line = document.createElement("div");
+      line.className = "flex items-center gap-3 p-2 rounded-lg bg-gray-50";
+      const avatar = document.createElement("div");
+      avatar.className = "w-9 h-9 rounded-full bg-orange-200 bg-cover bg-center text-xs font-bold flex items-center justify-center";
+      setAvatar(avatar, photo, name);
+      const nameEl = document.createElement("div");
+      nameEl.className = "text-sm font-medium text-gray-800 truncate";
+      nameEl.textContent = name;
+      line.appendChild(avatar);
+      line.appendChild(nameEl);
+      groupMembersList.appendChild(line);
+    });
+  }
+
   function renderPeerHeader(){
-    const name = getDisplayName(peerProfile, receiverNameParam || (isGroupChat ? "Group" : "User"));
-    const photo = getProfilePhoto(peerProfile, receiverPicParam);
+    const name = isGroupChat
+      ? String(groupInfo?.name || receiverNameParam || "Group").trim() || "Group"
+      : getDisplayName(peerProfile, receiverNameParam || "User");
+    const photo = isGroupChat
+      ? String(groupInfo?.icon_url || receiverPicParam || "").trim()
+      : getProfilePhoto(peerProfile, receiverPicParam);
     document.getElementById("userName").textContent = name;
     document.getElementById("infoName").textContent = name;
     setAvatar(document.getElementById("userAvatar"), photo, name);
     setAvatar(document.getElementById("infoPic"), photo, name);
+    if(isGroupChat){
+      const memberCount = normalizeMemberCount(groupInfo?.member_count || groupMembers.length);
+      const label = `${memberCount} Members`;
+      if(userMeta) userMeta.textContent = label;
+      if(infoMeta) infoMeta.textContent = label;
+      renderGroupMembers();
+      return;
+    }
+    if(userMeta) userMeta.textContent = "";
+    if(infoMeta) infoMeta.textContent = "Real-time verified account";
+    renderGroupMembers();
   }
 
   function applyBlockedUi(){
@@ -431,10 +610,13 @@
   function createAttachmentBlock(row){
     const attachment = getAttachmentUrl(row);
     if(!attachment) return null;
+    const mediaType = String(row?.message_type || "").trim().toLowerCase();
+    const treatAsVideo = mediaType === "video" || isVideoUrl(attachment);
+    const treatAsImage = mediaType === "image" || isImageUrl(attachment) || (!treatAsVideo && !mediaType);
     const box = document.createElement("div");
     box.className = "attachment";
     box.style.cursor = "pointer";
-    if(isImageUrl(attachment)){
+    if(treatAsImage){
       const img = document.createElement("img");
       img.src = attachment;
       img.alt = "attachment";
@@ -447,7 +629,7 @@
       box.appendChild(img);
       return box;
     }
-    if(isVideoUrl(attachment)){
+    if(treatAsVideo){
       const video = document.createElement("video");
       video.src = attachment;
       video.muted = true;
@@ -470,7 +652,7 @@
     link.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const type = isVideoUrl(attachment) ? "video" : "image";
+      const type = treatAsVideo ? "video" : "image";
       openMediaPreview(attachment, type);
     });
     box.appendChild(link);
@@ -1448,6 +1630,14 @@
     const name = getDisplayName(peerProfile, receiverNameParam || "User");
     setAvatar(document.getElementById("infoPic"), getProfilePhoto(peerProfile, receiverPicParam), name);
     document.getElementById("infoName").textContent = name;
+    if(isGroupChat){
+      const count = normalizeMemberCount(groupInfo?.member_count || groupMembers.length);
+      if(infoMeta) infoMeta.textContent = `${count} Members`;
+      renderGroupMembers();
+    }else{
+      if(infoMeta) infoMeta.textContent = "Real-time verified account";
+      renderGroupMembers();
+    }
     document.getElementById("profileOverlay").style.display = "flex";
   }
 
@@ -1534,7 +1724,23 @@
       return;
     }
     if(isGroupChat){
-      peerProfile = { display_name: receiverNameParam || "Group", photo: receiverPicParam };
+      try{
+        groupInfo = await fetchGroupInfo(receiverId);
+      }catch(err){
+        console.error("group_info_fetch_exception", err);
+        groupInfo = {
+          id: receiverId,
+          name: receiverNameParam || "Group",
+          icon_url: receiverPicParam,
+          member_count: 0,
+          members: []
+        };
+      }
+      groupMembers = Array.isArray(groupInfo?.members) ? groupInfo.members : [];
+      peerProfile = {
+        display_name: groupInfo?.name || receiverNameParam || "Group",
+        photo: groupInfo?.icon_url || receiverPicParam
+      };
       renderPeerHeader();
       msgHolder.innerHTML = "<p class='text-center text-xs text-gray-400'>Group room opened.</p>";
       mainInput.disabled = true;
