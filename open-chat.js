@@ -12,8 +12,16 @@
   const msgHolder = document.getElementById("msgHolder");
   const chatWindow = document.getElementById("chatWindow");
   const mainInput = document.getElementById("mainInput");
+  const sendBtn = document.getElementById("sendBtn");
   const audioCallBtn = document.getElementById("audioCallBtn");
   const videoCallBtn = document.getElementById("videoCallBtn");
+  const chatHeaderMenu = document.getElementById("chatHeaderMenu");
+  const filterBanner = document.getElementById("filterBanner");
+  const blockedBanner = document.getElementById("blockedBanner");
+  const replyPreview = document.getElementById("replyPreview");
+  const replyPreviewText = document.getElementById("replyPreviewText");
+  const messageContextMenu = document.getElementById("messageContextMenu");
+  const deleteChoiceModal = document.getElementById("deleteChoiceModal");
   const incomingCallBar = document.getElementById("incomingCallBar");
   const incomingCallText = document.getElementById("incomingCallText");
   const callOverlay = document.getElementById("callOverlay");
@@ -43,6 +51,17 @@
   let activeCall = null;
   let pendingIncomingOffer = null;
   const bufferedIceByCall = new Map();
+  let messageRows = [];
+  let localDeletedMessageIds = new Set();
+  let chatClearedAt = 0;
+  let showingStarredOnly = false;
+  let selectedContextMessage = null;
+  let pendingReply = null;
+  let isPeerBlocked = false;
+  let storageDeleteKey = "";
+  let storageClearKey = "";
+  let storageBlockKey = "";
+  let longPressTimer = null;
 
   function isUuid(value){
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
@@ -51,6 +70,11 @@
   function maybeMissingColumn(error){
     const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
     return text.includes("column") && text.includes("does not exist");
+  }
+
+  function maybeMissingTable(error){
+    const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+    return text.includes("relation") && text.includes("does not exist");
   }
 
   function getDisplayName(profile, fallback){
@@ -108,6 +132,111 @@
     return true;
   }
 
+  function toEpoch(raw){
+    if(!raw) return 0;
+    const t = new Date(raw).getTime();
+    return Number.isFinite(t) ? t : 0;
+  }
+
+  function chatStorageId(prefix){
+    return `${prefix}:${myId}:${receiverId}`;
+  }
+
+  function getStoredArray(key){
+    try{
+      const parsed = JSON.parse(localStorage.getItem(key) || "[]");
+      return Array.isArray(parsed) ? parsed : [];
+    }catch(_){
+      return [];
+    }
+  }
+
+  function loadThreadLocalState(){
+    storageDeleteKey = chatStorageId("deleted_for_me");
+    storageClearKey = chatStorageId("chat_cleared_at");
+    storageBlockKey = chatStorageId("blocked_user");
+    localDeletedMessageIds = new Set(getStoredArray(storageDeleteKey).map(v => String(v || "").trim()).filter(Boolean));
+    chatClearedAt = Number(localStorage.getItem(storageClearKey) || "0") || 0;
+    isPeerBlocked = localStorage.getItem(storageBlockKey) === "1";
+  }
+
+  function saveDeletedForMeState(){
+    localStorage.setItem(storageDeleteKey, JSON.stringify(Array.from(localDeletedMessageIds)));
+  }
+
+  function setChatClearedAt(ts){
+    chatClearedAt = Number(ts) || Date.now();
+    localStorage.setItem(storageClearKey, String(chatClearedAt));
+  }
+
+  function setBlockedLocalState(flag){
+    isPeerBlocked = !!flag;
+    localStorage.setItem(storageBlockKey, isPeerBlocked ? "1" : "0");
+  }
+
+  function getMessageId(row){
+    return String(row?.id || "").trim();
+  }
+
+  function textOrEmpty(v){
+    return String(v ?? "").trim();
+  }
+
+  function messageSenderName(row){
+    if(String(row?.sender_id || "") === myId){
+      return getDisplayName(myUser, "You");
+    }
+    return getDisplayName(peerProfile, receiverNameParam);
+  }
+
+  function isMessageDeletedEverywhere(row){
+    if(row?.deleted_for_everyone === true) return true;
+    const content = textOrEmpty(row?.content);
+    return /^this message was deleted by /i.test(content);
+  }
+
+  function isMessageStarred(row){
+    return row?.is_starred === true || row?.is_starred === 1;
+  }
+
+  function getReplySnippet(row){
+    return textOrEmpty(row?.reply_preview || row?.reply_text || row?.reply_content);
+  }
+
+  function getAttachmentUrl(row){
+    return textOrEmpty(row?.attachment_url || row?.media_url || row?.file_url);
+  }
+
+  function isImageUrl(url){
+    return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(String(url || "").split("?")[0]);
+  }
+
+  function isVideoUrl(url){
+    return /\.(mp4|webm|ogg|mov|m4v)$/i.test(String(url || "").split("?")[0]);
+  }
+
+  function getMessageTextForPreview(row){
+    const attachment = getAttachmentUrl(row);
+    if(attachment){
+      return isVideoUrl(attachment) ? "Video attachment" : "Attachment";
+    }
+    return textOrEmpty(row?.content || row?.message || "Message");
+  }
+
+  function getDeletedMessageText(row){
+    const deleter = textOrEmpty(row?.deleted_by_name) || messageSenderName(row);
+    return `This message was deleted by ${deleter}`;
+  }
+
+  function shouldHideRow(row){
+    const messageId = getMessageId(row);
+    if(messageId && localDeletedMessageIds.has(messageId)) return true;
+    const createdAt = toEpoch(row?.created_at);
+    if(chatClearedAt && createdAt && createdAt <= chatClearedAt) return true;
+    if(showingStarredOnly && !isMessageStarred(row)) return true;
+    return false;
+  }
+
   function scrollBottom(){
     chatWindow.scrollTop = chatWindow.scrollHeight + 900;
   }
@@ -121,20 +250,168 @@
     setAvatar(document.getElementById("infoPic"), photo, name);
   }
 
-  function addMessageRow(row){
+  function applyBlockedUi(){
+    blockedBanner.classList.toggle("show", isPeerBlocked);
+    mainInput.disabled = isPeerBlocked;
+    sendBtn.disabled = isPeerBlocked;
+    audioCallBtn.disabled = isPeerBlocked;
+    videoCallBtn.disabled = isPeerBlocked;
+    mainInput.placeholder = isPeerBlocked ? "User is blocked" : "Type a message";
+    sendBtn.classList.toggle("opacity-50", isPeerBlocked);
+    audioCallBtn.classList.toggle("opacity-50", isPeerBlocked);
+    videoCallBtn.classList.toggle("opacity-50", isPeerBlocked);
+  }
+
+  function updateFilterUi(){
+    filterBanner.classList.toggle("show", showingStarredOnly);
+  }
+
+  function closeContextMenu(){
+    messageContextMenu.style.display = "none";
+  }
+
+  function openContextMenu(x, y, row){
+    selectedContextMessage = row || null;
+    const menuWidth = 180;
+    const menuHeight = 150;
+    const maxX = Math.max(8, window.innerWidth - menuWidth - 8);
+    const maxY = Math.max(8, window.innerHeight - menuHeight - 8);
+    messageContextMenu.style.left = `${Math.min(Math.max(8, x || 8), maxX)}px`;
+    messageContextMenu.style.top = `${Math.min(Math.max(8, y || 8), maxY)}px`;
+    messageContextMenu.style.display = "block";
+  }
+
+  function bindBubbleContextMenu(bubble, row){
+    bubble.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      openContextMenu(event.clientX, event.clientY, row);
+    });
+    bubble.addEventListener("pointerdown", (event) => {
+      if(event.pointerType === "mouse") return;
+      if(longPressTimer) clearTimeout(longPressTimer);
+      longPressTimer = setTimeout(() => {
+        openContextMenu(event.clientX || 20, event.clientY || 20, row);
+      }, 520);
+    });
+    const clearLongPress = () => {
+      if(longPressTimer){
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    };
+    bubble.addEventListener("pointerup", clearLongPress);
+    bubble.addEventListener("pointercancel", clearLongPress);
+    bubble.addEventListener("pointerleave", clearLongPress);
+  }
+
+  function upsertMessageRow(row){
     if(!row || typeof row !== "object") return;
-    const content = String(row.content ?? row.message ?? "").trim();
-    if(!content) return;
-    const idKey = String(row.id || `${row.sender_id}_${row.receiver_id}_${row.created_at}_${content.slice(0, 30)}`).trim();
-    if(!rememberMessageId(idKey)) return;
+    const id = getMessageId(row);
+    if(id){
+      const i = messageRows.findIndex(r => getMessageId(r) === id);
+      if(i >= 0){
+        messageRows[i] = { ...messageRows[i], ...row };
+      }else{
+        messageRows.push(row);
+      }
+      return;
+    }
+    const content = textOrEmpty(row.content || row.message);
+    if(!content && !getAttachmentUrl(row)) return;
+    const syntheticId = `${row.sender_id || ""}:${row.receiver_id || ""}:${row.created_at || ""}:${content.slice(0, 30)}`;
+    if(!rememberMessageId(syntheticId)) return;
+    messageRows.push({ ...row, __synthetic_id: syntheticId });
+  }
+
+  function resolveReplyRow(row){
+    const replyId = textOrEmpty(row?.reply_to_id || row?.reply_to || row?.reply_message_id);
+    if(!replyId) return null;
+    return messageRows.find(m => getMessageId(m) === replyId) || null;
+  }
+
+  function createReplyBlock(row){
+    const explicit = getReplySnippet(row);
+    const byRef = resolveReplyRow(row);
+    const text = explicit || (byRef ? getMessageTextForPreview(byRef) : "");
+    if(!text) return null;
+    const replyBox = document.createElement("div");
+    replyBox.className = "text-[11px] bg-black/5 rounded px-2 py-1 mb-1 italic";
+    replyBox.textContent = text;
+    return replyBox;
+  }
+
+  function createAttachmentBlock(row){
+    const attachment = getAttachmentUrl(row);
+    if(!attachment) return null;
+    const box = document.createElement("div");
+    box.className = "attachment";
+    if(isImageUrl(attachment)){
+      const img = document.createElement("img");
+      img.src = attachment;
+      img.alt = "attachment";
+      img.loading = "lazy";
+      box.appendChild(img);
+      return box;
+    }
+    if(isVideoUrl(attachment)){
+      const video = document.createElement("video");
+      video.src = attachment;
+      video.controls = true;
+      video.preload = "metadata";
+      box.appendChild(video);
+      return box;
+    }
+    const link = document.createElement("a");
+    link.href = attachment;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.className = "text-xs text-blue-700 underline break-all";
+    link.textContent = attachment;
+    box.appendChild(link);
+    return box;
+  }
+
+  function createMessageMainContent(row, outgoing){
+    const contentWrap = document.createElement("div");
+    if(!outgoing){
+      const sender = document.createElement("div");
+      sender.className = "text-[10px] text-orange-700 font-semibold";
+      sender.textContent = getDisplayName(peerProfile, receiverNameParam);
+      contentWrap.appendChild(sender);
+    }
+
+    const replyBox = createReplyBlock(row);
+    if(replyBox) contentWrap.appendChild(replyBox);
+
+    const messageText = isMessageDeletedEverywhere(row)
+      ? getDeletedMessageText(row)
+      : textOrEmpty(row.content || row.message);
+    if(messageText){
+      const textNode = document.createElement("div");
+      textNode.textContent = messageText;
+      if(isMessageDeletedEverywhere(row)){
+        textNode.className = "italic text-gray-500";
+      }
+      contentWrap.appendChild(textNode);
+    }
+
+    if(!isMessageDeletedEverywhere(row)){
+      const attachment = createAttachmentBlock(row);
+      if(attachment) contentWrap.appendChild(attachment);
+    }
+    return contentWrap;
+  }
+
+  function buildMessageBubble(row){
     const outgoing = String(row.sender_id || "") === myId;
     const bubble = document.createElement("div");
-    bubble.className = `bubble ${outgoing ? "bubble-out" : "bubble-in"}`;
+    bubble.className = `bubble ${outgoing ? "bubble-out" : "bubble-in"} ${isMessageStarred(row) ? "starred-bubble" : ""}`;
+    const id = getMessageId(row);
+    if(id) bubble.dataset.messageId = id;
+    bindBubbleContextMenu(bubble, row);
 
     if(outgoing){
-      const textNode = document.createElement("div");
-      textNode.textContent = content;
-      bubble.appendChild(textNode);
+      bubble.appendChild(createMessageMainContent(row, true));
     }else{
       const wrap = document.createElement("div");
       wrap.className = "flex items-start gap-2";
@@ -143,23 +420,42 @@
       setAvatar(avatar, getProfilePhoto(peerProfile, receiverPicParam), getDisplayName(peerProfile, receiverNameParam));
       const textWrap = document.createElement("div");
       textWrap.className = "flex-1";
-      const sender = document.createElement("div");
-      sender.className = "text-[10px] text-orange-700 font-semibold";
-      sender.textContent = getDisplayName(peerProfile, receiverNameParam);
-      const textNode = document.createElement("div");
-      textNode.textContent = content;
-      textWrap.appendChild(sender);
-      textWrap.appendChild(textNode);
+      textWrap.appendChild(createMessageMainContent(row, false));
       wrap.appendChild(avatar);
       wrap.appendChild(textWrap);
       bubble.appendChild(wrap);
     }
 
-    const meta = document.createElement("div");
-    meta.className = "text-[9px] text-gray-400 text-right mt-1";
-    meta.textContent = formatClock(row.created_at);
-    bubble.appendChild(meta);
-    msgHolder.appendChild(bubble);
+    const metaRow = document.createElement("div");
+    metaRow.className = "text-[9px] text-gray-400 mt-1 flex items-center justify-end gap-2";
+    if(isMessageStarred(row)){
+      const starTag = document.createElement("span");
+      starTag.className = "star-tag";
+      starTag.textContent = "STARRED";
+      metaRow.appendChild(starTag);
+    }
+    const clock = document.createElement("span");
+    clock.textContent = formatClock(row.created_at);
+    metaRow.appendChild(clock);
+    bubble.appendChild(metaRow);
+    return bubble;
+  }
+
+  function renderMessageList(){
+    msgHolder.innerHTML = "";
+    const rows = [...messageRows]
+      .filter(row => !shouldHideRow(row))
+      .sort((a, b) => toEpoch(a?.created_at) - toEpoch(b?.created_at));
+    if(!rows.length){
+      msgHolder.innerHTML = "<p class='text-center text-xs text-gray-400'>No messages.</p>";
+      return;
+    }
+    rows.forEach(row => msgHolder.appendChild(buildMessageBubble(row)));
+  }
+
+  function addMessageRow(row){
+    upsertMessageRow(row);
+    renderMessageList();
   }
 
   async function fetchUserProfile(uid){
@@ -189,46 +485,132 @@
     return data?.user || null;
   }
 
+  async function queryThreadMessages(condition, selectFields){
+    return await supa
+      .from("messages")
+      .select(selectFields)
+      .or(condition)
+      .order("created_at", { ascending: true });
+  }
+
+  async function fetchThreadRows(condition){
+    const selects = [
+      "id,sender_id,receiver_id,content,created_at,attachment_url,message_type,is_starred,reply_to_id,reply_preview,deleted_for_everyone,deleted_by_name",
+      "id,sender_id,receiver_id,content,created_at,attachment_url,is_starred,reply_to_id,reply_preview",
+      "id,sender_id,receiver_id,content,created_at,is_starred",
+      "id,sender_id,receiver_id,content,created_at"
+    ];
+    for(const fields of selects){
+      const { data, error } = await queryThreadMessages(condition, fields);
+      if(!error) return { data: data || [], error: null };
+      if(!maybeMissingColumn(error)) return { data: [], error };
+    }
+    const fallback = await queryThreadMessages(condition, "id,sender_id,receiver_id,content,created_at");
+    return { data: fallback.data || [], error: fallback.error || null };
+  }
+
   async function loadMessages(){
     msgHolder.innerHTML = "<p class='text-center text-xs text-gray-400'>Syncing messages...</p>";
     const condition = `and(sender_id.eq.${myId},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${myId})`;
-    const { data, error } = await supa
-      .from("messages")
-      .select("id,sender_id,receiver_id,content,created_at")
-      .or(condition)
-      .order("created_at", { ascending: true });
+    const { data, error } = await fetchThreadRows(condition);
     if(error){
       console.error("message_load_failed", error);
       msgHolder.innerHTML = "<p class='text-center text-xs text-red-500'>Unable to load messages.</p>";
       return;
     }
-    msgHolder.innerHTML = "";
-    (data || []).forEach(addMessageRow);
+    messageRows = [];
+    renderedMessageIds = new Set();
+    (data || []).forEach(upsertMessageRow);
+    renderMessageList();
     scrollBottom();
+  }
+
+  async function insertMessageWithFallback(payload){
+    const variants = [];
+    variants.push({ ...payload });
+    if("reply_preview" in payload){ const v = { ...payload }; delete v.reply_preview; variants.push(v); }
+    if("reply_to_id" in payload){ const v = { ...payload }; delete v.reply_to_id; variants.push(v); }
+    if("attachment_url" in payload){ const v = { ...payload }; delete v.attachment_url; variants.push(v); }
+    if("message_type" in payload){ const v = { ...payload }; delete v.message_type; variants.push(v); }
+    variants.push({ sender_id: payload.sender_id, receiver_id: payload.receiver_id, content: payload.content });
+
+    for(const candidate of variants){
+      const { data, error } = await supa
+        .from("messages")
+        .insert(candidate)
+        .select("id,sender_id,receiver_id,content,created_at")
+        .maybeSingle();
+      if(!error) return { data: data ? { ...candidate, ...data } : null, error: null };
+      if(!maybeMissingColumn(error)) return { data: null, error };
+    }
+    return { data: null, error: new Error("message_insert_failed") };
+  }
+
+  function getReplyPayload(){
+    if(!pendingReply) return {};
+    const messageId = getMessageId(pendingReply);
+    const preview = getMessageTextForPreview(pendingReply).slice(0, 140);
+    const payload = {};
+    if(messageId) payload.reply_to_id = messageId;
+    if(preview) payload.reply_preview = preview;
+    return payload;
+  }
+
+  function clearReplyState(){
+    pendingReply = null;
+    replyPreviewText.textContent = "";
+    replyPreview.classList.remove("show");
+  }
+
+  function setReplyState(row){
+    pendingReply = row || null;
+    if(!pendingReply){
+      clearReplyState();
+      return;
+    }
+    replyPreviewText.textContent = getMessageTextForPreview(pendingReply);
+    replyPreview.classList.add("show");
+  }
+
+  function cancelReply(){
+    clearReplyState();
+  }
+
+  async function sendMessageWithPayload(rawPayload, restoreText){
+    if(!isUuid(myId) || !isUuid(receiverId)){
+      alert("Invalid sender/receiver id.");
+      return false;
+    }
+    if(isPeerBlocked){
+      alert("You blocked this user.");
+      return false;
+    }
+    const { data, error } = await insertMessageWithFallback(rawPayload);
+    if(error){
+      console.error("message_send_failed", error);
+      alert("Message failed to send.");
+      if(typeof restoreText === "string") mainInput.value = restoreText;
+      return false;
+    }
+    if(data){
+      addMessageRow(data);
+      scrollBottom();
+    }
+    return true;
   }
 
   async function sendMessage(){
     const text = String(mainInput.value || "").trim();
     if(!text) return;
-    if(!isUuid(myId) || !isUuid(receiverId)){
-      alert("Invalid sender/receiver id.");
-      return;
-    }
     mainInput.value = "";
-    const payload = { sender_id: myId, receiver_id: receiverId, content: text };
-    const { data, error } = await supa
-      .from("messages")
-      .insert(payload)
-      .select("id,sender_id,receiver_id,content,created_at")
-      .maybeSingle();
-    if(error){
-      console.error("message_send_failed", error);
-      alert("Message failed to send.");
-      mainInput.value = text;
-      return;
-    }
-    if(data) addMessageRow(data);
-    scrollBottom();
+    const payload = {
+      sender_id: myId,
+      receiver_id: receiverId,
+      content: text,
+      ...getReplyPayload()
+    };
+    const ok = await sendMessageWithPayload(payload, text);
+    if(ok) clearReplyState();
   }
 
   function subscribeToMessages(){
@@ -236,15 +618,33 @@
       try{ supa.removeChannel(realtimeChannel); }catch(_){ }
       realtimeChannel = null;
     }
+    const processPayload = (row, type) => {
+      const s = String(row?.sender_id || "");
+      const r = String(row?.receiver_id || "");
+      const inThread = (s === myId && r === receiverId) || (s === receiverId && r === myId);
+      if(!inThread) return;
+      if(type === "DELETE"){
+        const id = getMessageId(row);
+        if(id){
+          messageRows = messageRows.filter(item => getMessageId(item) !== id);
+          renderMessageList();
+          scrollBottom();
+        }
+        return;
+      }
+      addMessageRow(row);
+      scrollBottom();
+    };
+
     realtimeChannel = supa.channel(`dm_${myId}_${receiverId}_${Date.now()}`)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, payload => {
-        const row = payload?.new || {};
-        const s = String(row.sender_id || "");
-        const r = String(row.receiver_id || "");
-        const inThread = (s === myId && r === receiverId) || (s === receiverId && r === myId);
-        if(!inThread) return;
-        addMessageRow(row);
-        scrollBottom();
+        processPayload(payload?.new || {}, "INSERT");
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "messages" }, payload => {
+        processPayload(payload?.new || {}, "UPDATE");
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "messages" }, payload => {
+        processPayload(payload?.old || {}, "DELETE");
       })
       .subscribe();
   }
@@ -512,6 +912,10 @@
 
   async function startOutgoingCall(mediaType){
     if(!isUuid(myId) || !isUuid(receiverId)) return;
+    if(isPeerBlocked){
+      alert("You blocked this user.");
+      return;
+    }
     if(activeCall){ alert("A call is already active."); return; }
     hideIncomingOffer();
     const localStream = await getLocalStream(mediaType);
@@ -628,6 +1032,17 @@
   async function handleCallSignal(signal){
     if(!signal || signal.to_user_id !== myId || signal.from_user_id !== receiverId) return;
     if(signal.type === "call-offer"){
+      if(isPeerBlocked){
+        await sendCallSignal({
+          type: "call-decline",
+          call_id: signal.call_id,
+          from_user_id: myId,
+          to_user_id: receiverId,
+          media_type: signal.media_type,
+          reason: "blocked"
+        });
+        return;
+      }
       if(activeCall){
         await sendCallSignal({
           type: "call-busy",
@@ -719,7 +1134,202 @@
     }
   }
 
+  function toggleHeaderMenu(){
+    const show = chatHeaderMenu.style.display !== "block";
+    chatHeaderMenu.style.display = show ? "block" : "none";
+    if(show) closeContextMenu();
+  }
+
+  function closeHeaderMenu(){
+    chatHeaderMenu.style.display = "none";
+  }
+
+  function showStarredMessages(){
+    showingStarredOnly = true;
+    updateFilterUi();
+    closeHeaderMenu();
+    renderMessageList();
+  }
+
+  function showAllMessages(){
+    showingStarredOnly = false;
+    updateFilterUi();
+    renderMessageList();
+  }
+
+  async function clearAllChat(){
+    closeHeaderMenu();
+    if(!confirm("Clear all chat only on your side?")) return;
+    setChatClearedAt(Date.now());
+    renderMessageList();
+  }
+
+  async function persistBlockInDatabase(){
+    const now = new Date().toISOString();
+    const attempts = [
+      { table: "user_blocks", payload: { blocker_id: myId, blocked_id: receiverId, created_at: now }, onConflict: "blocker_id,blocked_id" },
+      { table: "blocked_users", payload: { user_id: myId, blocked_user_id: receiverId, created_at: now }, onConflict: "user_id,blocked_user_id" },
+      { table: "blocks", payload: { blocker_id: myId, blocked_id: receiverId, created_at: now }, onConflict: "blocker_id,blocked_id" }
+    ];
+    for(const attempt of attempts){
+      try{
+        const { error: upsertError } = await supa.from(attempt.table).upsert(attempt.payload, { onConflict: attempt.onConflict });
+        if(!upsertError) return true;
+        if(!maybeMissingColumn(upsertError) && !maybeMissingTable(upsertError)){
+          const { error: insertError } = await supa.from(attempt.table).insert(attempt.payload);
+          if(!insertError) return true;
+          if(!maybeMissingColumn(insertError) && !maybeMissingTable(insertError)){
+            console.error("block_insert_failed", insertError);
+          }
+        }
+      }catch(err){
+        console.error("block_persist_error", err);
+      }
+    }
+    return false;
+  }
+
+  async function checkBlockedInDatabase(){
+    const attempts = [
+      { table: "user_blocks", where: { blocker_id: myId, blocked_id: receiverId } },
+      { table: "blocked_users", where: { user_id: myId, blocked_user_id: receiverId } },
+      { table: "blocks", where: { blocker_id: myId, blocked_id: receiverId } }
+    ];
+    for(const attempt of attempts){
+      let query = supa.from(attempt.table).select("id").limit(1);
+      Object.entries(attempt.where).forEach(([k, v]) => { query = query.eq(k, v); });
+      const { data, error } = await query;
+      if(!error){
+        if(Array.isArray(data) && data.length > 0) return true;
+        continue;
+      }
+      if(!maybeMissingColumn(error) && !maybeMissingTable(error)){
+        console.error("block_check_failed", error);
+      }
+    }
+    return false;
+  }
+
+  async function blockCurrentUser(){
+    closeHeaderMenu();
+    if(isPeerBlocked){
+      alert("User already blocked.");
+      return;
+    }
+    if(!confirm("Block this user?")) return;
+    await persistBlockInDatabase();
+    setBlockedLocalState(true);
+    applyBlockedUi();
+    alert("User blocked.");
+  }
+
+  function getContextMessage(){
+    return selectedContextMessage || null;
+  }
+
+  function updateMessageInMemory(updated){
+    const id = getMessageId(updated);
+    if(!id) return;
+    const idx = messageRows.findIndex(row => getMessageId(row) === id);
+    if(idx >= 0){
+      messageRows[idx] = { ...messageRows[idx], ...updated };
+      renderMessageList();
+    }
+  }
+
+  async function updateMessageRowWithFallback(messageId, payloadCandidates){
+    const id = String(messageId || "").trim();
+    if(!id || !Array.isArray(payloadCandidates)) return null;
+    for(const payload of payloadCandidates){
+      if(!payload || typeof payload !== "object" || !Object.keys(payload).length) continue;
+      const { data, error } = await supa
+        .from("messages")
+        .update(payload)
+        .eq("id", id)
+        .select("id,sender_id,receiver_id,content,created_at")
+        .maybeSingle();
+      if(!error){
+        return data ? { ...payload, ...data } : { id, ...payload };
+      }
+      if(!maybeMissingColumn(error)){
+        console.error("message_update_failed", error);
+        return null;
+      }
+    }
+    return null;
+  }
+
+  async function contextMenuStar(){
+    const row = getContextMessage();
+    closeContextMenu();
+    if(!row) return;
+    const messageId = getMessageId(row);
+    if(!messageId){
+      row.is_starred = true;
+      renderMessageList();
+      return;
+    }
+    updateMessageInMemory({ id: messageId, is_starred: true });
+    await updateMessageRowWithFallback(messageId, [
+      { is_starred: true },
+      { starred: true }
+    ]);
+  }
+
+  function contextMenuReply(){
+    const row = getContextMessage();
+    closeContextMenu();
+    if(!row) return;
+    setReplyState(row);
+    mainInput.focus();
+  }
+
+  function contextMenuDelete(){
+    if(!getContextMessage()) return;
+    closeContextMenu();
+    deleteChoiceModal.style.display = "flex";
+  }
+
+  function closeDeleteChoice(){
+    deleteChoiceModal.style.display = "none";
+  }
+
+  function deleteForMe(){
+    const row = getContextMessage();
+    closeDeleteChoice();
+    if(!row) return;
+    const id = getMessageId(row);
+    if(id){
+      localDeletedMessageIds.add(id);
+      saveDeletedForMeState();
+    }
+    renderMessageList();
+  }
+
+  async function deleteForEveryone(){
+    const row = getContextMessage();
+    closeDeleteChoice();
+    if(!row) return;
+    const id = getMessageId(row);
+    if(!id) return;
+    const deleteText = `This message was deleted by ${getDisplayName(myUser, "User")}`;
+    updateMessageInMemory({
+      id,
+      content: deleteText,
+      deleted_for_everyone: true,
+      deleted_by_name: getDisplayName(myUser, "User"),
+      attachment_url: "",
+      message_type: "text"
+    });
+    await updateMessageRowWithFallback(id, [
+      { content: deleteText, deleted_for_everyone: true, deleted_by_name: getDisplayName(myUser, "User"), attachment_url: null, message_type: "text" },
+      { content: deleteText, deleted_for_everyone: true, deleted_by_name: getDisplayName(myUser, "User") },
+      { content: deleteText }
+    ]);
+  }
+
   function openProfile(){
+    closeHeaderMenu();
     const name = getDisplayName(peerProfile, receiverNameParam || "User");
     setAvatar(document.getElementById("infoPic"), getProfilePhoto(peerProfile, receiverPicParam), name);
     document.getElementById("infoName").textContent = name;
@@ -728,16 +1338,53 @@
 
   function closeProfile(){ document.getElementById("profileOverlay").style.display = "none"; }
 
-  function confirmAction(){
-    if(confirm("Clear current chat view?")){
-      msgHolder.innerHTML = "";
-      renderedMessageIds = new Set();
-    }
+  function confirmAction(){ clearAllChat().catch(() => {}); }
+
+  function sanitizeFileName(name){
+    return String(name || "file").replace(/[^a-zA-Z0-9._-]/g, "_").slice(-80) || "file";
   }
 
   async function handleMediaUpload(el){
-    if(!el?.files?.[0]) return;
-    alert("Storage bucket upload flow is not configured on this page yet.");
+    const file = el?.files?.[0];
+    if(!file) return;
+    try{
+      if(isPeerBlocked){
+        alert("You blocked this user.");
+        return;
+      }
+      const fileName = `${myId}/${Date.now()}_${sanitizeFileName(file.name)}`;
+      const { error: uploadError } = await supa
+        .storage
+        .from("chat-attachments")
+        .upload(fileName, file, { cacheControl: "3600", upsert: false, contentType: file.type || undefined });
+      if(uploadError){
+        console.error("attachment_upload_failed", uploadError);
+        alert("File upload failed.");
+        return;
+      }
+      const { data } = supa.storage.from("chat-attachments").getPublicUrl(fileName);
+      const fileUrl = String(data?.publicUrl || "").trim();
+      if(!fileUrl){
+        alert("File URL not available.");
+        return;
+      }
+      const type = String(file.type || "").toLowerCase();
+      const isVideo = type.startsWith("video/");
+      const isImage = type.startsWith("image/");
+      const content = isVideo ? "Video attachment" : (isImage ? "Image attachment" : (file.name || "Attachment"));
+      const payload = {
+        sender_id: myId,
+        receiver_id: receiverId,
+        content,
+        attachment_url: fileUrl,
+        message_type: isVideo ? "video" : (isImage ? "image" : "file"),
+        ...getReplyPayload()
+      };
+      const ok = await sendMessageWithPayload(payload, "");
+      if(ok) clearReplyState();
+    }finally{
+      el.value = "";
+    }
   }
 
   async function initPage(){
@@ -766,12 +1413,17 @@
       location.href = "chat.html";
       return;
     }
+    loadThreadLocalState();
+    const blockedInDb = await checkBlockedInDatabase().catch(() => false);
+    if(blockedInDb) setBlockedLocalState(true);
     peerProfile = await fetchUserProfile(receiverId);
     renderPeerHeader();
+    applyBlockedUi();
+    updateFilterUi();
     await loadMessages();
     subscribeToMessages();
     startCallPolling();
-    const canCall = isUuid(receiverId) && receiverId !== myId;
+    const canCall = isUuid(receiverId) && receiverId !== myId && !isPeerBlocked;
     audioCallBtn.disabled = !canCall;
     videoCallBtn.disabled = !canCall;
     if(!canCall){
@@ -782,6 +1434,28 @@
 
   document.addEventListener("visibilitychange", () => {
     if(document.visibilityState === "visible") pollCallSignals(true).catch(() => {});
+  });
+
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if(chatHeaderMenu.style.display === "block" && !chatHeaderMenu.contains(target)){
+      closeHeaderMenu();
+    }
+    if(messageContextMenu.style.display === "block" && !messageContextMenu.contains(target)){
+      closeContextMenu();
+    }
+    if(deleteChoiceModal.style.display === "flex" && target === deleteChoiceModal){
+      closeDeleteChoice();
+    }
+  });
+
+  window.addEventListener("resize", () => {
+    closeHeaderMenu();
+    closeContextMenu();
+  });
+
+  chatWindow.addEventListener("scroll", () => {
+    closeContextMenu();
   });
 
   window.addEventListener("beforeunload", () => {
@@ -802,6 +1476,18 @@
   window.openProfile = openProfile;
   window.closeProfile = closeProfile;
   window.confirmAction = confirmAction;
+  window.toggleHeaderMenu = toggleHeaderMenu;
+  window.showStarredMessages = showStarredMessages;
+  window.showAllMessages = showAllMessages;
+  window.clearAllChat = clearAllChat;
+  window.blockCurrentUser = blockCurrentUser;
+  window.cancelReply = cancelReply;
+  window.contextMenuStar = contextMenuStar;
+  window.contextMenuReply = contextMenuReply;
+  window.contextMenuDelete = contextMenuDelete;
+  window.deleteForMe = deleteForMe;
+  window.deleteForEveryone = deleteForEveryone;
+  window.closeDeleteChoice = closeDeleteChoice;
   window.startOutgoingCall = startOutgoingCall;
   window.answerIncomingCall = answerIncomingCall;
   window.declineIncomingCall = declineIncomingCall;
