@@ -13,11 +13,20 @@
   </script>
   <style>
     :root{--nova-orange:#ff6a00;--nova-gradient:linear-gradient(90deg,#ff6a00 0%,#ee0979 100%)}
-    body{font-family:sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;background:#efeae2;user-select:none}
-    .chat-bg{background-image:url("https://www.transparenttextures.com/patterns/cubes.png");flex:1;overflow-y:auto;padding:15px;display:flex;flex-direction:column}
+    html,body{width:100%;max-width:100%;height:100dvh;overflow:hidden}
+    body{font-family:sans-serif;min-height:100dvh;display:flex;flex-direction:column;overflow:hidden;background:#efeae2;user-select:none}
+    header,footer{width:100%;max-width:100%}
+    .chat-bg{background-image:url("https://www.transparenttextures.com/patterns/cubes.png");flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:15px;display:flex;flex-direction:column}
+    #msgHolder{width:100%;min-width:0}
     .bubble{max-width:88%;padding:8px;border-radius:8px;margin-bottom:10px;box-shadow:0 1px .5px rgba(0,0,0,.13);font-size:14.5px}
+    .bubble,.msg-text{word-break:break-word;overflow-wrap:anywhere;white-space:pre-wrap}
     .bubble-out{background:#ffe9d6;align-self:flex-end;border-top-right-radius:0}
     .bubble-in{background:#fff;align-self:flex-start;border-top-left-radius:0}
+    .msg-link{color:#0f6edb;text-decoration:underline;word-break:break-all}
+    .reel-link-card{display:flex;flex-direction:column;gap:2px;margin-top:2px;padding:8px 10px;border-radius:10px;border:1px solid #ffd1b1;background:#fff7f1;text-decoration:none;color:#2b1800;max-width:min(300px,100%)}
+    .reel-link-card-label{font-size:10px;font-weight:700;color:#ff6a00;text-transform:uppercase;letter-spacing:.04em}
+    .reel-link-card-title{font-size:13px;font-weight:700;line-height:1.3}
+    .reel-link-card-url{font-size:11px;color:#7f4d24;word-break:break-all}
     .msg-mini-avatar{width:22px;height:22px;border-radius:999px;background:#ffd5b5;background-size:cover;background-position:center;font-size:10px;font-weight:700;color:#7b3f00;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px}
     #profileOverlay{position:fixed;inset:0;background:#fff;z-index:20000;display:none;flex-direction:column;overflow-y:auto}
     .call-btn{width:34px;height:34px;border-radius:999px;border:1px solid rgba(255,255,255,.55);color:#fff;display:inline-flex;align-items:center;justify-content:center}
@@ -72,6 +81,15 @@
     .media-preview-download{background:#ff6a00;color:#fff}
     .media-preview-body{flex:1;display:flex;align-items:center;justify-content:center;padding:12px}
     .media-preview-body img,.media-preview-body video{max-width:100%;max-height:100%;border-radius:8px}
+    #mainInput{min-width:0}
+    @media (max-width:640px){
+      .chat-bg{padding:10px}
+      .bubble{max-width:94%;font-size:14px}
+      .attachment-grid{max-width:100%}
+      .attachment-tile img,.attachment-tile video{height:108px}
+      footer{padding:8px calc(8px + env(safe-area-inset-right,0px)) calc(8px + env(safe-area-inset-bottom,0px)) calc(8px + env(safe-area-inset-left,0px))}
+      .call-btn{width:32px;height:32px}
+    }
     .hidden{display:none!important}
   </style>
 </head>
@@ -97,7 +115,7 @@
 
   <header class="h-16 flex items-center px-2 justify-between shrink-0 shadow-lg z-50" style="background:var(--nova-gradient)">
     <div class="flex items-center gap-1 cursor-pointer" onclick="openProfile()">
-      <button onclick="event.stopPropagation();window.history.back()" class="text-white p-2 text-2xl"><-</button>
+      <button type="button" onclick="handleBackNavigation(event)" class="text-white p-2 text-2xl"><-</button>
       <div id="userAvatar" class="w-10 h-10 rounded-full bg-white bg-cover bg-center"></div>
       <div class="text-white ml-2">
         <h1 id="userName" class="font-bold">Loading...</h1>

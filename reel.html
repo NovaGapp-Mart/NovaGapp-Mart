@@ -1642,7 +1642,7 @@ async function renderReel(item, options){
         </div>
         <div class="action-item">
           <div class="icon-btn" data-action="share">
-            <svg viewBox="0 0 24 24"><path d="M12 3l9 9-9 9-9-9 9-9z"/></svg>
+            <svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7a2.98 2.98 0 0 0 0-1.39l7-4.11A3 3 0 1 0 14 5a3 3 0 0 0 .04.49l-7 4.11a3 3 0 1 0 0 4.8l7.13 4.2A3 3 0 1 0 18 16.08z"/></svg>
           </div>
           <span class="count" data-share-count>0</span>
         </div>
@@ -2546,10 +2546,11 @@ function closeShareSheet(){
 function getSharePayload(){
   const text = activeShareItem?.title || "Reel";
   const url = activeShareItem ? getReelShareUrl(activeShareItem) : location.href;
+  const message = `Reel: ${text}\n${url}`;
   return {
     text,
     url,
-    message: text + "\n" + url
+    message
   };
 }
 
@@ -2592,18 +2593,55 @@ async function loadShareChatTargets(){
 
 async function sendShareToChat(userId, sendBtn){
   if(!activeShareItem || !userId) return;
-  if(!window.NOVA || typeof window.NOVA.sendChatMessage !== "function"){
-    alert("Chat share not available.");
+  const targetId = String(userId || "").trim();
+  if(!targetId){
     return;
   }
   if(sendBtn) sendBtn.disabled = true;
   const payload = getSharePayload();
-  const { ok } = await window.NOVA.sendChatMessage(userId, payload.message);
-  if(!ok){
+  let sent = false;
+
+  try{
+    if(window.NOVA && typeof window.NOVA.requireUser === "function" && window.NOVA.supa){
+      const me = await window.NOVA.requireUser();
+      const myId = String(me?.id || "").trim();
+      if(myId){
+        const base = {
+          sender_id: myId,
+          receiver_id: targetId,
+          content: payload.message
+        };
+        const candidates = [
+          { ...base, message_type: "reel", reel_url: payload.url },
+          { ...base, message_type: "text" },
+          base
+        ];
+        for(const candidate of candidates){
+          const { error } = await window.NOVA.supa.from("messages").insert(candidate);
+          if(!error){
+            sent = true;
+            break;
+          }
+          const errText = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+          const schemaMiss = errText.includes("does not exist") || errText.includes("column") || errText.includes("undefined");
+          if(!schemaMiss){
+            break;
+          }
+        }
+      }
+    }
+  }catch(_){}
+
+  if(!sent && window.NOVA && typeof window.NOVA.sendChatMessage === "function"){
+    const res = await window.NOVA.sendChatMessage(targetId, payload.message);
+    sent = !!res?.ok;
+  }
+
+  if(!sent){
     if(sendBtn) sendBtn.disabled = false;
-    alert("Unable to send in chat.");
     return;
   }
+
   if(activeShareItem?.id){
     const next = await trackReelShare(activeShareItem.id, "chat");
     if(activeShareCountEl){

@@ -77,6 +77,7 @@
   let groupInfo = null;
   let groupMembers = [];
   let noticeTimer = null;
+  const URL_PATTERN = /(https?:\/\/[^\s]+)/ig;
 
   function isUuid(value){
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
@@ -343,6 +344,102 @@
       return isVideoUrl(attachments[0]) ? "Video attachment" : "Attachment";
     }
     return textOrEmpty(row?.content || row?.message || "Message");
+  }
+
+  function sanitizeTextForCard(text){
+    return String(text || "").replace(/\s+/g, " ").trim();
+  }
+
+  function isReelLink(url){
+    const value = String(url || "").trim();
+    return /\/reel\.html(\?|$)/i.test(value) || /[?&]reel(_id)?=/i.test(value);
+  }
+
+  function extractUrls(text){
+    const value = String(text || "");
+    const found = value.match(URL_PATTERN);
+    if(!Array.isArray(found)) return [];
+    return found.map(url => String(url || "").trim()).filter(Boolean);
+  }
+
+  function getFirstReelUrl(text){
+    const links = extractUrls(text);
+    return links.find(isReelLink) || "";
+  }
+
+  function buildReelCardTitle(text, reelUrl){
+    const src = String(text || "");
+    const withoutLink = src.replace(reelUrl, "").trim();
+    const cleaned = sanitizeTextForCard(withoutLink);
+    if(!cleaned) return "Open shared reel";
+    const withoutPrefix = cleaned.replace(/^reel:\s*/i, "").trim();
+    return withoutPrefix || "Open shared reel";
+  }
+
+  function appendTextWithLinks(parent, text){
+    const value = String(text || "");
+    const wrap = document.createElement("div");
+    wrap.className = "msg-text";
+    let cursor = 0;
+    let hasUrl = false;
+    URL_PATTERN.lastIndex = 0;
+    let match = URL_PATTERN.exec(value);
+    while(match){
+      hasUrl = true;
+      const url = String(match[0] || "").trim();
+      const start = Number(match.index || 0);
+      if(start > cursor){
+        const txt = document.createTextNode(value.slice(cursor, start));
+        wrap.appendChild(txt);
+      }
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.target = "_blank";
+      anchor.rel = "noopener";
+      anchor.className = "msg-link";
+      anchor.textContent = url;
+      wrap.appendChild(anchor);
+      cursor = start + url.length;
+      match = URL_PATTERN.exec(value);
+    }
+    if(!hasUrl){
+      wrap.textContent = value;
+    }else if(cursor < value.length){
+      wrap.appendChild(document.createTextNode(value.slice(cursor)));
+    }
+    parent.appendChild(wrap);
+  }
+
+  function appendMessageTextContent(parent, text){
+    const value = String(text || "").trim();
+    if(!value) return;
+    const reelUrl = getFirstReelUrl(value);
+    if(reelUrl){
+      const card = document.createElement("a");
+      card.href = reelUrl;
+      card.target = "_blank";
+      card.rel = "noopener";
+      card.className = "reel-link-card";
+
+      const label = document.createElement("span");
+      label.className = "reel-link-card-label";
+      label.textContent = "Shared Reel";
+
+      const title = document.createElement("span");
+      title.className = "reel-link-card-title";
+      title.textContent = buildReelCardTitle(value, reelUrl);
+
+      const linkText = document.createElement("span");
+      linkText.className = "reel-link-card-url";
+      linkText.textContent = reelUrl;
+
+      card.appendChild(label);
+      card.appendChild(title);
+      card.appendChild(linkText);
+      parent.appendChild(card);
+      return;
+    }
+    appendTextWithLinks(parent, value);
   }
 
   function getThreadTargetKey(){
@@ -686,12 +783,14 @@
       ? getDeletedMessageText(row)
       : textOrEmpty(row.content || row.message);
     if(messageText){
-      const textNode = document.createElement("div");
-      textNode.textContent = messageText;
       if(isMessageDeletedEverywhere(row)){
+        const textNode = document.createElement("div");
+        textNode.textContent = messageText;
         textNode.className = "italic text-gray-500";
+        contentWrap.appendChild(textNode);
+      }else{
+        appendMessageTextContent(contentWrap, messageText);
       }
-      contentWrap.appendChild(textNode);
     }
 
     if(!isMessageDeletedEverywhere(row)){
@@ -1465,6 +1564,22 @@
     chatHeaderMenu.style.display = "none";
   }
 
+  function handleBackNavigation(event){
+    if(event) event.stopPropagation();
+    const fallback = () => { location.href = "chat.html"; };
+    if(window.history.length <= 1){
+      fallback();
+      return;
+    }
+    const startPath = String(location.pathname || "");
+    window.history.back();
+    setTimeout(() => {
+      if(String(location.pathname || "") === startPath){
+        fallback();
+      }
+    }, 240);
+  }
+
   function showStarredMessages(){
     showingStarredOnly = true;
     updateFilterUi();
@@ -1893,6 +2008,7 @@
   window.openProfile = openProfile;
   window.closeProfile = closeProfile;
   window.confirmAction = confirmAction;
+  window.handleBackNavigation = handleBackNavigation;
   window.toggleHeaderMenu = toggleHeaderMenu;
   window.showStarredMessages = showStarredMessages;
   window.showAllMessages = showAllMessages;

@@ -131,6 +131,8 @@
         let currentUserId = "";
         let realtimeListChannel = null;
         let chatCache = [];
+        const manualChatTargets = new Map();
+        const MANUAL_TARGET_KEY_PREFIX = "manual_chat_targets:";
 
         function isUuid(value){
             return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
@@ -176,6 +178,52 @@
             }
         }
 
+        function maybeMissingResource(error, resource){
+            const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+            const missing = text.includes("does not exist") || text.includes("not found") || text.includes("undefined");
+            return missing && text.includes(String(resource || "").toLowerCase());
+        }
+
+        function manualTargetStorageKey(){
+            return `${MANUAL_TARGET_KEY_PREFIX}${currentUserId}`;
+        }
+
+        function loadManualChatTargets(){
+            manualChatTargets.clear();
+            if(!isUuid(currentUserId)) return;
+            const rows = getStoredArray(manualTargetStorageKey());
+            rows.forEach(row => {
+                const id = String(row?.id || "").trim();
+                if(!isUuid(id) || id === currentUserId) return;
+                manualChatTargets.set(id, {
+                    id,
+                    name: sanitizeNameForQuery(row?.name || "User"),
+                    img: sanitizeImageForQuery(row?.img || ""),
+                    updated_at: Number(row?.updated_at || 0) || 0
+                });
+            });
+        }
+
+        function saveManualChatTargets(){
+            if(!isUuid(currentUserId)) return;
+            const payload = Array.from(manualChatTargets.values()).slice(0, 300);
+            localStorage.setItem(manualTargetStorageKey(), JSON.stringify(payload));
+        }
+
+        function rememberManualChatTarget(uid, profile){
+            const cleanId = String(uid || "").trim();
+            if(!isUuid(cleanId) || cleanId === currentUserId) return;
+            const existing = manualChatTargets.get(cleanId) || {};
+            const p = profile && typeof profile === "object" ? profile : {};
+            manualChatTargets.set(cleanId, {
+                id: cleanId,
+                name: sanitizeNameForQuery(displayName(p) || existing.name || "User"),
+                img: sanitizeImageForQuery(avatarUrl(p) || existing.img || ""),
+                updated_at: Date.now()
+            });
+            saveManualChatTargets();
+        }
+
         async function resolveCurrentUser(){
             if(window.NOVA && typeof window.NOVA.requireUser === "function"){
                 return await window.NOVA.requireUser();
@@ -214,7 +262,9 @@
             return null;
         }
 
-        async function fetchUsersForChatList(){
+        async function fetchUsersByIds(userIds){
+            const ids = Array.from(userIds || []).map(id => String(id || "").trim()).filter(id => isUuid(id) && id !== currentUserId);
+            if(!ids.length) return [];
             const attempts = [
                 "user_id,username,full_name,display_name,photo,avatar_url",
                 "user_id,username,full_name,display_name,photo",
@@ -222,11 +272,11 @@
                 "user_id,username,full_name"
             ];
             for(const fields of attempts){
-                let query = supa.from("users").select(fields).limit(200);
-                if(isUuid(currentUserId)){
-                    query = query.neq("user_id", currentUserId);
-                }
-                const { data, error } = await query;
+                const { data, error } = await supa
+                    .from("users")
+                    .select(fields)
+                    .in("user_id", ids)
+                    .limit(Math.max(200, ids.length + 10));
                 if(!error) return data || [];
                 if(!maybeMissingColumn(error)){
                     console.error("users_fetch_failed", error);
@@ -234,6 +284,193 @@
                 }
             }
             return [];
+        }
+
+        function putRecentContact(map, userId, createdAt){
+            const id = String(userId || "").trim();
+            if(!isUuid(id) || id === currentUserId) return;
+            const ts = Number(new Date(createdAt || 0).getTime()) || 0;
+            const prev = Number(map.get(id) || 0);
+            if(ts > prev) map.set(id, ts);
+            if(!map.has(id)) map.set(id, prev || 0);
+        }
+
+        async function fetchRecentContactsFromMessages(){
+            const recent = new Map();
+            try{
+                const { data, error } = await supa
+                    .from("messages")
+                    .select("sender_id,receiver_id,created_at")
+                    .or(`sender_id.eq.${currentUserId},receiver_id.eq.${currentUserId}`)
+                    .order("created_at", { ascending: false })
+                    .limit(1200);
+                if(error){
+                    if(!maybeMissingResource(error, "messages")){
+                        console.error("message_contacts_failed", error);
+                    }
+                    return recent;
+                }
+                (data || []).forEach(row => {
+                    const senderId = String(row?.sender_id || "").trim();
+                    const receiverId = String(row?.receiver_id || "").trim();
+                    const otherId = senderId === currentUserId ? receiverId : senderId;
+                    putRecentContact(recent, otherId, row?.created_at);
+                });
+            }catch(err){
+                console.error("message_contacts_exception", err);
+            }
+            return recent;
+        }
+
+        async function fetchRecentContactsFromChats(){
+            const recent = new Map();
+            try{
+                const { data, error } = await supa
+                    .from("chats")
+                    .select("sender_id,receiver_id,created_at")
+                    .or(`sender_id.eq.${currentUserId},receiver_id.eq.${currentUserId}`)
+                    .order("created_at", { ascending: false })
+                    .limit(1200);
+                if(error){
+                    if(!maybeMissingResource(error, "chats")){
+                        console.error("chat_contacts_failed", error);
+                    }
+                    return recent;
+                }
+                (data || []).forEach(row => {
+                    const senderId = String(row?.sender_id || "").trim();
+                    const receiverId = String(row?.receiver_id || "").trim();
+                    const otherId = senderId === currentUserId ? receiverId : senderId;
+                    putRecentContact(recent, otherId, row?.created_at);
+                });
+            }catch(err){
+                console.error("chat_contacts_exception", err);
+            }
+            return recent;
+        }
+
+        async function fetchFollowedUserIds(){
+            const set = new Set();
+            try{
+                const { data, error } = await supa
+                    .from("follows")
+                    .select("following_id")
+                    .eq("follower_id", currentUserId)
+                    .limit(1000);
+                if(error){
+                    if(!maybeMissingResource(error, "follows")){
+                        console.error("followed_users_failed", error);
+                    }
+                    return set;
+                }
+                (data || []).forEach(row => {
+                    const id = String(row?.following_id || "").trim();
+                    if(isUuid(id) && id !== currentUserId){
+                        set.add(id);
+                    }
+                });
+            }catch(err){
+                console.error("followed_users_exception", err);
+            }
+            return set;
+        }
+
+        async function fetchPrivateUserRows(){
+            const [messageRecent, chatRecent, followedIds] = await Promise.all([
+                fetchRecentContactsFromMessages(),
+                fetchRecentContactsFromChats(),
+                fetchFollowedUserIds()
+            ]);
+            const recentByUser = new Map();
+            messageRecent.forEach((ts, id) => putRecentContact(recentByUser, id, ts));
+            chatRecent.forEach((ts, id) => putRecentContact(recentByUser, id, ts));
+            followedIds.forEach(id => {
+                if(isUuid(id) && id !== currentUserId && !recentByUser.has(id)){
+                    recentByUser.set(id, 0);
+                }
+            });
+            manualChatTargets.forEach((row, id) => {
+                if(!isUuid(id) || id === currentUserId) return;
+                const updated = Number(row?.updated_at || 0) || 0;
+                const prev = Number(recentByUser.get(id) || 0);
+                recentByUser.set(id, Math.max(prev, updated));
+            });
+
+            const ids = new Set(recentByUser.keys());
+            const userRows = await fetchUsersByIds(ids);
+            const userById = new Map();
+            (userRows || []).forEach(row => {
+                const id = String(row?.user_id || "").trim();
+                if(!id) return;
+                userById.set(id, row);
+            });
+
+            const mapped = Array.from(ids).map(id => {
+                const userRow = userById.get(id) || {};
+                const manual = manualChatTargets.get(id) || {};
+                const name = displayName(userRow) || String(manual?.name || "User");
+                const img = avatarUrl(userRow) || String(manual?.img || "");
+                return {
+                    id,
+                    name: String(name || "User").trim() || "User",
+                    img: String(img || "").trim(),
+                    isGroup: false,
+                    sortTs: Number(recentByUser.get(id) || 0)
+                };
+            }).filter(row => isUuid(row.id));
+
+            mapped.sort((a, b) => {
+                const diff = Number(b.sortTs || 0) - Number(a.sortTs || 0);
+                if(diff !== 0) return diff;
+                return String(a.name || "").localeCompare(String(b.name || ""));
+            });
+
+            return mapped;
+        }
+
+        async function fetchMyGroups(){
+            const groupIds = new Set();
+            try{
+                const { data: memberRows, error: memberError } = await supa
+                    .from("group_members")
+                    .select("group_id")
+                    .eq("user_id", currentUserId)
+                    .limit(1000);
+                if(!memberError){
+                    (memberRows || []).forEach(row => {
+                        const id = String(row?.group_id || "").trim();
+                        if(id) groupIds.add(id);
+                    });
+                }else if(!maybeMissingResource(memberError, "group_members")){
+                    console.error("group_members_fetch_failed", memberError);
+                }
+            }catch(err){
+                console.error("group_members_fetch_exception", err);
+            }
+            if(!groupIds.size) return [];
+
+            try{
+                const { data: groups, error } = await supa
+                    .from("groups")
+                    .select("id,name,icon_url")
+                    .in("id", Array.from(groupIds))
+                    .limit(300);
+                if(error){
+                    if(!maybeMissingResource(error, "groups")){
+                        console.error("groups_fetch_failed", error);
+                    }
+                    return [];
+                }
+                return (groups || []).map(g => ({
+                    id: String(g?.id || "").trim(),
+                    name: String(g?.name || "Group").trim() || "Group",
+                    img: String(g?.icon_url || "").trim(),
+                    isGroup: true
+                })).filter(g => g.id);
+            }catch(err){
+                console.error("groups_fetch_exception", err);
+                return [];
+            }
         }
 
         async function maybeRouteDirectChat(){
@@ -245,6 +482,7 @@
                 return false;
             }
             const profile = await fetchUserById(uid);
+            rememberManualChatTarget(uid, profile || {});
             location.replace(buildOpenChatUrl(uid, {
                 name: displayName(profile),
                 img: avatarUrl(profile),
@@ -325,28 +563,11 @@
         async function renderChats(){
             const list = document.getElementById("chatList");
             list.innerHTML = "<p class='text-center p-10 text-gray-400 animate-pulse'>Loading NovaGapp Chats...</p>";
-            const [users, groupsRes] = await Promise.all([
-                fetchUsersForChatList(),
-                supa.from("groups").select("*").limit(120)
+            const [users, groups] = await Promise.all([
+                fetchPrivateUserRows(),
+                fetchMyGroups()
             ]);
-            const groups = groupsRes?.data || [];
-            const mappedUsers = (users || [])
-                .map(row => ({
-                    id: String(row?.user_id || "").trim(),
-                    name: displayName(row),
-                    img: avatarUrl(row),
-                    isGroup: false
-                }))
-                .filter(row => isUuid(row.id));
-
-            const mappedGroups = (groups || []).map(g => ({
-                id: String(g?.id || "").trim(),
-                name: String(g?.name || "Group").trim() || "Group",
-                img: String(g?.icon_url || "").trim(),
-                isGroup: true
-            }));
-
-            chatCache = mappedGroups.concat(mappedUsers);
+            chatCache = [...(groups || []), ...(users || [])];
             renderChatRows(chatCache);
         }
 
@@ -419,6 +640,7 @@
 
         function openChat(name, img, id){
             if(!isUuid(id)) return;
+            rememberManualChatTarget(id, { display_name: name, photo: img });
             location.href = buildOpenChatUrl(id, {
                 name: name || "User",
                 img: img || ""
@@ -446,11 +668,11 @@
         async function loadSelectionContacts(){
             const selList = document.getElementById("contactSelectionList");
             selList.innerHTML = "<p class='p-4'>Loading contacts...</p>";
-            const rows = await fetchUsersForChatList();
+            const rows = await fetchPrivateUserRows();
             selList.innerHTML = "";
             rows.forEach(row => {
-                const name = displayName(row);
-                const img = avatarUrl(row);
+                const name = String(row?.name || "User");
+                const img = String(row?.img || "");
                 selList.innerHTML += `
                 <div class="flex items-center p-4 border-b">
                     <input type="checkbox" class="w-5 h-5 mr-4 accent-orange-600">
@@ -484,6 +706,9 @@
                 .on("postgres_changes", { event:"INSERT", schema:"public", table:"messages" }, () => {
                     renderChats().catch(() => {});
                 })
+                .on("postgres_changes", { event:"INSERT", schema:"public", table:"chats" }, () => {
+                    renderChats().catch(() => {});
+                })
                 .subscribe();
         }
 
@@ -503,6 +728,7 @@
                 location.href = "login.html";
                 return;
             }
+            loadManualChatTargets();
             if(await maybeRouteDirectChat()){
                 return;
             }
