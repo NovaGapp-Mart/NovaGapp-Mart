@@ -102,6 +102,11 @@
     return Number.isFinite(count) && count >= 0 ? Math.floor(count) : 0;
   }
 
+  function groupMemberLabel(count){
+    const n = normalizeMemberCount(count);
+    return n > 0 ? `${n} Members` : "Members";
+  }
+
   async function fetchGroupMembers(groupId){
     try{
       const { data, error } = await supa
@@ -510,7 +515,7 @@
     setAvatar(document.getElementById("infoPic"), photo, name);
     if(isGroupChat){
       const memberCount = normalizeMemberCount(groupInfo?.member_count || groupMembers.length);
-      const label = `${memberCount} Members`;
+      const label = groupMemberLabel(memberCount);
       if(userMeta) userMeta.textContent = label;
       if(infoMeta) infoMeta.textContent = label;
       renderGroupMembers();
@@ -1660,7 +1665,7 @@
     document.getElementById("infoName").textContent = name;
     if(isGroupChat){
       const count = normalizeMemberCount(groupInfo?.member_count || groupMembers.length);
-      if(infoMeta) infoMeta.textContent = `${count} Members`;
+      if(infoMeta) infoMeta.textContent = groupMemberLabel(count);
       renderGroupMembers();
     }else{
       if(infoMeta) infoMeta.textContent = "Real-time verified account";
@@ -1677,6 +1682,16 @@
     return String(name || "file").replace(/[^a-zA-Z0-9._-]/g, "_").slice(-80) || "file";
   }
 
+  function isAllowedMediaFile(file){
+    const type = String(file?.type || "").toLowerCase();
+    return type.startsWith("image/") || type.startsWith("video/");
+  }
+
+  function isPermissionUploadError(error){
+    const text = `${error?.message || ""} ${error?.code || ""} ${error?.statusCode || ""}`.toLowerCase();
+    return text.includes("403") || text.includes("permission") || text.includes("forbidden") || text.includes("not authorized");
+  }
+
   async function handleMediaUpload(el){
     const files = Array.from(el?.files || []);
     if(!files.length) return;
@@ -1687,14 +1702,23 @@
       }
       const uploaded = [];
       const mediaTypes = [];
+      let invalidCount = 0;
+      let permissionDenied = false;
       for(let i = 0; i < files.length; i += 1){
         const file = files[i];
+        if(!isAllowedMediaFile(file)){
+          invalidCount += 1;
+          continue;
+        }
         const fileName = `${myId}/${Date.now()}_${i}_${sanitizeFileName(file.name)}`;
         const { error: uploadError } = await supa
           .storage
           .from("chat-attachments")
           .upload(fileName, file, { cacheControl: "3600", upsert: false, contentType: file.type || undefined });
         if(uploadError){
+          if(isPermissionUploadError(uploadError)){
+            permissionDenied = true;
+          }
           console.error("attachment_upload_failed", uploadError);
           continue;
         }
@@ -1705,6 +1729,14 @@
         mediaTypes.push(String(file.type || "").toLowerCase());
       }
       if(!uploaded.length){
+        if(permissionDenied){
+          showNotice("Upload permission denied.");
+          return;
+        }
+        if(invalidCount > 0){
+          showNotice("Only image/video files are allowed.");
+          return;
+        }
         showNotice("Upload failed.");
         return;
       }
