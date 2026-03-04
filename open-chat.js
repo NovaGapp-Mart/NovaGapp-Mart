@@ -1,7 +1,7 @@
 (function(){
   const supa = window.supa || (typeof window.novaCreateSupabaseClient === "function" ? window.novaCreateSupabaseClient() : null);
   const params = new URLSearchParams(location.search);
-  const receiverId = String(params.get("id") || "").trim();
+  let receiverId = String(params.get("id") || "").trim();
   const isGroupChat = String(params.get("isGroup") || "").trim().toLowerCase() === "true";
   const receiverNameParam = decodeURIComponent(params.get("name") || "User");
   const receiverPicParam = String(params.get("img") || "").trim();
@@ -76,6 +76,7 @@
   let previewMediaType = "";
   let groupInfo = null;
   let groupMembers = [];
+  let groupOwnerId = "";
   let noticeTimer = null;
   const URL_PATTERN = /(https?:\/\/[^\s]+)/ig;
 
@@ -108,41 +109,107 @@
     return n > 0 ? `${n} Members` : "Members";
   }
 
-  async function fetchGroupMembers(groupId){
-    try{
-      const { data, error } = await supa
-        .from("group_members")
-        .select("group_id,user_id,user_name,user_avatar")
-        .eq("group_id", groupId)
-        .limit(500);
-      if(error){
-        return [];
-      }
-      return (data || []).map((row, index) => ({
-        user_id: String(row?.user_id || `member_${index}`).trim(),
-        display_name: String(row?.user_name || "Member").trim() || "Member",
-        photo: String(row?.user_avatar || "").trim()
-      }));
-    }catch(_){
-      return [];
+  function resolveGroupOwnerId(groupRow){
+    const row = groupRow && typeof groupRow === "object" ? groupRow : {};
+    const candidates = [
+      row.created_by,
+      row.owner_id,
+      row.user_id,
+      row.admin_id,
+      row.createdBy,
+      row.ownerId
+    ];
+    for(const candidate of candidates){
+      const id = String(candidate || "").trim();
+      if(isUuid(id)) return id;
     }
+    return "";
+  }
+
+  function parseRoleText(row){
+    const value = String(row?.role || row?.member_role || row?.user_role || "").trim().toLowerCase();
+    return value;
+  }
+
+  function isMemberAdmin(row, ownerHint){
+    const role = parseRoleText(row);
+    const userId = String(row?.user_id || "").trim();
+    if(role === "admin" || role === "owner" || role === "creator") return true;
+    if(ownerHint && userId && userId === ownerHint) return true;
+    if(row?.is_admin === true || row?.is_admin === 1) return true;
+    return false;
+  }
+
+  async function fetchGroupMembers(groupId, ownerHint){
+    const cleanGroupId = String(groupId || receiverId || "").trim();
+    const ownerId = String(ownerHint || groupOwnerId || "").trim();
+    if(!cleanGroupId) return [];
+    const selections = [
+      "group_id,user_id,user_name,user_avatar,role",
+      "group_id,user_id,user_name,user_avatar"
+    ];
+    for(const fields of selections){
+      try{
+        const { data, error } = await supa
+          .from("group_members")
+          .select(fields)
+          .eq("group_id", cleanGroupId)
+          .limit(500);
+        if(error){
+          if(maybeMissingColumn(error)) continue;
+          return [];
+        }
+        return (data || []).map((row, index) => {
+          const userId = String(row?.user_id || `member_${index}`).trim();
+          const admin = isMemberAdmin(row, ownerId);
+          return {
+            user_id: userId,
+            display_name: String(row?.user_name || "Member").trim() || "Member",
+            photo: String(row?.user_avatar || "").trim(),
+            role: parseRoleText(row),
+            is_admin: admin
+          };
+        });
+      }catch(_){ }
+    }
+    return [];
   }
 
   async function fetchGroupInfo(groupId){
+    const cleanGroupId = String(groupId || receiverId || "").trim();
     let groupRow = null;
-    try{
-      const { data, error } = await supa
-        .from("groups")
-        .select("id,name,icon_url")
-        .eq("id", groupId)
-        .maybeSingle();
-      if(!error){
-        groupRow = data || null;
+    const selections = [
+      "id,name,icon_url,created_by,owner_id,user_id,admin_id",
+      "id,name,icon_url,created_by",
+      "id,name,icon_url"
+    ];
+    for(const fields of selections){
+      try{
+        const { data, error } = await supa
+          .from("groups")
+          .select(fields)
+          .eq("id", cleanGroupId)
+          .maybeSingle();
+        if(!error){
+          groupRow = data || null;
+          break;
+        }
+        if(!maybeMissingColumn(error)){
+          break;
+        }
+      }catch(_){ }
+    }
+    groupOwnerId = resolveGroupOwnerId(groupRow);
+    const resolvedGroupId = String(groupRow?.id || cleanGroupId).trim();
+    const members = await fetchGroupMembers(resolvedGroupId, groupOwnerId);
+    if(!groupOwnerId){
+      const adminMember = members.find(member => member?.is_admin);
+      if(adminMember?.user_id){
+        groupOwnerId = String(adminMember.user_id || "").trim();
       }
-    }catch(_){ }
-    const members = await fetchGroupMembers(groupId);
+    }
     return {
-      id: groupId,
+      id: resolvedGroupId,
       name: String(groupRow?.name || receiverNameParam || "Group").trim() || "Group",
       icon_url: String(groupRow?.icon_url || receiverPicParam || "").trim(),
       member_count: normalizeMemberCount(members.length),
@@ -585,16 +652,26 @@
       const row = member && typeof member === "object" ? member : {};
       const name = getDisplayName(row, "Member");
       const photo = getProfilePhoto(row, "");
+      const admin = row?.is_admin === true || row?.is_admin === 1 || String(row?.role || "").toLowerCase() === "admin";
       const line = document.createElement("div");
       line.className = "flex items-center gap-3 p-2 rounded-lg bg-gray-50";
       const avatar = document.createElement("div");
       avatar.className = "w-9 h-9 rounded-full bg-orange-200 bg-cover bg-center text-xs font-bold flex items-center justify-center";
       setAvatar(avatar, photo, name);
+      const meta = document.createElement("div");
+      meta.className = "flex-1 min-w-0 flex items-center gap-2";
       const nameEl = document.createElement("div");
       nameEl.className = "text-sm font-medium text-gray-800 truncate";
       nameEl.textContent = name;
+      meta.appendChild(nameEl);
+      if(admin){
+        const badge = document.createElement("span");
+        badge.className = "text-[10px] font-semibold px-2 py-[2px] rounded-full bg-orange-100 text-orange-700";
+        badge.textContent = "Admin";
+        meta.appendChild(badge);
+      }
       line.appendChild(avatar);
-      line.appendChild(nameEl);
+      line.appendChild(meta);
       groupMembersList.appendChild(line);
     });
   }
@@ -936,6 +1013,30 @@
     scrollBottom();
   }
 
+  async function markDirectMessagesRead(){
+    if(isGroupChat || !isUuid(myId) || !isUuid(receiverId)) return;
+    const attempts = [
+      () => supa
+        .from("messages")
+        .update({ is_read: true })
+        .eq("receiver_id", myId)
+        .eq("sender_id", receiverId)
+        .eq("is_read", false),
+      () => supa
+        .from("messages")
+        .update({ is_read: true })
+        .eq("receiver_id", myId)
+        .eq("sender_id", receiverId)
+    ];
+    for(const run of attempts){
+      try{
+        const { error } = await run();
+        if(!error) return;
+        if(!maybeMissingColumn(error)) return;
+      }catch(_){ return; }
+    }
+  }
+
   async function insertMessageWithFallback(payload){
     const variants = [];
     variants.push({ ...payload });
@@ -944,6 +1045,7 @@
     if("attachment_urls" in payload){ const v = { ...payload }; delete v.attachment_urls; variants.push(v); }
     if("attachment_url" in payload){ const v = { ...payload }; delete v.attachment_url; variants.push(v); }
     if("message_type" in payload){ const v = { ...payload }; delete v.message_type; variants.push(v); }
+    if("is_read" in payload){ const v = { ...payload }; delete v.is_read; variants.push(v); }
     variants.push({
       sender_id: payload.sender_id,
       ...buildThreadPayload(),
@@ -1024,6 +1126,7 @@
       sender_id: myId,
       ...buildThreadPayload(),
       content: text,
+      is_read: false,
       ...getReplyPayload()
     };
     const ok = await sendMessageWithPayload(payload, text);
@@ -1054,6 +1157,9 @@
       }
       addMessageRow(row);
       scrollBottom();
+      if(!isGroupChat && String(row?.sender_id || "") === receiverId && String(row?.receiver_id || "") === myId){
+        markDirectMessagesRead().catch(() => {});
+      }
     };
 
     realtimeChannel = supa.channel(`${isGroupChat ? "group" : "dm"}_${myId}_${receiverId}_${Date.now()}`)
@@ -1797,14 +1903,43 @@
     return String(name || "file").replace(/[^a-zA-Z0-9._-]/g, "_").slice(-80) || "file";
   }
 
-  function isAllowedMediaFile(file){
+  function inferMediaKind(file){
     const type = String(file?.type || "").toLowerCase();
-    return type.startsWith("image/") || type.startsWith("video/");
+    const fileName = String(file?.name || "").toLowerCase();
+    if(type.startsWith("video/")) return "video";
+    if(type.startsWith("image/")) return "image";
+    if(/\.(mp4|mov|m4v|webm|ogg|avi|mkv|3gp)$/i.test(fileName)) return "video";
+    if(/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(fileName)) return "image";
+    return "";
+  }
+
+  function isAllowedMediaFile(file){
+    return inferMediaKind(file) !== "";
   }
 
   function isPermissionUploadError(error){
     const text = `${error?.message || ""} ${error?.code || ""} ${error?.statusCode || ""}`.toLowerCase();
     return text.includes("403") || text.includes("permission") || text.includes("forbidden") || text.includes("not authorized");
+  }
+
+  async function uploadAttachmentFile(bucket, path, file){
+    if(window.NOVA && typeof window.NOVA.uploadToBucket === "function"){
+      try{
+        const url = await window.NOVA.uploadToBucket(bucket, file, path);
+        if(url) return String(url).trim();
+      }catch(_){ }
+    }
+    const { error: uploadError } = await supa
+      .storage
+      .from(bucket)
+      .upload(path, file, {
+        cacheControl: "3600",
+        upsert: true,
+        contentType: file.type || "application/octet-stream"
+      });
+    if(uploadError) throw uploadError;
+    const { data } = supa.storage.from(bucket).getPublicUrl(path);
+    return String(data?.publicUrl || "").trim();
   }
 
   async function handleMediaUpload(el){
@@ -1816,47 +1951,45 @@
         return;
       }
       const uploaded = [];
-      const mediaTypes = [];
+      const mediaKinds = [];
       let invalidCount = 0;
       let permissionDenied = false;
       for(let i = 0; i < files.length; i += 1){
         const file = files[i];
-        if(!isAllowedMediaFile(file)){
+        const mediaKind = inferMediaKind(file);
+        if(!mediaKind){
           invalidCount += 1;
           continue;
         }
         const fileName = `${myId}/${Date.now()}_${i}_${sanitizeFileName(file.name)}`;
-        const { error: uploadError } = await supa
-          .storage
-          .from("chat-attachments")
-          .upload(fileName, file, { cacheControl: "3600", upsert: false, contentType: file.type || undefined });
-        if(uploadError){
+        let fileUrl = "";
+        try{
+          fileUrl = await uploadAttachmentFile("chat-attachments", fileName, file);
+        }catch(uploadError){
           if(isPermissionUploadError(uploadError)){
             permissionDenied = true;
           }
           console.error("attachment_upload_failed", uploadError);
           continue;
         }
-        const { data } = supa.storage.from("chat-attachments").getPublicUrl(fileName);
-        const fileUrl = String(data?.publicUrl || "").trim();
         if(!fileUrl) continue;
         uploaded.push(fileUrl);
-        mediaTypes.push(String(file.type || "").toLowerCase());
+        mediaKinds.push(mediaKind);
       }
       if(!uploaded.length){
         if(permissionDenied){
-          showNotice("Upload permission denied.");
+          showNotice("chat-attachments upload permission denied.");
           return;
         }
         if(invalidCount > 0){
-          showNotice("Only image/video files are allowed.");
+          showNotice("Only image/video formats are allowed.");
           return;
         }
         showNotice("Upload failed.");
         return;
       }
-      const allVideos = mediaTypes.length > 0 && mediaTypes.every(t => t.startsWith("video/"));
-      const allImages = mediaTypes.length > 0 && mediaTypes.every(t => t.startsWith("image/"));
+      const allVideos = mediaKinds.length > 0 && mediaKinds.every(t => t === "video");
+      const allImages = mediaKinds.length > 0 && mediaKinds.every(t => t === "image");
       const content = uploaded.length > 1
         ? `${uploaded.length} attachments`
         : (allVideos ? "Video attachment" : (allImages ? "Image attachment" : "Attachment"));
@@ -1867,6 +2000,7 @@
         attachment_urls: uploaded,
         attachment_url: uploaded[0],
         message_type: allVideos ? "video" : (allImages ? "image" : "file"),
+        is_read: false,
         ...getReplyPayload()
       };
       const ok = await sendMessageWithPayload(payload, "");
@@ -1918,12 +2052,30 @@
           members: []
         };
       }
+      if(groupInfo?.id){
+        receiverId = String(groupInfo.id || "").trim() || receiverId;
+      }
       groupMembers = Array.isArray(groupInfo?.members) ? groupInfo.members : [];
+      if(groupInfo){
+        groupInfo.member_count = normalizeMemberCount(groupMembers.length);
+      }
       peerProfile = {
         display_name: groupInfo?.name || receiverNameParam || "Group",
         photo: groupInfo?.icon_url || receiverPicParam
       };
       renderPeerHeader();
+      if(!groupMembers.length && receiverId){
+        fetchGroupMembers(receiverId, groupOwnerId).then(members => {
+          if(Array.isArray(members) && members.length){
+            groupMembers = members;
+            if(groupInfo){
+              groupInfo.member_count = normalizeMemberCount(groupMembers.length);
+              groupInfo.members = groupMembers.slice();
+            }
+            renderPeerHeader();
+          }
+        }).catch(() => {});
+      }
       mainInput.disabled = false;
       sendBtn.disabled = false;
       mainInput.placeholder = "Type a message";
@@ -1945,6 +2097,7 @@
     updateFilterUi();
     await loadMessages();
     subscribeToMessages();
+    markDirectMessagesRead().catch(() => {});
     startCallPolling();
     const canCall = isUuid(receiverId) && receiverId !== myId && !isPeerBlocked;
     audioCallBtn.disabled = !canCall;

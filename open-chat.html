@@ -16,6 +16,7 @@
     html,body{width:100%;max-width:100%;height:100dvh;overflow:hidden}
     body{font-family:sans-serif;min-height:100dvh;display:flex;flex-direction:column;overflow:hidden;background:#efeae2;user-select:none}
     header,footer{width:100%;max-width:100%}
+    .chat-shell{position:relative;width:100%;height:100%;display:flex;flex-direction:column;max-width:100%}
     .chat-bg{background-image:url("https://www.transparenttextures.com/patterns/cubes.png");flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:15px;display:flex;flex-direction:column}
     #msgHolder{width:100%;min-width:0}
     .bubble{max-width:88%;padding:8px;border-radius:8px;margin-bottom:10px;box-shadow:0 1px .5px rgba(0,0,0,.13);font-size:14.5px}
@@ -31,7 +32,7 @@
     #profileOverlay{position:fixed;inset:0;background:#fff;z-index:20000;display:none;flex-direction:column;overflow-y:auto}
     .call-btn{width:34px;height:34px;border-radius:999px;border:1px solid rgba(255,255,255,.55);color:#fff;display:inline-flex;align-items:center;justify-content:center}
     .call-btn svg{width:17px;height:17px}
-    .header-menu{position:fixed;top:64px;right:8px;z-index:14000;background:#fff;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);display:none;overflow:hidden;min-width:180px}
+    .header-menu{position:absolute;top:64px;right:8px;z-index:14000;background:#fff;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);display:none;overflow:hidden;min-width:180px}
     .header-menu button{width:100%;text-align:left;padding:10px 12px;font-size:13px;border:none;background:#fff}
     .header-menu button+button{border-top:1px solid #eee}
     .filter-banner{display:none;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;background:#fff7d6;border-bottom:1px solid #f0df9f;font-size:12px}
@@ -58,7 +59,7 @@
     .starred-bubble{box-shadow:0 0 0 2px #ffd45c inset}
     .blocked-banner{display:none;padding:8px 10px;background:#2c0e0e;color:#ffd3d3;font-size:12px;text-align:center}
     .blocked-banner.show{display:block}
-    .incoming-call-bar{position:fixed;left:10px;right:10px;bottom:78px;z-index:10500;background:#13151a;color:#fff;border-radius:12px;border:1px solid rgba(255,255,255,.15);padding:10px;display:none;align-items:center;justify-content:space-between;gap:10px}
+    .incoming-call-bar{position:fixed;left:50%;transform:translateX(-50%);width:min(calc(100% - 20px),860px);bottom:78px;z-index:10500;background:#13151a;color:#fff;border-radius:12px;border:1px solid rgba(255,255,255,.15);padding:10px;display:none;align-items:center;justify-content:space-between;gap:10px}
     .incoming-call-actions{display:flex;gap:8px}
     .incoming-call-actions button{border:none;border-radius:8px;padding:7px 10px;font-size:12px;font-weight:700}
     .incoming-answer{background:#1aa34a;color:#fff}
@@ -89,6 +90,12 @@
       .attachment-tile img,.attachment-tile video{height:108px}
       footer{padding:8px calc(8px + env(safe-area-inset-right,0px)) calc(8px + env(safe-area-inset-bottom,0px)) calc(8px + env(safe-area-inset-left,0px))}
       .call-btn{width:32px;height:32px}
+      .chat-shell{max-width:100%;margin:0}
+      .incoming-call-bar{width:calc(100% - 20px)}
+    }
+    @media (min-width:900px){
+      body{background:#d9d9d9}
+      .chat-shell{max-width:860px;margin:0 auto;background:#efeae2;box-shadow:0 16px 44px rgba(0,0,0,.16)}
     }
     .hidden{display:none!important}
   </style>
@@ -113,6 +120,7 @@
     </div>
   </div>
 
+  <div class="chat-shell">
   <header class="h-16 flex items-center px-2 justify-between shrink-0 shadow-lg z-50" style="background:var(--nova-gradient)">
     <div class="flex items-center gap-1 cursor-pointer" onclick="openProfile()">
       <button type="button" onclick="handleBackNavigation(event)" class="text-white p-2 text-2xl"><-</button>
@@ -164,6 +172,7 @@
       <button id="sendBtn" onclick="sendMessage()" class="w-11 h-11 rounded-full flex items-center justify-center text-white bg-orange-600">></button>
     </div>
   </footer>
+  </div>
 
   <div id="incomingCallBar" class="incoming-call-bar">
     <div id="incomingCallText" class="text-sm font-semibold truncate">Incoming call</div>

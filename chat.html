@@ -32,7 +32,7 @@
         .fab { position: fixed; bottom: 25px; right: 25px; width: 60px; height: 60px; background: #ff6a00; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 15px rgba(0,0,0,0.3); z-index: 90; cursor: pointer; }
 
         .group-badge { background: #ff6a00; color: white; font-size: 9px; padding: 2px 5px; border-radius: 4px; margin-left: 5px; vertical-align: middle; text-transform: uppercase; }
-        .unread-badge { background: #25d366; color: white; font-size: 11px; min-width: 20px; height: 20px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: bold; margin-top: 5px; }
+        .unread-badge { background: #ff6a00; color: white; font-size: 11px; min-width: 20px; height: 20px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: bold; margin-top: 5px; }
 
         .switch { position: relative; display: inline-block; width: 45px; height: 24px; }
         .switch input { opacity: 0; width: 0; height: 0; }
@@ -131,6 +131,7 @@
         let currentUserId = "";
         let realtimeListChannel = null;
         let chatCache = [];
+        let dbUnreadByKey = new Map();
         const manualChatTargets = new Map();
         const MANUAL_TARGET_KEY_PREFIX = "manual_chat_targets:";
 
@@ -473,6 +474,52 @@
             }
         }
 
+        async function fetchUnreadCountsFromDatabase(){
+            const counts = new Map();
+            try{
+                const { data, error } = await supa
+                    .from("messages")
+                    .select("sender_id,receiver_id,is_read")
+                    .eq("receiver_id", currentUserId)
+                    .eq("is_read", false)
+                    .limit(3000);
+                if(error){
+                    if(maybeMissingColumn(error) || maybeMissingResource(error, "messages")){
+                        return counts;
+                    }
+                    console.error("unread_fetch_failed", error);
+                    return counts;
+                }
+                (data || []).forEach(row => {
+                    const senderId = String(row?.sender_id || "").trim();
+                    if(!isUuid(senderId) || senderId === currentUserId) return;
+                    const key = `user:${senderId}`;
+                    counts.set(key, Number(counts.get(key) || 0) + 1);
+                });
+            }catch(err){
+                console.error("unread_fetch_exception", err);
+            }
+            return counts;
+        }
+
+        async function markDirectThreadRead(userId){
+            const uid = String(userId || "").trim();
+            if(!isUuid(uid) || !isUuid(currentUserId) || uid === currentUserId) return;
+            try{
+                const { error } = await supa
+                    .from("messages")
+                    .update({ is_read: true })
+                    .eq("receiver_id", currentUserId)
+                    .eq("sender_id", uid)
+                    .eq("is_read", false);
+                if(error && !maybeMissingColumn(error) && !maybeMissingResource(error, "messages")){
+                    console.error("mark_read_failed", error);
+                }
+            }catch(err){
+                console.error("mark_read_exception", err);
+            }
+        }
+
         async function maybeRouteDirectChat(){
             const q = new URLSearchParams(location.search);
             const uid = String(q.get("uid") || "").trim();
@@ -483,6 +530,8 @@
             }
             const profile = await fetchUserById(uid);
             rememberManualChatTarget(uid, profile || {});
+            dbUnreadByKey.set(`user:${uid}`, 0);
+            markDirectThreadRead(uid).catch(() => {});
             location.replace(buildOpenChatUrl(uid, {
                 name: displayName(profile),
                 img: avatarUrl(profile),
@@ -506,7 +555,9 @@
             visibleItems.forEach(item => {
                 const key = itemKey(item);
                 const unseenKey = "unseen_" + key.replace(/[^a-z0-9_-]/gi, "_");
-                const unreadCount = parseInt(localStorage.getItem(unseenKey) || "0", 10) || 0;
+                const localUnread = parseInt(localStorage.getItem(unseenKey) || "0", 10) || 0;
+                const dbUnread = Number(dbUnreadByKey.get(key) || 0);
+                const unreadCount = Math.max(localUnread, dbUnread);
                 const name = String(item.name || "User");
                 const img = String(item.img || "");
                 const isGroup = !!item.isGroup;
@@ -553,6 +604,8 @@
                         alert("Invalid user id.");
                         return;
                     }
+                    dbUnreadByKey.set(key, 0);
+                    markDirectThreadRead(item.id).catch(() => {});
                     openChat(name, img, item.id);
                 };
 
@@ -567,6 +620,7 @@
                 fetchPrivateUserRows(),
                 fetchMyGroups()
             ]);
+            dbUnreadByKey = await fetchUnreadCountsFromDatabase();
             chatCache = [...(groups || []), ...(users || [])];
             renderChatRows(chatCache);
         }
