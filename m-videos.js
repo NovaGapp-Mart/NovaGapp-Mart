@@ -642,6 +642,11 @@
       list.push(item);
     };
 
+    const absoluteRaw = toAbsoluteAssetUrl(raw);
+    if(/^https?:\/\//i.test(absoluteRaw) || absoluteRaw.startsWith("/") || absoluteRaw.startsWith("data:") || absoluteRaw.startsWith("blob:")){
+      push(absoluteRaw);
+    }
+
     const supabaseRef = parseSupabaseObjectReference(raw);
     if(supabaseRef && supabaseRef.fileName){
       const bucket = supabaseRef.bucket;
@@ -653,11 +658,6 @@
     }
 
     push(normalizeAssetUrl(raw, kind));
-
-    const absoluteRaw = toAbsoluteAssetUrl(raw);
-    if(/^https?:\/\//i.test(absoluteRaw) || absoluteRaw.startsWith("/")){
-      push(absoluteRaw);
-    }
 
     if(kind === "thumb"){
       push(FALLBACK_THUMBNAIL);
@@ -2907,7 +2907,7 @@
   function toAbsoluteAssetUrl(value){
     const raw = util.safe(value).replace(/\\/g, "/");
     if(!raw) return "";
-    if(/^https?:\/\//i.test(raw) || raw.startsWith("data:")) return raw;
+    if(/^https?:\/\//i.test(raw) || raw.startsWith("data:") || raw.startsWith("blob:")) return raw;
     try{
       return new URL(raw, location.origin).href;
     }catch(_){

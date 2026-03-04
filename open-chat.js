@@ -664,12 +664,12 @@
       nameEl.className = "text-sm font-medium text-gray-800 truncate";
       nameEl.textContent = name;
       meta.appendChild(nameEl);
-      if(admin){
-        const badge = document.createElement("span");
-        badge.className = "text-[10px] font-semibold px-2 py-[2px] rounded-full bg-orange-100 text-orange-700";
-        badge.textContent = "Admin";
-        meta.appendChild(badge);
-      }
+      const badge = document.createElement("span");
+      badge.className = admin
+        ? "text-[10px] font-semibold px-2 py-[2px] rounded-full bg-orange-100 text-orange-700"
+        : "text-[10px] font-semibold px-2 py-[2px] rounded-full bg-gray-100 text-gray-600";
+      badge.textContent = admin ? "Admin" : "Member";
+      meta.appendChild(badge);
       line.appendChild(avatar);
       line.appendChild(meta);
       groupMembersList.appendChild(line);

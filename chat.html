@@ -755,9 +755,18 @@
             if(realtimeListChannel){
                 try{ supa.removeChannel(realtimeListChannel); }catch(_){ }
             }
+            const bumpUnreadFromMessage = (row) => {
+                const receiver = String(row?.receiver_id || "").trim();
+                const sender = String(row?.sender_id || "").trim();
+                if(receiver !== currentUserId || !isUuid(sender) || sender === currentUserId) return;
+                const key = `user:${sender}`;
+                dbUnreadByKey.set(key, Number(dbUnreadByKey.get(key) || 0) + 1);
+                renderChatRows(chatCache);
+            };
             realtimeListChannel = supa
                 .channel(`chat_list_${currentUserId}_${Date.now()}`)
-                .on("postgres_changes", { event:"INSERT", schema:"public", table:"messages" }, () => {
+                .on("postgres_changes", { event:"INSERT", schema:"public", table:"messages" }, (payload) => {
+                    bumpUnreadFromMessage(payload?.new || {});
                     renderChats().catch(() => {});
                 })
                 .on("postgres_changes", { event:"INSERT", schema:"public", table:"chats" }, () => {
