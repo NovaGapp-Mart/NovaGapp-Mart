@@ -100,124 +100,44 @@
     return Number.isFinite(count) && count >= 0 ? Math.floor(count) : 0;
   }
 
-  function extractMemberIdsFromRows(rows){
-    const ids = [];
-    (rows || []).forEach(row => {
-      const value = row && typeof row === "object" ? row : {};
-      const id = String(
-        value.user_id ||
-        value.member_id ||
-        value.profile_id ||
-        value.uid ||
-        value.id ||
-        ""
-      ).trim();
-      if(isUuid(id)) ids.push(id);
-    });
-    return Array.from(new Set(ids));
-  }
-
-  function extractMemberIdsFromGroup(groupRow){
-    const list = [];
-    const members = groupRow?.members;
-    if(Array.isArray(members)){
-      members.forEach(item => {
-        if(typeof item === "string" && isUuid(item)) list.push(item);
-        if(item && typeof item === "object"){
-          const id = String(item.user_id || item.member_id || item.id || "").trim();
-          if(isUuid(id)) list.push(id);
-        }
-      });
-    }
-    return Array.from(new Set(list));
-  }
-
-  async function fetchUsersByIds(userIds){
-    const ids = Array.from(new Set((userIds || []).filter(isUuid)));
-    if(!ids.length) return [];
-    const selects = [
-      "user_id,username,full_name,display_name,photo,avatar_url",
-      "user_id,username,full_name,display_name,photo",
-      "user_id,username,full_name,photo",
-      "user_id,username,full_name"
-    ];
-    for(const fields of selects){
-      const { data, error } = await supa.from("users").select(fields).in("user_id", ids);
-      if(!error){
-        const map = new Map((data || []).map(row => [String(row?.user_id || "").trim(), row]));
-        return ids.map(id => map.get(id) || { user_id: id, display_name: "Member" });
+  async function fetchGroupMembers(groupId){
+    try{
+      const { data, error } = await supa
+        .from("group_members")
+        .select("group_id,user_id,user_name,user_avatar")
+        .eq("group_id", groupId)
+        .limit(500);
+      if(error){
+        return [];
       }
-      if(!maybeMissingColumn(error)){
-        console.error("group_member_users_fetch_failed", error);
-        return ids.map(id => ({ user_id: id, display_name: "Member" }));
-      }
+      return (data || []).map((row, index) => ({
+        user_id: String(row?.user_id || `member_${index}`).trim(),
+        display_name: String(row?.user_name || "Member").trim() || "Member",
+        photo: String(row?.user_avatar || "").trim()
+      }));
+    }catch(_){
+      return [];
     }
-    return ids.map(id => ({ user_id: id, display_name: "Member" }));
-  }
-
-  async function fetchGroupMembers(groupId, groupRow){
-    const memberTableAttempts = [
-      { table: "group_members", matchColumn: "group_id" },
-      { table: "groups_members", matchColumn: "group_id" },
-      { table: "group_participants", matchColumn: "group_id" }
-    ];
-    for(const attempt of memberTableAttempts){
-      try{
-        const { data, error } = await supa.from(attempt.table).select("*").eq(attempt.matchColumn, groupId).limit(500);
-        if(error){
-          const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
-          if(text.includes("does not exist")) continue;
-          if(maybeMissingColumn(error)) continue;
-          console.error("group_member_table_fetch_failed", error);
-          continue;
-        }
-        const ids = extractMemberIdsFromRows(data);
-        if(ids.length) return await fetchUsersByIds(ids);
-        if(Array.isArray(data) && data.length){
-          return data.map((row, index) => ({
-            user_id: String(row?.user_id || row?.member_id || row?.id || `member_${index}`),
-            display_name: String(row?.display_name || row?.full_name || row?.name || row?.username || "Member").trim() || "Member",
-            photo: String(row?.photo || row?.avatar_url || row?.icon_url || "").trim()
-          }));
-        }
-      }catch(err){
-        console.error("group_member_table_fetch_exception", err);
-      }
-    }
-    const fallbackIds = extractMemberIdsFromGroup(groupRow);
-    if(fallbackIds.length) return await fetchUsersByIds(fallbackIds);
-    return [];
   }
 
   async function fetchGroupInfo(groupId){
-    const fieldsAttempts = [
-      "id,name,icon_url,member_count,members",
-      "id,name,icon_url,members",
-      "id,name,icon_url"
-    ];
     let groupRow = null;
-    for(const fields of fieldsAttempts){
-      const { data, error } = await supa.from("groups").select(fields).eq("id", groupId).maybeSingle();
+    try{
+      const { data, error } = await supa
+        .from("groups")
+        .select("id,name,icon_url")
+        .eq("id", groupId)
+        .maybeSingle();
       if(!error){
         groupRow = data || null;
-        break;
       }
-      if(!maybeMissingColumn(error)){
-        console.error("group_fetch_failed", error);
-        break;
-      }
-    }
-    const members = await fetchGroupMembers(groupId, groupRow);
-    const calculatedCount = Math.max(
-      members.length,
-      extractMemberIdsFromGroup(groupRow).length,
-      normalizeMemberCount(groupRow?.member_count)
-    );
+    }catch(_){ }
+    const members = await fetchGroupMembers(groupId);
     return {
       id: groupId,
       name: String(groupRow?.name || receiverNameParam || "Group").trim() || "Group",
       icon_url: String(groupRow?.icon_url || receiverPicParam || "").trim(),
-      member_count: calculatedCount,
+      member_count: normalizeMemberCount(members.length),
       members
     };
   }
