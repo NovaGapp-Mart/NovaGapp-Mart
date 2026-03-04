@@ -72,11 +72,6 @@
     return text.includes("column") && text.includes("does not exist");
   }
 
-  function maybeMissingTable(error){
-    const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
-    return text.includes("relation") && text.includes("does not exist");
-  }
-
   function getDisplayName(profile, fallback){
     const row = profile || {};
     return String(row.display_name || row.full_name || row.username || fallback || "User").trim() || "User";
@@ -485,28 +480,23 @@
     return data?.user || null;
   }
 
-  async function queryThreadMessages(condition, selectFields){
+  async function queryThreadMessages(condition){
     return await supa
       .from("messages")
-      .select(selectFields)
+      .select("id,sender_id,receiver_id,content,created_at")
       .or(condition)
       .order("created_at", { ascending: true });
   }
 
   async function fetchThreadRows(condition){
-    const selects = [
-      "id,sender_id,receiver_id,content,created_at,attachment_url,message_type,is_starred,reply_to_id,reply_preview,deleted_for_everyone,deleted_by_name",
-      "id,sender_id,receiver_id,content,created_at,attachment_url,is_starred,reply_to_id,reply_preview",
-      "id,sender_id,receiver_id,content,created_at,is_starred",
-      "id,sender_id,receiver_id,content,created_at"
-    ];
-    for(const fields of selects){
-      const { data, error } = await queryThreadMessages(condition, fields);
-      if(!error) return { data: data || [], error: null };
-      if(!maybeMissingColumn(error)) return { data: [], error };
+    try{
+      const { data, error } = await queryThreadMessages(condition);
+      if(error) return { data: [], error };
+      return { data: data || [], error: null };
+    }catch(err){
+      console.error("thread_query_failed", err);
+      return { data: [], error: err || new Error("thread_query_failed") };
     }
-    const fallback = await queryThreadMessages(condition, "id,sender_id,receiver_id,content,created_at");
-    return { data: fallback.data || [], error: fallback.error || null };
   }
 
   async function loadMessages(){
@@ -1165,47 +1155,51 @@
   }
 
   async function persistBlockInDatabase(){
-    const now = new Date().toISOString();
-    const attempts = [
-      { table: "user_blocks", payload: { blocker_id: myId, blocked_id: receiverId, created_at: now }, onConflict: "blocker_id,blocked_id" },
-      { table: "blocked_users", payload: { user_id: myId, blocked_user_id: receiverId, created_at: now }, onConflict: "user_id,blocked_user_id" },
-      { table: "blocks", payload: { blocker_id: myId, blocked_id: receiverId, created_at: now }, onConflict: "blocker_id,blocked_id" }
-    ];
-    for(const attempt of attempts){
-      try{
-        const { error: upsertError } = await supa.from(attempt.table).upsert(attempt.payload, { onConflict: attempt.onConflict });
-        if(!upsertError) return true;
-        if(!maybeMissingColumn(upsertError) && !maybeMissingTable(upsertError)){
-          const { error: insertError } = await supa.from(attempt.table).insert(attempt.payload);
-          if(!insertError) return true;
-          if(!maybeMissingColumn(insertError) && !maybeMissingTable(insertError)){
-            console.error("block_insert_failed", insertError);
-          }
-        }
-      }catch(err){
-        console.error("block_persist_error", err);
+    const payload = { user_id: myId, blocked_user_id: receiverId, created_at: new Date().toISOString() };
+    try{
+      const { error: upsertError } = await supa
+        .from("blocked_users")
+        .upsert(payload, { onConflict: "user_id,blocked_user_id" });
+      if(!upsertError) return true;
+      if(maybeMissingColumn(upsertError)){
+        console.warn("blocked_users columns missing", upsertError?.message || upsertError);
+        return false;
       }
+      const { error: insertError } = await supa.from("blocked_users").insert(payload);
+      if(!insertError) return true;
+      if(maybeMissingColumn(insertError)){
+        console.warn("blocked_users columns missing", insertError?.message || insertError);
+        return false;
+      }
+      if(String(insertError?.code || "") === "23505"){
+        return true;
+      }
+      console.error("block_insert_failed", insertError);
+    }catch(err){
+      console.error("block_persist_error", err);
     }
     return false;
   }
 
   async function checkBlockedInDatabase(){
-    const attempts = [
-      { table: "user_blocks", where: { blocker_id: myId, blocked_id: receiverId } },
-      { table: "blocked_users", where: { user_id: myId, blocked_user_id: receiverId } },
-      { table: "blocks", where: { blocker_id: myId, blocked_id: receiverId } }
-    ];
-    for(const attempt of attempts){
-      let query = supa.from(attempt.table).select("id").limit(1);
-      Object.entries(attempt.where).forEach(([k, v]) => { query = query.eq(k, v); });
-      const { data, error } = await query;
-      if(!error){
-        if(Array.isArray(data) && data.length > 0) return true;
-        continue;
-      }
-      if(!maybeMissingColumn(error) && !maybeMissingTable(error)){
+    try{
+      const { data, error } = await supa
+        .from("blocked_users")
+        .select("id")
+        .eq("user_id", myId)
+        .eq("blocked_user_id", receiverId)
+        .limit(1);
+      if(error){
+        if(maybeMissingColumn(error)){
+          console.warn("blocked_users columns missing", error?.message || error);
+          return false;
+        }
         console.error("block_check_failed", error);
+        return false;
       }
+      return Array.isArray(data) && data.length > 0;
+    }catch(err){
+      console.error("block_check_exception", err);
     }
     return false;
   }
