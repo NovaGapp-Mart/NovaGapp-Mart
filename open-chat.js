@@ -1464,7 +1464,7 @@
     if(!file) return;
     try{
       if(isPeerBlocked){
-        alert("You blocked this user.");
+        console.warn("attachment_blocked_user");
         return;
       }
       const fileName = `${myId}/${Date.now()}_${sanitizeFileName(file.name)}`;
@@ -1474,13 +1474,12 @@
         .upload(fileName, file, { cacheControl: "3600", upsert: false, contentType: file.type || undefined });
       if(uploadError){
         console.error("attachment_upload_failed", uploadError);
-        alert("File upload failed.");
         return;
       }
       const { data } = supa.storage.from("chat-attachments").getPublicUrl(fileName);
       const fileUrl = String(data?.publicUrl || "").trim();
       if(!fileUrl){
-        alert("File URL not available.");
+        console.error("attachment_public_url_missing");
         return;
       }
       const type = String(file.type || "").toLowerCase();

@@ -149,6 +149,20 @@
             return String(user?.photo || user?.avatar_url || "").trim();
         }
 
+        function sanitizeNameForQuery(value){
+            return String(value || "User").trim().slice(0, 80);
+        }
+
+        function sanitizeImageForQuery(value){
+            const img = String(value || "").trim();
+            if(!img) return "";
+            if(/^data:/i.test(img)) return "";
+            if(img.length > 400) return "";
+            if(/^https?:\/\//i.test(img)) return img;
+            if(img.startsWith("/")) return img;
+            return "";
+        }
+
         function itemKey(item){
             return item?.isGroup ? `group:${item.id}` : `user:${item.id}`;
         }
@@ -175,8 +189,10 @@
             const options = opts || {};
             const qp = new URLSearchParams();
             qp.set("id", String(id || "").trim());
-            if(options.name) qp.set("name", String(options.name));
-            if(options.img) qp.set("img", String(options.img));
+            const safeName = sanitizeNameForQuery(options.name || "");
+            const safeImg = sanitizeImageForQuery(options.img || "");
+            if(safeName) qp.set("name", safeName);
+            if(safeImg) qp.set("img", safeImg);
             if(options.callAction) qp.set("call_action", String(options.callAction));
             if(options.callId) qp.set("call_id", String(options.callId));
             if(options.isGroup) qp.set("isGroup", "true");
