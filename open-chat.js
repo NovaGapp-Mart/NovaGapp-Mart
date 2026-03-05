@@ -65,9 +65,13 @@
   let lastThreadSnapshot = "";
   let callPollTimer = null;
   let incomingOfferTimer = null;
+  let outgoingOfferTimer = null;
   let seenCallSignalIds = new Set();
   let activeCall = null;
   let pendingIncomingOffer = null;
+  let ringToneTimer = null;
+  let ringAudioCtx = null;
+  let ringMode = "";
   const bufferedIceByCall = new Map();
   let messageRows = [];
   let localDeletedMessageIds = new Set();
@@ -87,6 +91,7 @@
   let groupOwnerId = "";
   let activeInfoTab = "media";
   let noticeTimer = null;
+  const CALL_RING_TIMEOUT_MS = 30000;
   const URL_PATTERN = /(https?:\/\/[^\s]+)/ig;
 
   function isUuid(value){
@@ -122,6 +127,31 @@
   function groupMemberLabel(count){
     const n = normalizeMemberCount(count);
     return n > 0 ? `${n} Members` : "Members";
+  }
+
+  function isAdminMemberRow(row){
+    const role = String(row?.role || "").trim().toLowerCase();
+    if(role === "admin" || role === "owner" || role === "creator") return true;
+    if(row?.is_admin === true || row?.is_admin === 1) return true;
+    return false;
+  }
+
+  function findGroupAdminMember(){
+    const owner = String(groupOwnerId || "").trim();
+    if(owner){
+      const ownerRow = groupMembers.find(member => String(member?.user_id || "").trim() === owner);
+      if(ownerRow) return ownerRow;
+    }
+    return groupMembers.find(member => isAdminMemberRow(member)) || null;
+  }
+
+  function buildGroupMetaText(){
+    const memberCount = normalizeMemberCount(groupInfo?.member_count || groupMembers.length);
+    const memberLabel = groupMemberLabel(memberCount);
+    const admin = findGroupAdminMember();
+    if(!admin) return memberLabel;
+    const adminName = getDisplayName(admin, "Admin");
+    return `${memberLabel} | Admin: ${adminName}`;
   }
 
   function readFirstValue(row, keys){
@@ -734,9 +764,11 @@
     }
     groupMembers.forEach(member => {
       const row = member && typeof member === "object" ? member : {};
+      const memberId = String(row?.user_id || "").trim();
       const name = getDisplayName(row, "Member");
       const photo = getProfilePhoto(row, "");
-      const admin = row?.is_admin === true || row?.is_admin === 1 || String(row?.role || "").toLowerCase() === "admin";
+      const owner = !!(groupOwnerId && memberId && memberId === groupOwnerId);
+      const admin = owner || isAdminMemberRow(row);
       const line = document.createElement("div");
       line.className = "flex items-center gap-3 p-2 rounded-lg bg-gray-50";
       const avatar = document.createElement("div");
@@ -752,7 +784,7 @@
       badge.className = admin
         ? "text-[10px] font-semibold px-2 py-[2px] rounded-full bg-orange-100 text-orange-700"
         : "text-[10px] font-semibold px-2 py-[2px] rounded-full bg-gray-100 text-gray-600";
-      badge.textContent = admin ? "Admin" : "Member";
+      badge.textContent = owner ? "Owner" : (admin ? "Admin" : "Member");
       meta.appendChild(badge);
       line.appendChild(avatar);
       line.appendChild(meta);
@@ -882,8 +914,7 @@
     setAvatar(document.getElementById("userAvatar"), photo, name);
     setAvatar(document.getElementById("infoPic"), photo, name);
     if(isGroupChat){
-      const memberCount = normalizeMemberCount(groupInfo?.member_count || groupMembers.length);
-      const label = groupMemberLabel(memberCount);
+      const label = buildGroupMetaText();
       if(userMeta) userMeta.textContent = label;
       if(infoMeta) infoMeta.textContent = label;
       renderGroupMembers();
@@ -1598,18 +1629,106 @@
     return false;
   }
 
+  function clearIncomingOfferTimer(){
+    if(incomingOfferTimer){
+      clearTimeout(incomingOfferTimer);
+      incomingOfferTimer = null;
+    }
+  }
+
+  function clearOutgoingOfferTimer(){
+    if(outgoingOfferTimer){
+      clearTimeout(outgoingOfferTimer);
+      outgoingOfferTimer = null;
+    }
+  }
+
+  function playRingBurst(mode){
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if(!AudioCtx) return;
+    try{
+      if(!ringAudioCtx) ringAudioCtx = new AudioCtx();
+      if(ringAudioCtx.state === "suspended") ringAudioCtx.resume().catch(() => {});
+      const now = ringAudioCtx.currentTime;
+      const freqA = mode === "incoming" ? 840 : 720;
+      const freqB = mode === "incoming" ? 620 : 560;
+      [freqA, freqB].forEach((freq, idx) => {
+        const startAt = now + (idx * 0.22);
+        const osc = ringAudioCtx.createOscillator();
+        const gain = ringAudioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, startAt);
+        gain.gain.setValueAtTime(0.0001, startAt);
+        gain.gain.exponentialRampToValueAtTime(0.07, startAt + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.17);
+        osc.connect(gain);
+        gain.connect(ringAudioCtx.destination);
+        osc.start(startAt);
+        osc.stop(startAt + 0.19);
+      });
+    }catch(_){ }
+  }
+
+  function startRingTone(mode){
+    const cleanMode = String(mode || "").trim().toLowerCase() === "incoming" ? "incoming" : "outgoing";
+    if(ringMode === cleanMode && ringToneTimer) return;
+    stopRingTone();
+    ringMode = cleanMode;
+    playRingBurst(cleanMode);
+    ringToneTimer = setInterval(() => { playRingBurst(cleanMode); }, 1400);
+  }
+
+  function stopRingTone(){
+    if(ringToneTimer){
+      clearInterval(ringToneTimer);
+      ringToneTimer = null;
+    }
+    ringMode = "";
+  }
+
+  function scheduleOutgoingNotAnswered(call){
+    clearOutgoingOfferTimer();
+    const row = call && typeof call === "object" ? call : null;
+    if(!row?.callId || row.direction !== "outgoing") return;
+    outgoingOfferTimer = setTimeout(() => {
+      const current = activeCall;
+      if(!current || current.callId !== row.callId || current.direction !== "outgoing") return;
+      sendCallSignal({
+        type: "call-end",
+        call_id: row.callId,
+        from_user_id: myId,
+        to_user_id: String(current.peerId || row.peerId || receiverId || "").trim(),
+        media_type: current.mediaType || row.mediaType || "audio",
+        reason: "not_answered"
+      }).catch(() => {});
+      endActiveCall(false, "They not answered").catch(() => {});
+    }, CALL_RING_TIMEOUT_MS);
+  }
+
+  function mapRemoteCallEndReason(signal){
+    const type = String(signal?.type || "").trim().toLowerCase();
+    const reason = String(signal?.reason || "").trim().toLowerCase();
+    if(type === "call-busy") return "User busy in call";
+    if(reason === "not_answered" || reason === "timeout") return "They not answered";
+    if(reason === "blocked") return "User blocked";
+    if(type === "call-decline") return "Call declined";
+    return "Call ended";
+  }
+
   function showIncomingOffer(offer){
     pendingIncomingOffer = offer;
-    incomingCallText.textContent = `${offer.media_type === "video" ? "Video" : "Audio"} call from ${getDisplayName(peerProfile, receiverNameParam)}`;
+    incomingCallText.textContent = (offer.media_type === "video" ? "Video" : "Audio") + " call from " + getDisplayName(peerProfile, receiverNameParam);
     incomingCallBar.style.display = "flex";
-    if(incomingOfferTimer) clearTimeout(incomingOfferTimer);
-    incomingOfferTimer = setTimeout(() => { declineIncomingCall("timeout").catch(() => {}); }, 60000);
+    clearIncomingOfferTimer();
+    startRingTone("incoming");
+    incomingOfferTimer = setTimeout(() => { declineIncomingCall("not_answered").catch(() => {}); }, CALL_RING_TIMEOUT_MS);
   }
 
   function hideIncomingOffer(){
-    if(incomingOfferTimer){ clearTimeout(incomingOfferTimer); incomingOfferTimer = null; }
+    clearIncomingOfferTimer();
     pendingIncomingOffer = null;
     incomingCallBar.style.display = "none";
+    if(ringMode === "incoming") stopRingTone();
   }
 
   function setCallStatus(text){
@@ -1655,12 +1774,15 @@
     if(!activeCall) return;
     const call = activeCall;
     activeCall = null;
+    clearOutgoingOfferTimer();
+    clearIncomingOfferTimer();
+    stopRingTone();
     if(sendSignal){
       await sendCallSignal({
         type: "call-end",
         call_id: call.callId,
         from_user_id: myId,
-        to_user_id: receiverId,
+        to_user_id: String(call.peerId || receiverId || "").trim(),
         media_type: call.mediaType,
         reason: reason || "ended"
       });
@@ -1696,10 +1818,18 @@
     });
   }
 
-  async function createCallSession(callId, mediaType, direction, localStream){
+  async function createCallSession(callId, mediaType, direction, localStream, peerId){
     const call = {
-      callId, mediaType, direction, localStream,
-      remoteStream: new MediaStream(), pc: null, pendingIce: [], muted: false, cameraOff: false
+      callId,
+      mediaType,
+      direction,
+      localStream,
+      peerId: String(peerId || receiverId || "").trim(),
+      remoteStream: new MediaStream(),
+      pc: null,
+      pendingIce: [],
+      muted: false,
+      cameraOff: false
     };
     const pc = new RTCPeerConnection(RTC_CONFIG);
     call.pc = pc;
@@ -1715,7 +1845,7 @@
         type: "ice",
         call_id: call.callId,
         from_user_id: myId,
-        to_user_id: receiverId,
+        to_user_id: String(call.peerId || receiverId || "").trim(),
         media_type: call.mediaType,
         candidate
       }).catch(() => {});
@@ -1768,10 +1898,12 @@
     }
     if(activeCall){ showNotice("A call is already active."); return; }
     hideIncomingOffer();
+    stopRingTone();
+    clearOutgoingOfferTimer();
     const localStream = await getLocalStream(mediaType);
     if(!localStream) return;
     const callId = typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    const call = await createCallSession(callId, mediaType, "outgoing", localStream);
+    const call = await createCallSession(callId, mediaType, "outgoing", localStream, receiverId);
     activeCall = call;
     showCallOverlay(call);
     setCallStatus("Creating offer...");
@@ -1792,6 +1924,8 @@
         return;
       }
       setCallStatus("Ringing...");
+      startRingTone("outgoing");
+      scheduleOutgoingNotAnswered(call);
     }catch(err){
       console.error("call_offer_failed", err);
       await endActiveCall(false, "Call failed");
@@ -1824,7 +1958,7 @@
       });
       return;
     }
-    const call = await createCallSession(offer.call_id, offer.media_type, "incoming", localStream);
+    const call = await createCallSession(offer.call_id, offer.media_type, "incoming", localStream, offer.from_user_id);
     activeCall = call;
     showCallOverlay(call);
     setCallStatus("Connecting...");
@@ -1838,7 +1972,7 @@
         type: "call-answer",
         call_id: call.callId,
         from_user_id: myId,
-        to_user_id: receiverId,
+        to_user_id: offer.from_user_id,
         media_type: call.mediaType,
         sdp: call.pc.localDescription
       });
@@ -1887,18 +2021,18 @@
           type: "call-decline",
           call_id: signal.call_id,
           from_user_id: myId,
-          to_user_id: receiverId,
+          to_user_id: signal.from_user_id,
           media_type: signal.media_type,
           reason: "blocked"
         });
         return;
       }
-      if(activeCall){
+      if(activeCall || pendingIncomingOffer){
         await sendCallSignal({
           type: "call-busy",
           call_id: signal.call_id,
           from_user_id: myId,
-          to_user_id: receiverId,
+          to_user_id: signal.from_user_id,
           media_type: signal.media_type
         });
         return;
@@ -1929,6 +2063,8 @@
       try{
         await activeCall.pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
         await flushPendingIce(activeCall);
+        clearOutgoingOfferTimer();
+        stopRingTone();
         setCallStatus("Connected");
       }catch(err){
         console.error("set_remote_answer_failed", err);
@@ -1939,7 +2075,7 @@
     if(signal.type === "call-end" || signal.type === "call-decline" || signal.type === "call-busy"){
       if(pendingIncomingOffer && pendingIncomingOffer.call_id === signal.call_id) hideIncomingOffer();
       if(activeCall && activeCall.callId === signal.call_id){
-        const reason = signal.type === "call-busy" ? "User busy" : (signal.type === "call-decline" ? "Call declined" : "Call ended");
+        const reason = mapRemoteCallEndReason(signal);
         await endActiveCall(false, reason);
       }
     }
@@ -1947,7 +2083,7 @@
 
   async function pollCallSignals(force){
     if(!isUuid(myId)) return;
-    if(document.hidden && !force && !activeCall && !pendingIncomingOffer) return;
+    // Keep polling even in background so incoming calls are picked without refresh.
     const query = new URLSearchParams();
     query.set("user_id", myId);
     query.set("with_user_id", receiverId);
@@ -2482,6 +2618,10 @@
   window.addEventListener("beforeunload", () => {
     stopCallPolling();
     stopMessageSync();
+    clearIncomingOfferTimer();
+    clearOutgoingOfferTimer();
+    stopRingTone();
+    if(ringAudioCtx){ try{ ringAudioCtx.close(); }catch(_){ } ringAudioCtx = null; }
     if(realtimeChannel){ try{ supa.removeChannel(realtimeChannel); }catch(_){ } }
     if(activeCall){ closeCallResources(activeCall); activeCall = null; }
   });
