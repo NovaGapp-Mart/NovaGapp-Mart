@@ -18,17 +18,11 @@
         :root {
             --nova-gradient: linear-gradient(90deg, #ff6a00 0%, #ee0979 100%);
             --selection-bg: #005c4b;
-            --chat-shell-tablet: 860px;
-            --chat-shell-laptop: 980px;
-            --chat-shell-desktop: 1120px;
-            --chat-shell-width: 100%;
-            --shell-bg: #fff;
-            --shell-shadow: none;
         }
         * { box-sizing: border-box; }
         html, body { width: 100%; max-width: 100%; margin: 0; padding: 0; overflow-x: hidden; }
         body {
-            background-color: var(--shell-bg);
+            background-color: #fff;
             font-family: sans-serif;
             user-select: none;
             min-height: 100dvh;
@@ -43,21 +37,16 @@
             z-index: 100;
             transition: 0.3s;
             padding-top: env(safe-area-inset-top, 0px);
-            width: min(100%, var(--chat-shell-width));
-            margin-left: auto;
-            margin-right: auto;
+            width: 100%;
             flex-shrink: 0;
         }
         .header-selection { background: var(--selection-bg) !important; }
         #normalNav, #selectionNav { min-height: 64px; }
         #chatList {
-            width: min(100%, var(--chat-shell-width));
-            margin-left: auto;
-            margin-right: auto;
+            width: 100%;
             flex: 1 1 auto;
             background: #fff;
             padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px));
-            box-shadow: var(--shell-shadow);
         }
         .chat-item { display: flex; align-items: center; gap: 12px; padding: 12px 15px; border-bottom: 1px solid #f2f2f2; cursor: pointer; transition: 0.2s; position: relative; min-height: 76px; }
         .chat-item.selected { background: #e9edef; }
@@ -133,80 +122,33 @@
         }
 
         @media (min-width: 641px) and (max-width: 991px) {
-            :root {
-                --chat-shell-width: var(--chat-shell-tablet);
-                --shell-bg: #f1f3f4;
-                --shell-shadow: 0 10px 28px rgba(0,0,0,0.09);
-            }
+            #normalNav, #selectionNav { padding-left: 16px; padding-right: 16px; }
             .chat-item { padding: 12px 16px; min-height: 74px; }
             .avatar { width: 50px; height: 50px; font-size: 19px; }
-            .header { border-radius: 14px 14px 0 0; overflow: hidden; }
-            #chatList {
-                min-height: calc(100dvh - 134px);
-                border-radius: 0 0 14px 14px;
-                overflow: hidden;
-            }
+            #chatList { min-height: calc(100dvh - 134px); }
             .top-tabs { justify-content: center; }
-            .full-screen-modal {
-                width: min(100%, var(--chat-shell-width));
-                left: 50%;
-                right: auto;
-                transform: translateX(-50%);
-            }
-            .fab { right: max(20px, calc((100vw - var(--chat-shell-tablet)) / 2 + 14px)); }
-            .modal-fab { right: max(20px, calc((100vw - var(--chat-shell-tablet)) / 2 + 14px)); }
+            .fab { right: 18px; }
+            .modal-fab { right: 18px; }
         }
 
         @media (min-width: 992px) and (max-width: 1279px) {
-            :root {
-                --chat-shell-width: var(--chat-shell-laptop);
-                --shell-bg: #e7ecf0;
-                --shell-shadow: 0 14px 34px rgba(0,0,0,0.12);
-            }
             #normalNav, #selectionNav { padding-left: 18px; padding-right: 18px; }
             .chat-item { padding: 13px 18px; min-height: 78px; }
             .avatar { width: 54px; height: 54px; font-size: 21px; }
-            .header { border-radius: 16px 16px 0 0; overflow: hidden; }
-            #chatList {
-                min-height: calc(100dvh - 138px);
-                border-radius: 0 0 16px 16px;
-                overflow: hidden;
-            }
+            #chatList { min-height: calc(100dvh - 138px); }
             .top-tabs { justify-content: center; gap: 10px; }
-            .full-screen-modal {
-                width: min(100%, var(--chat-shell-width));
-                left: 50%;
-                right: auto;
-                transform: translateX(-50%);
-            }
-            .fab { right: max(26px, calc((100vw - var(--chat-shell-laptop)) / 2 + 16px)); }
-            .modal-fab { right: max(26px, calc((100vw - var(--chat-shell-laptop)) / 2 + 16px)); }
+            .fab { right: 22px; }
+            .modal-fab { right: 22px; }
         }
 
         @media (min-width: 1280px) {
-            :root {
-                --chat-shell-width: var(--chat-shell-desktop);
-                --shell-bg: #dde4ea;
-                --shell-shadow: 0 18px 44px rgba(0,0,0,0.14);
-            }
             #normalNav, #selectionNav { padding-left: 22px; padding-right: 22px; }
             .chat-item { padding: 14px 20px; min-height: 82px; }
             .avatar { width: 56px; height: 56px; font-size: 22px; }
-            .header { border-radius: 18px 18px 0 0; overflow: hidden; }
-            #chatList {
-                min-height: calc(100dvh - 142px);
-                border-radius: 0 0 18px 18px;
-                overflow: hidden;
-            }
+            #chatList { min-height: calc(100dvh - 142px); }
             .top-tabs { justify-content: center; gap: 14px; padding-left: 18px; padding-right: 18px; }
-            .full-screen-modal {
-                width: min(100%, var(--chat-shell-width));
-                left: 50%;
-                right: auto;
-                transform: translateX(-50%);
-            }
-            .fab { right: max(34px, calc((100vw - var(--chat-shell-desktop)) / 2 + 18px)); }
-            .modal-fab { right: max(34px, calc((100vw - var(--chat-shell-desktop)) / 2 + 18px)); }
+            .fab { right: 26px; }
+            .modal-fab { right: 26px; }
         }
 
         .switch { position: relative; display: inline-block; width: 45px; height: 24px; }
