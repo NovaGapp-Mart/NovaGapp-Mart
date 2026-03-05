@@ -223,8 +223,8 @@
         <div id="normalNav" class="flex justify-between items-center p-4">
             <h1 class="text-2xl font-bold tracking-tight">NovaGapp</h1>
             <div class="flex gap-5 text-xl relative">
-                <span onclick="event.stopPropagation(); toggleSearch()" class="cursor-pointer">🔍</span>
-                <span onclick="event.stopPropagation(); toggleMenu('mainMenu')" class="cursor-pointer">⋮</span>
+                <span onclick="event.stopPropagation(); toggleSearch()" class="cursor-pointer">ðŸ”</span>
+                <span onclick="event.stopPropagation(); toggleMenu('mainMenu')" class="cursor-pointer">â‹®</span>
                 <div id="mainMenu">
                     <div class="menu-item" onclick="startGroupCreation()">New Group</div>
                     <div class="menu-item" onclick="clearAllData()">Clear All Data</div>
@@ -234,12 +234,12 @@
 
         <div id="selectionNav" class="hidden flex justify-between items-center p-4 h-[64px]">
             <div class="flex items-center gap-6">
-                <span onclick="cancelSelection()" class="cursor-pointer text-2xl">✕</span>
+                <span onclick="cancelSelection()" class="cursor-pointer text-2xl">âœ•</span>
                 <span id="selectCount" class="text-xl font-medium">1</span>
             </div>
             <div class="flex gap-6 text-xl relative">
-                <span onclick="handleQuickAction('deleteChat')" class="cursor-pointer">🗑️</span>
-                <span onclick="event.stopPropagation(); toggleMenu('selectionMenu')" class="cursor-pointer">⋮</span>
+                <span onclick="handleQuickAction('deleteChat')" class="cursor-pointer">ðŸ—‘ï¸</span>
+                <span onclick="event.stopPropagation(); toggleMenu('selectionMenu')" class="cursor-pointer">â‹®</span>
                 <div id="selectionMenu">
                     <div class="menu-item" onclick="handleQuickAction('deleteChat')">Delete Chat</div>
                     <div class="menu-item" onclick="handleQuickAction('block')">Block Contact</div>
@@ -266,17 +266,17 @@
     </div>
 
     <div id="groupStep1" class="full-screen-modal">
-        <div class="step-header"><button onclick="closeGroupModal()" class="text-2xl">←</button><div><h2 class="font-bold">New Group</h2><p class="text-xs">Add participants</p></div></div>
+        <div class="step-header"><button onclick="closeGroupModal()" class="text-2xl">â†</button><div><h2 class="font-bold">New Group</h2><p class="text-xs">Add participants</p></div></div>
         <div id="contactSelectionList" class="flex-1 overflow-y-auto"></div>
-        <button onclick="openGroupDetails()" class="fixed modal-fab w-14 h-14 bg-orange-600 rounded-full text-white shadow-xl text-2xl">→</button>
+        <button onclick="openGroupDetails()" class="fixed modal-fab w-14 h-14 bg-orange-600 rounded-full text-white shadow-xl text-2xl">â†’</button>
     </div>
 
     <div id="groupStep2" class="full-screen-modal">
-        <div class="step-header"><button onclick="document.getElementById('groupStep2').style.display='none'" class="text-2xl">←</button><h2 class="font-bold">Group Details</h2></div>
+        <div class="step-header"><button onclick="document.getElementById('groupStep2').style.display='none'" class="text-2xl">â†</button><h2 class="font-bold">Group Details</h2></div>
         <div class="p-6 flex flex-col gap-5 text-center">
             <input type="file" id="groupIconInput" accept="image/*" class="hidden" onchange="previewImage(this)">
             <div id="groupIconPreview" onclick="document.getElementById('groupIconInput').click()" class="w-24 h-24 bg-gray-200 rounded-full mx-auto flex items-center justify-center border-2 border-dashed border-gray-400 overflow-hidden cursor-pointer">
-                <span id="camPlaceholderText">📷</span>
+                <span id="camPlaceholderText">ðŸ“·</span>
             </div>
             <p class="text-xs text-gray-500">Tap to select Group Icon</p>
             
@@ -294,7 +294,7 @@
                 </label>
             </div>
         </div>
-        <button onclick="finishGroupCreation()" class="fixed modal-fab w-14 h-14 bg-orange-600 rounded-full text-white shadow-xl flex items-center justify-center text-2xl">✓</button>
+        <button onclick="finishGroupCreation()" class="fixed modal-fab w-14 h-14 bg-orange-600 rounded-full text-white shadow-xl flex items-center justify-center text-2xl">âœ“</button>
     </div>
 
     <script>
@@ -1036,7 +1036,7 @@
             if(adminOnly) adminOnly.checked = false;
             const iconPreview = document.getElementById("groupIconPreview");
             if(iconPreview){
-                iconPreview.innerHTML = '<span id="camPlaceholderText">📷</span>';
+                iconPreview.innerHTML = '<span id="camPlaceholderText">ðŸ“·</span>';
             }
             document.querySelectorAll("[data-group-member-id]").forEach(box => {
                 box.checked = false;

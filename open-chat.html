@@ -118,13 +118,13 @@
     .call-actions button{border:none;border-radius:999px;padding:9px 14px;font-size:12px;font-weight:700}
     .call-mute,.call-cam{background:#2a3140;color:#fff}
     .call-end{background:#e53935;color:#fff}
-    .media-preview-modal{position:fixed;inset:0;z-index:17000;background:rgba(0,0,0,.95);display:none;flex-direction:column}
-    .media-preview-head{height:58px;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;color:#fff;background:rgba(0,0,0,.55)}
+    .media-preview-modal{position:fixed;inset:0;z-index:17000;background:rgba(0,0,0,.95);display:none;flex-direction:column;padding:0}
+    .media-preview-head{height:58px;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;color:#fff;background:rgba(0,0,0,.55);width:100%}
     .media-preview-head button{border:none;border-radius:8px;padding:7px 11px;font-size:13px;font-weight:700}
     .media-preview-close{background:rgba(255,255,255,.18);color:#fff}
     .media-preview-download{background:#ff6a00;color:#fff}
-    .media-preview-body{flex:1;display:flex;align-items:center;justify-content:center;padding:12px}
-    .media-preview-body img,.media-preview-body video{max-width:100%;max-height:100%;border-radius:8px}
+    .media-preview-body{flex:1;display:flex;align-items:center;justify-content:center;padding:12px;width:100%}
+    .media-preview-body img,.media-preview-body video{max-width:100%;max-height:100%;border-radius:8px;width:auto;height:auto;object-fit:contain}
     .info-tabs-wrap{padding:0 14px 14px}
     .info-tabs{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px}
     .info-tab{border:1px solid #ffd3b4;background:#fff7f1;color:#8d4d10;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:700;white-space:nowrap}
@@ -196,9 +196,12 @@
       .attachment-grid{max-width:280px}
       .info-media-tile{width:94px;height:94px}
       .info-chat-chip{min-width:150px;max-width:240px}
-      footer{padding:10px 12px calc(8px + env(safe-area-inset-bottom,0px))}
+            footer{padding:10px 12px calc(8px + env(safe-area-inset-bottom,0px))}
       #mainInput{font-size:15px}
       #sendBtn{width:44px;height:44px}
+      .media-preview-head{width:min(100%,1120px);margin:0 auto;padding:12px 16px}
+      .media-preview-body{padding:18px}
+      .media-preview-body img,.media-preview-body video{max-width:min(90vw,1000px);max-height:calc(100dvh - 120px)}
     }
 
     @media (min-width:1280px){
@@ -228,6 +231,9 @@
       #mainInput{font-size:15px}
       #sendBtn{width:46px;height:46px}
       .call-btn{width:36px;height:36px}
+      .media-preview-head{width:min(100%,1280px);padding:14px 20px}
+      .media-preview-body{padding:22px}
+      .media-preview-body img,.media-preview-body video{max-width:min(88vw,1200px);max-height:calc(100dvh - 128px)}
     }
 
     .hidden{display:none!important}
@@ -375,4 +381,8 @@
   <script src="open-chat.js"></script>
 </body>
 </html>
+
+
+
+
 
