@@ -15,40 +15,140 @@
     </script>
 
     <style>
-        :root { --nova-gradient: linear-gradient(90deg, #ff6a00 0%, #ee0979 100%); --selection-bg: #005c4b; }
-        body { background-color: #fff; font-family: sans-serif; overflow-x: hidden; user-select: none; }
-        .header { background: var(--nova-gradient); color: white; position: sticky; top: 0; z-index: 100; transition: 0.3s; }
+        :root {
+            --nova-gradient: linear-gradient(90deg, #ff6a00 0%, #ee0979 100%);
+            --selection-bg: #005c4b;
+            --chat-shell-max: 920px;
+        }
+        * { box-sizing: border-box; }
+        html, body { width: 100%; max-width: 100%; margin: 0; padding: 0; overflow-x: hidden; }
+        body {
+            background-color: #fff;
+            font-family: sans-serif;
+            user-select: none;
+            min-height: 100dvh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            background: var(--nova-gradient);
+            color: white;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            transition: 0.3s;
+            padding-top: env(safe-area-inset-top, 0px);
+            width: 100%;
+            flex-shrink: 0;
+        }
         .header-selection { background: var(--selection-bg) !important; }
+        #normalNav, #selectionNav { min-height: 64px; }
+        #chatList {
+            width: 100%;
+            flex: 1 1 auto;
+            background: #fff;
+            padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px));
+        }
         .chat-item { display: flex; align-items: center; gap: 12px; padding: 12px 15px; border-bottom: 1px solid #f2f2f2; cursor: pointer; transition: 0.2s; position: relative; min-height: 76px; }
         .chat-item.selected { background: #e9edef; }
         .avatar-wrap { position: relative; flex-shrink: 0; }
         .avatar { width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; color: white; flex-shrink: 0; font-size: 20px; overflow: hidden; background-size: cover; background-position: center; border: 1px solid #eee; }
         .avatar-unread-dot { position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: #ff6a00; color: #fff; border: 2px solid #fff; font-size: 10px; font-weight: 700; line-height: 1; display: flex; align-items: center; justify-content: center; }
-        .full-screen-modal { position: fixed; inset: 0; background: white; z-index: 1000; display: none; flex-direction: column; }
+        .chat-title-line { min-width: 0; gap: 8px; }
+        .chat-title { min-width: 0; }
+        .chat-time-label { flex-shrink: 0; white-space: nowrap; }
+        .full-screen-modal {
+            position: fixed;
+            inset: 0;
+            background: white;
+            z-index: 1000;
+            display: none;
+            flex-direction: column;
+            width: 100%;
+            height: 100dvh;
+            overflow: hidden;
+        }
         .step-header { background: var(--nova-gradient); color: white; padding: 16px; display: flex; align-items: center; gap: 15px; }
         
         #mainMenu, #selectionMenu { position: absolute; right: 10px; top: 50px; background: white; color: black; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: none; z-index: 200; width: 170px; }
         .menu-item { padding: 12px 16px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 14px; }
         .menu-item:last-child { border: none; }
 
-        .fab { position: fixed; bottom: 25px; right: 25px; width: 60px; height: 60px; background: #ff6a00; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 15px rgba(0,0,0,0.3); z-index: 90; cursor: pointer; }
+        .fab {
+            position: fixed;
+            bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+            right: 18px;
+            width: 60px;
+            height: 60px;
+            background: #ff6a00;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            z-index: 90;
+            cursor: pointer;
+        }
 
         .group-badge { background: #ff6a00; color: white; font-size: 9px; padding: 2px 5px; border-radius: 4px; margin-left: 5px; vertical-align: middle; text-transform: uppercase; }
         .pending-share-banner { margin: 10px 14px 0; padding: 10px 12px; border: 1px solid #ffd3b4; border-radius: 12px; background: #fff7f1; color: #8a4d12; font-size: 12px; line-height: 1.35; }
         .pending-share-banner strong { color: #7a3700; }
+        .top-tabs {
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+            gap: 6px;
+            overflow-x: auto;
+            white-space: nowrap;
+            -webkit-overflow-scrolling: touch;
+        }
+        .top-tabs > div { flex: 0 0 auto; }
+        #contactSelectionList { padding-bottom: calc(110px + env(safe-area-inset-bottom, 0px)); }
+        #contactSelectionList .avatar { width: 40px; height: 40px; font-size: 14px; }
+        .modal-fab {
+            bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+            right: 16px;
+        }
 
         @media (max-width: 640px) {
             .chat-item { padding: 10px 12px; min-height: 68px; gap: 10px; }
             .avatar { width: 46px; height: 46px; font-size: 18px; }
             .avatar-unread-dot { min-width: 16px; height: 16px; font-size: 9px; padding: 0 3px; }
-            .fab { width: 56px; height: 56px; bottom: 18px; right: 16px; }
+            .fab { width: 56px; height: 56px; right: 14px; }
+            #normalNav, #selectionNav { padding-left: 12px; padding-right: 12px; }
+            .top-tabs { justify-content: flex-start; padding-left: 8px; padding-right: 8px; }
+            .top-tabs > div { padding-left: 10px; padding-right: 10px; }
+            .chat-time-label { font-size: 10px; }
         }
 
-        @media (min-width: 768px) {
-            body { background: #f4f4f4; }
-            .header, #chatList, .full-screen-modal { width: min(100%, 860px); margin: 0 auto; }
-            #chatList { background: #fff; min-height: calc(100dvh - 128px); box-shadow: 0 14px 38px rgba(0,0,0,0.08); }
-            .fab { right: max(28px, calc((100vw - 860px) / 2 + 18px)); }
+        @media (min-width: 768px) and (max-width: 1023px) {
+            body { background: #f1f3f4; }
+            .header, #chatList, .full-screen-modal {
+                width: min(100%, 860px);
+                margin-left: auto;
+                margin-right: auto;
+            }
+            #chatList {
+                min-height: calc(100dvh - 132px);
+                box-shadow: 0 10px 28px rgba(0,0,0,0.09);
+            }
+            .fab { right: max(20px, calc((100vw - 860px) / 2 + 14px)); }
+            .modal-fab { right: max(20px, calc((100vw - 860px) / 2 + 14px)); }
+        }
+
+        @media (min-width: 1024px) {
+            body { background: #e4e8eb; }
+            .header, #chatList, .full-screen-modal {
+                width: min(100%, var(--chat-shell-max));
+                margin-left: auto;
+                margin-right: auto;
+            }
+            #chatList {
+                min-height: calc(100dvh - 136px);
+                box-shadow: 0 16px 42px rgba(0,0,0,0.11);
+            }
+            .fab { right: max(26px, calc((100vw - var(--chat-shell-max)) / 2 + 16px)); }
+            .modal-fab { right: max(26px, calc((100vw - var(--chat-shell-max)) / 2 + 16px)); }
         }
 
         .switch { position: relative; display: inline-block; width: 45px; height: 24px; }
@@ -93,7 +193,7 @@
         <div id="searchBox" class="hidden px-4 pb-3">
             <input type="text" id="searchInput" onkeyup="filterChats()" placeholder="Search contacts..." class="w-full p-2 rounded-lg text-black outline-none">
         </div>
-        <div class="flex justify-around font-bold text-[11px] pb-2 uppercase">
+        <div class="top-tabs font-bold text-[11px] pb-2 uppercase">
             <div class="border-b-4 border-white pb-1 px-4 text-white">CHATS</div>
             <div class="opacity-70 pb-1 px-4" onclick="location.href='posts.html'">POST</div>
             <div class="opacity-70 pb-1 px-4" onclick="location.href='videos.html'">VIDEOS</div>
@@ -110,7 +210,7 @@
     <div id="groupStep1" class="full-screen-modal">
         <div class="step-header"><button onclick="closeGroupModal()" class="text-2xl">←</button><div><h2 class="font-bold">New Group</h2><p class="text-xs">Add participants</p></div></div>
         <div id="contactSelectionList" class="flex-1 overflow-y-auto"></div>
-        <button onclick="openGroupDetails()" class="fixed bottom-6 right-6 w-14 h-14 bg-orange-600 rounded-full text-white shadow-xl text-2xl">→</button>
+        <button onclick="openGroupDetails()" class="fixed modal-fab w-14 h-14 bg-orange-600 rounded-full text-white shadow-xl text-2xl">→</button>
     </div>
 
     <div id="groupStep2" class="full-screen-modal">
@@ -136,7 +236,7 @@
                 </label>
             </div>
         </div>
-        <button onclick="finishGroupCreation()" class="fixed bottom-6 right-6 w-14 h-14 bg-orange-600 rounded-full text-white shadow-xl flex items-center justify-center text-2xl">✓</button>
+        <button onclick="finishGroupCreation()" class="fixed modal-fab w-14 h-14 bg-orange-600 rounded-full text-white shadow-xl flex items-center justify-center text-2xl">✓</button>
     </div>
 
     <script>
@@ -755,9 +855,9 @@
                 row.innerHTML = `
                     ${avatarHTML}
                     <div class="flex-1 min-w-0">
-                        <div class="flex justify-between items-center">
+                        <div class="flex justify-between items-center chat-title-line">
                             <span class="font-bold text-gray-800 truncate">${name}${badge}</span>
-                            <span class="text-xs text-gray-400">Realtime</span>
+                            <span class="text-xs text-gray-400 chat-time-label">Realtime</span>
                         </div>
                         <div class="flex items-center">
                             <div class="text-sm text-gray-500 truncate">${isGroup ? "Group chat" : "Tap to chat..."}</div>

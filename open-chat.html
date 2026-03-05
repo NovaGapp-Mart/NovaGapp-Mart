@@ -12,13 +12,33 @@
     window.supa = window.supa || window.novaCreateSupabaseClient();
   </script>
   <style>
-    :root{--nova-orange:#ff6a00;--nova-gradient:linear-gradient(90deg,#ff6a00 0%,#ee0979 100%)}
-    html,body{width:100%;max-width:100%;height:100dvh;overflow:hidden}
-    body{font-family:sans-serif;min-height:100dvh;display:flex;flex-direction:column;overflow:hidden;background:#efeae2;user-select:none}
-    header,footer{width:100%;max-width:100%}
-    .chat-shell{position:relative;width:100%;height:100%;display:flex;flex-direction:column;max-width:100%}
+    :root{
+      --nova-orange:#ff6a00;
+      --nova-gradient:linear-gradient(90deg,#ff6a00 0%,#ee0979 100%);
+      --open-chat-max:920px;
+    }
+    *{box-sizing:border-box}
+    html,body{width:100%;max-width:100%;height:100%;min-height:100vh;overflow:hidden;margin:0}
+    body{
+      font-family:sans-serif;
+      min-height:100dvh;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+      background:#efeae2;
+      user-select:none;
+      padding-top:env(safe-area-inset-top,0px);
+    }
+    header,footer{width:100%;max-width:100%;flex-shrink:0}
+    .chat-shell{position:relative;width:100%;height:100%;display:flex;flex-direction:column;max-width:100%;margin:0 auto}
     .chat-bg{background-image:url("https://www.transparenttextures.com/patterns/cubes.png");flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:15px;display:flex;flex-direction:column}
     #msgHolder{width:100%;min-width:0}
+    .chat-head-left{min-width:0;flex:1 1 auto}
+    .chat-head-meta{min-width:0;max-width:100%}
+    #userName,#userMeta{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .chat-head-actions{flex-shrink:0}
+    .composer-row{min-width:0}
+    .composer-row label,#sendBtn{flex-shrink:0}
     .bubble{max-width:88%;padding:8px;border-radius:8px;margin-bottom:10px;box-shadow:0 1px .5px rgba(0,0,0,.13);font-size:14.5px}
     .bubble,.msg-text{word-break:break-word;overflow-wrap:anywhere;white-space:pre-wrap}
     .bubble-out{background:#ffe9d6;align-self:flex-end;border-top-right-radius:0}
@@ -94,7 +114,8 @@
     .info-media-video-badge{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.62);color:#fff;border-radius:999px;padding:2px 6px;font-size:10px;font-weight:700}
     .info-chat-chip{flex:0 0 auto;min-width:140px;max-width:230px;border:1px solid #ffd3b4;background:#fff7f1;border-radius:10px;padding:8px 10px;color:#603100;font-size:12px;line-height:1.35;word-break:break-word}
     .info-empty{width:100%;border:1px dashed #e6c4a8;border-radius:10px;padding:10px 12px;font-size:12px;color:#7d5b43;background:#fff}
-    #mainInput{min-width:0}
+    footer{padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}
+    #mainInput{min-width:0;width:100%}
     @media (max-width:640px){
       .chat-bg{padding:10px}
       .bubble{max-width:94%;font-size:14px}
@@ -106,10 +127,22 @@
       .call-btn{width:32px;height:32px}
       .chat-shell{max-width:100%;margin:0}
       .incoming-call-bar{width:calc(100% - 20px)}
+      #userName{font-size:14px}
+      #userMeta{font-size:10px}
+      .composer-row{gap:6px}
+      #sendBtn{width:42px;height:42px}
+    }
+    @media (min-width:641px) and (max-width:899px){
+      body{background:#e6eaed}
+      .chat-shell{max-width:100%;margin:0 auto}
+      .chat-bg{padding:14px}
+      #userName{max-width:280px}
     }
     @media (min-width:900px){
       body{background:#d9d9d9}
-      .chat-shell{max-width:860px;margin:0 auto;background:#efeae2;box-shadow:0 16px 44px rgba(0,0,0,.16)}
+      .chat-shell{max-width:var(--open-chat-max);margin:0 auto;background:#efeae2;box-shadow:0 16px 44px rgba(0,0,0,.16)}
+      #userName{max-width:360px}
+      #userMeta{max-width:360px}
     }
     .hidden{display:none!important}
   </style>
@@ -148,15 +181,15 @@
 
   <div class="chat-shell">
   <header class="h-16 flex items-center px-2 justify-between shrink-0 shadow-lg z-50" style="background:var(--nova-gradient)">
-    <div class="flex items-center gap-1 cursor-pointer" onclick="openProfile()">
+    <div class="chat-head-left flex items-center gap-1 cursor-pointer" onclick="openProfile()">
       <button type="button" onclick="handleBackNavigation(event)" class="text-white p-2 text-2xl"><-</button>
       <div id="userAvatar" class="w-10 h-10 rounded-full bg-white bg-cover bg-center"></div>
-      <div class="text-white ml-2">
+      <div class="chat-head-meta text-white ml-2">
         <h1 id="userName" class="font-bold">Loading...</h1>
         <p id="userMeta" class="text-[11px] opacity-90"></p>
       </div>
     </div>
-    <div class="flex items-center gap-2 pr-1">
+    <div class="chat-head-actions flex items-center gap-2 pr-1">
       <button id="audioCallBtn" class="call-btn" onclick="event.stopPropagation();startOutgoingCall('audio')" title="Audio Call">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.2 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.78.61 2.62a2 2 0 0 1-.45 2.11L8 9.99a16 16 0 0 0 6 6l1.54-1.27a2 2 0 0 1 2.11-.45c.84.28 1.72.49 2.62.61A2 2 0 0 1 22 16.92z"/></svg>
       </button>
@@ -189,7 +222,7 @@
       <div class="reply-preview-text" id="replyPreviewText"></div>
       <button type="button" onclick="cancelReply()">x</button>
     </div>
-    <div class="flex items-center gap-2 mt-1">
+    <div class="composer-row flex items-center gap-2 mt-1">
       <label class="p-2 cursor-pointer text-gray-500">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
         <input type="file" id="fileIn" class="hidden" accept="image/*,video/*" multiple onchange="handleMediaUpload(this)">
