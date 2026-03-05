@@ -61,6 +61,8 @@
   let peerProfile = null;
   let renderedMessageIds = new Set();
   let realtimeChannel = null;
+  let messageSyncTimer = null;
+  let lastThreadSnapshot = "";
   let callPollTimer = null;
   let incomingOfferTimer = null;
   let seenCallSignalIds = new Set();
@@ -92,8 +94,14 @@
   }
 
   function maybeMissingColumn(error){
-    const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
-    return text.includes("column") && text.includes("does not exist");
+    const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""} ${error?.code || ""}`.toLowerCase();
+    if(!text) return false;
+    if(text.includes("pgrst204")) return true;
+    if(text.includes("schema cache") && text.includes("column")) return true;
+    if(text.includes("could not find") && text.includes("column")) return true;
+    if(text.includes("column") && text.includes("does not exist")) return true;
+    if(text.includes("unknown column")) return true;
+    return false;
   }
 
   function getDisplayName(profile, fallback){
@@ -149,7 +157,7 @@
   }
 
   function resolveMemberUserId(row, index){
-    return readFirstValue(row, ["user_id", "member_id", "user_uuid", "member_uuid", "uid"]) || `member_${index}`;
+    return readFirstValue(row, ["user_id", "member_id", "user_uuid", "member_uuid", "participant_id", "member", "uid"]) || `member_${index}`;
   }
 
   function resolveMemberName(row){
@@ -161,7 +169,7 @@
   }
 
   function resolveMemberGroupId(row){
-    return readFirstValue(row, ["group_id", "gid", "groupId"]);
+    return readFirstValue(row, ["group_id", "group_uuid", "gid", "groupId", "group", "chat_id", "room_id", "conversation_id"]);
   }
 
   function isMemberAdmin(row, ownerHint, memberUserId){
@@ -177,29 +185,87 @@
     const cleanGroupId = String(groupId || receiverId || "").trim();
     const ownerId = String(ownerHint || groupOwnerId || "").trim();
     if(!cleanGroupId) return [];
+    let members = [];
     try{
       const { data, error } = await supa
         .from("group_members")
         .select("*")
         .limit(1200);
-      if(error){
-        return [];
+      if(!error){
+        members = (data || [])
+          .filter(row => String(resolveMemberGroupId(row) || "").trim() === cleanGroupId)
+          .map((row, index) => {
+            const userId = String(resolveMemberUserId(row, index) || `member_${index}`).trim();
+            const admin = isMemberAdmin(row, ownerId, userId);
+            return {
+              user_id: userId,
+              display_name: resolveMemberName(row),
+              photo: resolveMemberAvatar(row),
+              role: parseRoleText(row),
+              is_admin: admin
+            };
+          })
+          .filter(row => String(row?.user_id || "").trim());
       }
-      return (data || [])
-        .filter(row => String(resolveMemberGroupId(row) || "").trim() === cleanGroupId)
-        .map((row, index) => {
-          const userId = String(resolveMemberUserId(row, index) || `member_${index}`).trim();
-          const admin = isMemberAdmin(row, ownerId, userId);
-          return {
-            user_id: userId,
-            display_name: resolveMemberName(row),
-            photo: resolveMemberAvatar(row),
-            role: parseRoleText(row),
-            is_admin: admin
-          };
-        });
     }catch(_){ }
-    return [];
+
+    if(members.length) return members;
+
+    const fallbackIds = new Set();
+    if(isUuid(ownerId)) fallbackIds.add(ownerId);
+    try{
+      const { data, error } = await supa
+        .from("messages")
+        .select("sender_id,group_id")
+        .eq("group_id", cleanGroupId)
+        .limit(800);
+      if(!error){
+        (data || []).forEach(row => {
+          const sender = String(row?.sender_id || "").trim();
+          if(isUuid(sender)) fallbackIds.add(sender);
+        });
+      }
+    }catch(_){ }
+
+    const ids = Array.from(fallbackIds);
+    if(!ids.length) return [];
+
+    const profileById = new Map();
+    const userSelectAttempts = [
+      "user_id,username,full_name,display_name,photo,avatar_url",
+      "user_id,username,full_name,display_name,photo",
+      "user_id,username,full_name,photo",
+      "user_id,username,full_name"
+    ];
+    for(const fields of userSelectAttempts){
+      try{
+        const { data, error } = await supa
+          .from("users")
+          .select(fields)
+          .in("user_id", ids)
+          .limit(Math.max(50, ids.length + 6));
+        if(!error){
+          (data || []).forEach(row => {
+            const uid = String(row?.user_id || "").trim();
+            if(uid) profileById.set(uid, row);
+          });
+          break;
+        }
+        if(!maybeMissingColumn(error)) break;
+      }catch(_){ break; }
+    }
+
+    return ids.map((uid) => {
+      const profile = profileById.get(uid) || {};
+      const admin = !!(ownerId && uid === ownerId);
+      return {
+        user_id: uid,
+        display_name: getDisplayName(profile, admin ? "Admin" : "Member"),
+        photo: getProfilePhoto(profile, ""),
+        role: admin ? "admin" : "member",
+        is_admin: admin
+      };
+    });
   }
 
   async function fetchGroupInfo(groupId){
@@ -212,13 +278,13 @@
         .limit(800);
       if(!error){
         groupRow = (data || []).find(row => {
-          const id = readFirstValue(row, ["id", "group_id", "gid"]);
+          const id = readFirstValue(row, ["id", "group_id", "group_uuid", "gid"]);
           return id && id === cleanGroupId;
         }) || null;
       }
     }catch(_){ }
     groupOwnerId = resolveGroupOwnerId(groupRow);
-    const resolvedGroupId = String(readFirstValue(groupRow, ["id", "group_id", "gid"]) || cleanGroupId).trim();
+    const resolvedGroupId = String(readFirstValue(groupRow, ["id", "group_id", "group_uuid", "gid"]) || cleanGroupId).trim();
     const members = await fetchGroupMembers(resolvedGroupId, groupOwnerId);
     if(!groupOwnerId){
       const adminMember = members.find(member => member?.is_admin);
@@ -1040,8 +1106,50 @@
     const clock = document.createElement("span");
     clock.textContent = formatClock(row.created_at);
     metaRow.appendChild(clock);
+    if(outgoing && !isGroupChat){
+      const tick = document.createElement("span");
+      const isRead = toReadFlag(row?.is_read) === 1;
+      tick.className = `msg-tick ${isRead ? "msg-tick-read" : ""}`.trim();
+      tick.textContent = "\u2713\u2713";
+      tick.title = isRead ? "Seen" : "Sent";
+      metaRow.appendChild(tick);
+    }
     bubble.appendChild(metaRow);
     return bubble;
+  }
+
+  function toReadFlag(value){
+    if(value === true || value === 1) return 1;
+    const text = String(value || "").trim().toLowerCase();
+    return (text === "true" || text === "1") ? 1 : 0;
+  }
+
+  function messageRowFingerprint(row){
+    const id = String(getMessageId(row) || row?.__synthetic_id || "").trim();
+    const senderId = String(row?.sender_id || "").trim();
+    const receiverIdValue = String(row?.receiver_id || "").trim();
+    const groupId = String(row?.group_id || "").trim();
+    const createdAt = String(row?.created_at || "").trim();
+    const content = textOrEmpty(row?.content || row?.message).slice(0, 120);
+    const msgType = String(row?.message_type || "").trim();
+    const readFlag = toReadFlag(row?.is_read);
+    const deletedFlag = isMessageDeletedEverywhere(row) ? 1 : 0;
+    return `${id}|${senderId}|${receiverIdValue}|${groupId}|${createdAt}|${msgType}|${readFlag}|${deletedFlag}|${content}`;
+  }
+
+  function computeThreadSnapshot(rows){
+    return (rows || [])
+      .map(row => messageRowFingerprint(row))
+      .sort()
+      .join("||");
+  }
+
+  function refreshThreadSnapshot(){
+    lastThreadSnapshot = computeThreadSnapshot(messageRows);
+  }
+
+  function isNearBottom(){
+    return Math.abs((chatWindow.scrollHeight - chatWindow.clientHeight) - chatWindow.scrollTop) < 100;
   }
 
   function renderMessageList(){
@@ -1061,6 +1169,7 @@
   function addMessageRow(row){
     upsertMessageRow(row);
     renderMessageList();
+    refreshThreadSnapshot();
   }
 
   async function fetchUserProfile(uid){
@@ -1110,9 +1219,10 @@
   async function fetchThreadRows(){
     try{
       const selections = [
-        "id,sender_id,receiver_id,group_id,content,created_at,attachment_urls,attachment_url,message_type,reply_to_id,reply_preview,deleted_for_everyone,is_starred,deleted_by_name",
-        "id,sender_id,receiver_id,group_id,content,created_at,attachment_urls,attachment_url,message_type,reply_to_id,deleted_for_everyone,is_starred",
-        "id,sender_id,receiver_id,group_id,content,created_at,attachment_urls,attachment_url,message_type",
+        "id,sender_id,receiver_id,group_id,content,created_at,attachment_urls,attachment_url,message_type,reply_to_id,reply_preview,deleted_for_everyone,is_starred,deleted_by_name,is_read",
+        "id,sender_id,receiver_id,group_id,content,created_at,attachment_urls,attachment_url,message_type,reply_to_id,deleted_for_everyone,is_starred,is_read",
+        "id,sender_id,receiver_id,group_id,content,created_at,attachment_urls,attachment_url,message_type,is_read",
+        "id,sender_id,receiver_id,group_id,content,created_at,is_read",
         "id,sender_id,receiver_id,group_id,content,created_at"
       ];
       for(const fields of selections){
@@ -1140,7 +1250,43 @@
     renderedMessageIds = new Set();
     (data || []).forEach(upsertMessageRow);
     renderMessageList();
-    scrollBottom();
+          refreshThreadSnapshot();
+          scrollBottom();
+  }
+
+  async function syncMessagesSilently(){
+    const { data, error } = await fetchThreadRows();
+    if(error) return;
+    const rows = Array.isArray(data) ? data : [];
+    const nextSnapshot = computeThreadSnapshot(rows);
+    if(nextSnapshot === lastThreadSnapshot) return;
+    const stickToBottom = isNearBottom();
+    messageRows = [];
+    renderedMessageIds = new Set();
+    rows.forEach(upsertMessageRow);
+    renderMessageList();
+    refreshThreadSnapshot();
+    if(stickToBottom) scrollBottom();
+    if(!isGroupChat && document.visibilityState === "visible"){
+      markDirectMessagesRead().catch(() => {});
+    }
+  }
+
+  function startMessageSync(){
+    if(messageSyncTimer){
+      clearInterval(messageSyncTimer);
+      messageSyncTimer = null;
+    }
+    messageSyncTimer = setInterval(() => {
+      if(document.hidden) return;
+      syncMessagesSilently().catch(() => {});
+    }, 2200);
+  }
+
+  function stopMessageSync(){
+    if(!messageSyncTimer) return;
+    clearInterval(messageSyncTimer);
+    messageSyncTimer = null;
   }
 
   async function markDirectMessagesRead(){
@@ -1186,7 +1332,7 @@
       const { data, error } = await supa
         .from("messages")
         .insert(candidate)
-        .select("id,sender_id,receiver_id,group_id,content,created_at,attachment_urls,attachment_url,message_type,reply_to_id,reply_preview")
+        .select("id,sender_id,receiver_id,group_id,content,created_at,attachment_urls,attachment_url,message_type,reply_to_id,reply_preview,is_read")
         .maybeSingle();
       if(!error) return { data: data ? { ...candidate, ...data } : null, error: null };
       if(!maybeMissingColumn(error)) return { data: null, error };
@@ -1245,6 +1391,9 @@
       addMessageRow(data);
       scrollBottom();
     }
+    if(!isGroupChat){
+      notifyChatPush(data || rawPayload || {}).catch(() => {});
+    }
     return true;
   }
 
@@ -1281,6 +1430,7 @@
         if(id){
           messageRows = messageRows.filter(item => getMessageId(item) !== id);
           renderMessageList();
+          refreshThreadSnapshot();
           scrollBottom();
         }
         return;
@@ -1368,6 +1518,50 @@
 
   function apiUrl(base, path){
     return base ? `${base}${path}` : path;
+  }
+  function getMyDisplayNameForPush(){
+    return String(
+      myUser?.user_metadata?.full_name ||
+      myUser?.user_metadata?.name ||
+      myUser?.user_metadata?.username ||
+      myUser?.email ||
+      "New Message"
+    ).trim() || "New Message";
+  }
+
+  async function notifyChatPush(rawPayload){
+    if(isGroupChat) return;
+    const toUserId = String(receiverId || "").trim();
+    if(!isUuid(toUserId) || toUserId === myId) return;
+    const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
+    const text = textOrEmpty(payload.content || payload.message);
+    const attachments = getAttachmentUrls(payload);
+    const bodyText = text
+      ? text.slice(0, 200)
+      : (attachments.length ? "Sent an attachment" : "New message");
+    const requestBody = {
+      to_user_id: toUserId,
+      title: getMyDisplayNameForPush(),
+      body: bodyText,
+      data: {
+        type: "chat_message",
+        sender_id: String(myId || "").trim(),
+        receiver_id: toUserId,
+        is_group: "0"
+      }
+    };
+
+    const bases = buildApiBases();
+    for(const base of bases){
+      try{
+        const res = await fetch(apiUrl(base, "/api/push/notify"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody)
+        });
+        if(res.ok) return;
+      }catch(_){ }
+    }
   }
 
   async function sendCallSignal(payload){
@@ -2222,6 +2416,7 @@
       videoCallBtn.classList.add("opacity-50");
       await loadMessages();
       subscribeToMessages();
+      startMessageSync();
       return;
     }
     loadThreadLocalState();
@@ -2233,6 +2428,7 @@
     updateFilterUi();
     await loadMessages();
     subscribeToMessages();
+    startMessageSync();
     markDirectMessagesRead().catch(() => {});
     startCallPolling();
     const canCall = isUuid(receiverId) && receiverId !== myId && !isPeerBlocked;
@@ -2245,7 +2441,11 @@
   }
 
   document.addEventListener("visibilitychange", () => {
-    if(document.visibilityState === "visible") pollCallSignals(true).catch(() => {});
+    if(document.visibilityState === "visible"){
+      pollCallSignals(true).catch(() => {});
+      syncMessagesSilently().catch(() => {});
+      if(!isGroupChat) markDirectMessagesRead().catch(() => {});
+    }
   });
 
   document.addEventListener("click", (event) => {
@@ -2281,6 +2481,7 @@
 
   window.addEventListener("beforeunload", () => {
     stopCallPolling();
+    stopMessageSync();
     if(realtimeChannel){ try{ supa.removeChannel(realtimeChannel); }catch(_){ } }
     if(activeCall){ closeCallResources(activeCall); activeCall = null; }
   });

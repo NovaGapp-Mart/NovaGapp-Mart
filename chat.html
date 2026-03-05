@@ -548,8 +548,14 @@
         }
 
         function maybeMissingColumn(error){
-            const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
-            return text.includes("column") && text.includes("does not exist");
+            const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""} ${error?.code || ""}`.toLowerCase();
+            if(!text) return false;
+            if(text.includes("pgrst204")) return true;
+            if(text.includes("schema cache") && text.includes("column")) return true;
+            if(text.includes("could not find") && text.includes("column")) return true;
+            if(text.includes("column") && text.includes("does not exist")) return true;
+            if(text.includes("unknown column")) return true;
+            return false;
         }
 
         function displayName(user){
@@ -979,7 +985,7 @@
         }
 
         function extractGroupMemberUserId(row){
-            return readFirstPresentValue(row, ["user_id", "member_id", "user_uuid", "member_uuid", "uid"]);
+            return readFirstPresentValue(row, ["user_id", "member_id", "user_uuid", "member_uuid", "participant_id", "member", "uid"]);
         }
 
         function hasAnyKnownOwnerField(row){
@@ -993,7 +999,7 @@
             const byId = new Map();
             const addGroupRows = (rows) => {
                 (rows || []).forEach(g => {
-                    const id = String(g?.id || g?.group_id || "").trim();
+                    const id = String(g?.id || g?.group_id || g?.group_uuid || g?.gid || "").trim();
                     if(!id) return;
                     groupIds.add(id);
                     byId.set(id, {
@@ -1015,13 +1021,13 @@
                     .from("group_members")
                     .select("*")
                     .limit(2000);
-                if(error){
+                if(memberError){
                     if(!maybeMissingResource(memberError, "group_members")){
                         console.error("group_members_fetch_failed", memberError);
                     }
                 }else{
                     (memberRows || []).forEach(row => {
-                        const id = String(row?.group_id || row?.gid || "").trim();
+                        const id = String(row?.group_id || row?.group_uuid || row?.gid || "").trim();
                         const memberUserId = extractGroupMemberUserId(row);
                         if(id && memberUserId === currentUserId){
                             groupIds.add(id);
@@ -1052,7 +1058,7 @@
             if(groupRows.length){
                 let matchedCount = 0;
                 groupRows.forEach(row => {
-                    const id = String(row?.id || row?.group_id || "").trim();
+                    const id = String(row?.id || row?.group_id || row?.group_uuid || row?.gid || "").trim();
                     if(!id) return;
                     const ownerId = extractGroupOwnerId(row);
                     const memberMatch = groupIds.has(id);
@@ -1550,6 +1556,7 @@
             };
             const groupRes = await insertGroupWithFallback(basePayload);
             if(!groupRes.ok){
+                console.error("group_create_failed", groupRes?.error || groupRes);
                 alert("Error creating group on backend");
                 return;
             }
