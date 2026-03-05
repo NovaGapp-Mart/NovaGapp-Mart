@@ -485,6 +485,8 @@
                     id,
                     name: String(row?.name || "Group").trim() || "Group",
                     img: String(row?.img || "").trim(),
+                    owner_id: String(row?.owner_id || "").trim(),
+                    owner_name: String(row?.owner_name || "").trim(),
                     isGroup: true,
                     updated_at: Number(row?.updated_at || 0) || 0
                 });
@@ -500,6 +502,8 @@
                     id: String(row?.id || "").trim(),
                     name: String(row?.name || "Group").trim() || "Group",
                     img: String(row?.img || "").trim(),
+                    owner_id: String(row?.owner_id || "").trim(),
+                    owner_name: String(row?.owner_name || "").trim(),
                     updated_at: Number(row?.updated_at || Date.now()) || Date.now()
                 }));
             localStorage.setItem(manualGroupStorageKey(), JSON.stringify(rows));
@@ -513,6 +517,8 @@
                 id,
                 name: String(row?.name || "Group").trim() || "Group",
                 img: String(row?.img || "").trim(),
+                owner_id: String(row?.owner_id || "").trim(),
+                owner_name: String(row?.owner_name || "").trim(),
                 isGroup: true,
                 updated_at: Date.now()
             });
@@ -1013,6 +1019,121 @@
             return truncateText(parts.join(" | "), 260);
         }
 
+        function extractNullColumnName(error){
+            const details = String(error?.details || "");
+            const match = details.match(/null value in column "([^"]+)"/i);
+            return String(match?.[1] || "").trim();
+        }
+
+        function extractInvalidInputColumnName(error){
+            const text = `${error?.details || ""} ${error?.message || ""}`.trim();
+            const match = text.match(/column "([^"]+)"/i);
+            return String(match?.[1] || "").trim();
+        }
+
+        function extractOverlongColumnName(error){
+            const text = `${error?.details || ""} ${error?.message || ""}`.trim();
+            const match = text.match(/column "([^"]+)"/i);
+            return String(match?.[1] || "").trim();
+        }
+
+        function buildGroupColumnFallback(columnName, context){
+            const key = String(columnName || "").trim().toLowerCase();
+            const cleanName = String(context?.cleanName || "").trim();
+            const cleanIcon = String(context?.cleanIcon || "").trim();
+            const cleanSlogan = String(context?.cleanSlogan || "").trim();
+            const ownerId = String(context?.ownerId || "").trim();
+            const generatedId = String(context?.generatedId || "").trim();
+            const nowIso = String(context?.nowIso || "").trim();
+            const adminOnly = !!context?.adminOnly;
+            if(!key) return "";
+            if(key === "name" || key === "group_name") return cleanName;
+            if(key === "icon_url" || key === "group_icon") return cleanIcon;
+            if(key === "slogan" || key === "description" || key === "about") return cleanSlogan || cleanName;
+            if(
+                key === "created_by" ||
+                key === "owner_id" ||
+                key === "user_id" ||
+                key === "admin_id" ||
+                key === "creator_id" ||
+                key === "user_uuid" ||
+                key === "owner_uuid" ||
+                key === "admin_uuid" ||
+                key === "uid" ||
+                key === "created_by_id" ||
+                key === "created_by_user_id" ||
+                key === "creator_user_id" ||
+                key === "creator_uuid" ||
+                key === "created_by_uuid" ||
+                key === "group_admin_id"
+            ){
+                return ownerId;
+            }
+            if(key === "id" || key === "group_id" || key === "group_uuid" || key === "gid" || key === "uuid") return generatedId;
+            if(key === "created_at" || key === "updated_at") return nowIso;
+            if(key === "is_admin_only" || key === "admin_only") return adminOnly;
+            return "";
+        }
+
+        function normalizeGroupInsertCandidateFromError(candidate, error, context){
+            const source = candidate && typeof candidate === "object" ? candidate : {};
+            const next = { ...source };
+            const code = String(error?.code || "").trim().toLowerCase();
+            const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
+
+            if(code === "42501" || text.includes("row-level security")){
+                return { retry: false, candidate: null };
+            }
+
+            if(code === "23502" || text.includes("null value in column")){
+                const column = extractNullColumnName(error);
+                if(!column) return { retry: false, candidate: null };
+                const fallback = buildGroupColumnFallback(column, context);
+                if(fallback === "") return { retry: false, candidate: null };
+                if(String(next?.[column] || "") === String(fallback || "")) return { retry: false, candidate: null };
+                next[column] = fallback;
+                return { retry: true, candidate: next };
+            }
+
+            if(code === "22001" || text.includes("too long for type")){
+                const column = extractOverlongColumnName(error);
+                if(!column) return { retry: false, candidate: null };
+                const value = next?.[column];
+                if(typeof value !== "string" || value.length <= 240) return { retry: false, candidate: null };
+                next[column] = value.slice(0, 240);
+                return { retry: true, candidate: next };
+            }
+
+            if(code === "22p02" || text.includes("invalid input syntax")){
+                const column = extractInvalidInputColumnName(error);
+                if(!column) return { retry: false, candidate: null };
+                const key = String(column || "").trim().toLowerCase();
+                if(key === "is_admin_only" || key === "admin_only"){
+                    next[column] = !!context?.adminOnly;
+                    return { retry: true, candidate: next };
+                }
+                if(key === "id" || key === "group_id" || key === "group_uuid" || key === "gid" || key === "uuid"){
+                    const fallbackId = String(context?.generatedId || "").trim();
+                    if(isUuid(fallbackId) && String(next?.[column] || "").trim() !== fallbackId){
+                        next[column] = fallbackId;
+                        return { retry: true, candidate: next };
+                    }
+                }
+                delete next[column];
+                return { retry: Object.keys(next).length > 0, candidate: Object.keys(next).length > 0 ? next : null };
+            }
+
+            if(text.includes("check constraint") && (Object.prototype.hasOwnProperty.call(next, "icon_url") || Object.prototype.hasOwnProperty.call(next, "group_icon"))){
+                delete next.icon_url;
+                delete next.group_icon;
+                if(Object.keys(next).length > 0){
+                    return { retry: true, candidate: next };
+                }
+            }
+
+            return { retry: false, candidate: null };
+        }
+
         async function resolveInsertedGroupRow(hint){
             const expectedName = String(hint?.expectedName || "").trim().toLowerCase();
             const preferredId = String(hint?.preferredId || "").trim();
@@ -1049,7 +1170,25 @@
 
         function hasAnyKnownOwnerField(row){
             const source = row && typeof row === "object" ? row : {};
-            const keys = ["created_by", "owner_id", "user_id", "admin_id", "createdBy", "ownerId", "user_uuid", "owner_uuid", "creator_id", "admin_uuid", "uid"];
+            const keys = [
+                "created_by",
+                "owner_id",
+                "user_id",
+                "admin_id",
+                "createdBy",
+                "ownerId",
+                "user_uuid",
+                "owner_uuid",
+                "creator_id",
+                "admin_uuid",
+                "uid",
+                "created_by_id",
+                "created_by_user_id",
+                "creator_user_id",
+                "creator_uuid",
+                "created_by_uuid",
+                "group_admin_id"
+            ];
             return keys.some(key => Object.prototype.hasOwnProperty.call(source, key));
         }
 
@@ -1065,6 +1204,8 @@
                         id,
                         name: String(g?.name || g?.group_name || byId.get(id)?.name || "Group").trim() || "Group",
                         img: String(g?.icon_url || g?.group_icon || byId.get(id)?.img || "").trim(),
+                        owner_id: String(extractGroupOwnerId(g) || g?.owner_id || byId.get(id)?.owner_id || "").trim(),
+                        owner_name: String(g?.owner_name || g?.creator_name || byId.get(id)?.owner_name || "").trim(),
                         isGroup: true,
                         sortTs: Number(g?.updated_at || g?.created_at || byId.get(id)?.sortTs || 0) || 0
                     });
@@ -1499,9 +1640,11 @@
             const cleanIcon = String(row.icon_url || row.group_icon || "").trim();
             const cleanSlogan = String(row.slogan || "").trim();
             const adminOnly = !!row.is_admin_only;
+            const ownerId = isUuid(currentUserId) ? String(currentUserId || "").trim() : "";
             const startedAt = Date.now();
             const generatedId = makeClientUuid();
             const nowIso = new Date(startedAt).toISOString();
+            const retryContext = { cleanName, cleanIcon, cleanSlogan, adminOnly, ownerId, generatedId, nowIso };
 
             const payloadBases = [
                 { name: cleanName },
@@ -1512,20 +1655,28 @@
                 { name: cleanName, group_name: cleanName, icon_url: cleanIcon, group_icon: cleanIcon },
                 { name: cleanName, group_name: cleanName, icon_url: cleanIcon, group_icon: cleanIcon, slogan: cleanSlogan }
             ];
-            const ownerHints = [
-                { created_by: currentUserId },
-                { owner_id: currentUserId },
-                { user_id: currentUserId },
-                { admin_id: currentUserId },
-                { creator_id: currentUserId },
-                { user_uuid: currentUserId },
-                { owner_uuid: currentUserId },
-                { admin_uuid: currentUserId },
-                { uid: currentUserId },
-                { created_by: currentUserId, owner_id: currentUserId },
-                { created_by: currentUserId, owner_id: currentUserId, user_id: currentUserId, admin_id: currentUserId },
-                {}
-            ];
+            const ownerHints = ownerId
+                ? [
+                    { created_by: ownerId },
+                    { owner_id: ownerId },
+                    { user_id: ownerId },
+                    { admin_id: ownerId },
+                    { creator_id: ownerId },
+                    { user_uuid: ownerId },
+                    { owner_uuid: ownerId },
+                    { admin_uuid: ownerId },
+                    { uid: ownerId },
+                    { created_by_id: ownerId },
+                    { created_by_user_id: ownerId },
+                    { creator_user_id: ownerId },
+                    { creator_uuid: ownerId },
+                    { created_by_uuid: ownerId },
+                    { group_admin_id: ownerId },
+                    { created_by: ownerId, owner_id: ownerId },
+                    { created_by: ownerId, owner_id: ownerId, user_id: ownerId, admin_id: ownerId },
+                    {}
+                ]
+                : [{}];
             const idHints = [
                 {},
                 { id: generatedId },
@@ -1571,7 +1722,7 @@
             });
 
             let lastError = null;
-            const maxAttempts = 420;
+            const maxAttempts = 180;
             for(let i = 0; i < candidates.length && i < maxAttempts; i += 1){
                 const candidate = candidates[i];
                 const { error } = await supa
@@ -1599,7 +1750,19 @@
                     };
                 }
                 lastError = error;
+                if(String(error?.code || "").trim() === "23505"){
+                    const duplicateId = extractGroupId(candidate);
+                    if(duplicateId){
+                        return { ok: true, data: candidate, groupId: duplicateId };
+                    }
+                }
                 if(maybeMissingColumn(error)) continue;
+                const normalized = normalizeGroupInsertCandidateFromError(candidate, error, retryContext);
+                if(normalized?.retry && normalized?.candidate){
+                    pushCandidate(normalized.candidate);
+                    continue;
+                }
+                break;
             }
 
             const resolved = await resolveInsertedGroupRow({
@@ -1656,6 +1819,30 @@
                     if(duplicate) return true;
                     return false;
                 }
+            }
+            return false;
+        }
+
+        async function insertGroupSystemMessage(groupId, text){
+            const cleanGroupId = String(groupId || "").trim();
+            const content = truncateText(text, 220);
+            if(!cleanGroupId || !content || !isUuid(currentUserId)) return false;
+            const base = {
+                sender_id: currentUserId,
+                group_id: cleanGroupId,
+                content
+            };
+            const variants = [
+                { ...base, message_type: "system", is_read: false },
+                { ...base, message_type: "text", is_read: false },
+                { ...base, is_read: false },
+                base
+            ];
+            for(const candidate of variants){
+                const { error } = await supa.from("messages").insert(candidate);
+                if(!error) return true;
+                const missingSchema = maybeMissingColumn(error) || maybeMissingResource(error, "messages");
+                if(!missingSchema) return false;
             }
             return false;
         }
@@ -1731,7 +1918,14 @@
                 });
             }
 
-            rememberManualGroup({ id: groupId, name: gName, img: selectedImgData });
+            await insertGroupSystemMessage(groupId, `${ownerName} created this group`).catch(() => {});
+            rememberManualGroup({
+                id: groupId,
+                name: gName,
+                img: selectedImgData,
+                owner_id: currentUserId,
+                owner_name: ownerName
+            });
             document.getElementById("groupStep1").style.display = "none";
             document.getElementById("groupStep2").style.display = "none";
             resetGroupDraft();

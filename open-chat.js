@@ -73,6 +73,7 @@
   let ringAudioCtx = null;
   let ringMode = "";
   const bufferedIceByCall = new Map();
+  const callOutcomeMessageKeys = new Set();
   let messageRows = [];
   let localDeletedMessageIds = new Set();
   let chatClearedAt = 0;
@@ -136,6 +137,20 @@
     return false;
   }
 
+  function findGroupCreatorMember(){
+    const owner = String(groupOwnerId || "").trim();
+    if(owner){
+      const ownerRow = groupMembers.find(member => String(member?.user_id || "").trim() === owner);
+      if(ownerRow) return ownerRow;
+    }
+    const creatorByRole = groupMembers.find(member => {
+      const role = parseRoleText(member);
+      return role === "owner" || role === "creator";
+    });
+    if(creatorByRole) return creatorByRole;
+    return groupMembers.find(member => isAdminMemberRow(member)) || null;
+  }
+
   function findGroupAdminMember(){
     const owner = String(groupOwnerId || "").trim();
     if(owner){
@@ -148,10 +163,20 @@
   function buildGroupMetaText(){
     const memberCount = normalizeMemberCount(groupInfo?.member_count || groupMembers.length);
     const memberLabel = groupMemberLabel(memberCount);
+    const creator = findGroupCreatorMember();
     const admin = findGroupAdminMember();
-    if(!admin) return memberLabel;
-    const adminName = getDisplayName(admin, "Admin");
-    return `${memberLabel} | Admin: ${adminName}`;
+    const parts = [memberLabel];
+    if(creator){
+      parts.push(`Created by: ${getDisplayName(creator, "Creator")}`);
+    }
+    if(admin){
+      const creatorId = String(creator?.user_id || "").trim();
+      const adminId = String(admin?.user_id || "").trim();
+      if(!creatorId || !adminId || creatorId !== adminId){
+        parts.push(`Admin: ${getDisplayName(admin, "Admin")}`);
+      }
+    }
+    return parts.join(" | ");
   }
 
   function readFirstValue(row, keys){
@@ -177,7 +202,13 @@
       "owner_uuid",
       "creator_id",
       "admin_uuid",
-      "uid"
+      "uid",
+      "created_by_id",
+      "created_by_user_id",
+      "creator_user_id",
+      "creator_uuid",
+      "created_by_uuid",
+      "group_admin_id"
     ]);
   }
 
@@ -1693,15 +1724,17 @@
     outgoingOfferTimer = setTimeout(() => {
       const current = activeCall;
       if(!current || current.callId !== row.callId || current.direction !== "outgoing") return;
+      const mediaType = current.mediaType || row.mediaType || "audio";
       sendCallSignal({
         type: "call-end",
         call_id: row.callId,
         from_user_id: myId,
         to_user_id: String(current.peerId || row.peerId || receiverId || "").trim(),
-        media_type: current.mediaType || row.mediaType || "audio",
+        media_type: mediaType,
         reason: "not_answered"
       }).catch(() => {});
       endActiveCall(false, "They not answered").catch(() => {});
+      sendMissedCallThreadMessage(row.callId, mediaType).catch(() => {});
     }, CALL_RING_TIMEOUT_MS);
   }
 
@@ -1713,6 +1746,54 @@
     if(reason === "blocked") return "User blocked";
     if(type === "call-decline") return "Call declined";
     return "Call ended";
+  }
+
+  function callOutcomeMessageKey(callId, tag){
+    const id = String(callId || "").trim();
+    const kind = String(tag || "").trim().toLowerCase();
+    if(!id || !kind) return "";
+    return `${id}:${kind}`;
+  }
+
+  function rememberCallOutcomeMessage(callId, tag){
+    const key = callOutcomeMessageKey(callId, tag);
+    if(!key) return false;
+    if(callOutcomeMessageKeys.has(key)) return false;
+    callOutcomeMessageKeys.add(key);
+    if(callOutcomeMessageKeys.size > 600){
+      const trimmed = Array.from(callOutcomeMessageKeys).slice(-300);
+      callOutcomeMessageKeys.clear();
+      trimmed.forEach(item => callOutcomeMessageKeys.add(item));
+    }
+    return true;
+  }
+
+  function buildMissedCallText(mediaType){
+    const mode = String(mediaType || "").trim().toLowerCase() === "video" ? "video" : "audio";
+    return `Missed ${mode} call`;
+  }
+
+  async function sendMissedCallThreadMessage(callId, mediaType){
+    if(isGroupChat || !isUuid(myId) || !isUuid(receiverId)) return false;
+    if(!rememberCallOutcomeMessage(callId, "missed")) return false;
+    const payload = {
+      sender_id: myId,
+      ...buildThreadPayload(),
+      content: buildMissedCallText(mediaType),
+      message_type: "call_missed",
+      is_read: false
+    };
+    const { data, error } = await insertMessageWithFallback(payload);
+    if(error){
+      console.error("missed_call_message_failed", error);
+      return false;
+    }
+    if(data){
+      addMessageRow(data);
+      scrollBottom();
+    }
+    notifyChatPush(data || payload).catch(() => {});
+    return true;
   }
 
   function showIncomingOffer(offer){
@@ -2075,8 +2156,14 @@
     if(signal.type === "call-end" || signal.type === "call-decline" || signal.type === "call-busy"){
       if(pendingIncomingOffer && pendingIncomingOffer.call_id === signal.call_id) hideIncomingOffer();
       if(activeCall && activeCall.callId === signal.call_id){
+        const localCall = activeCall;
+        const reasonCode = String(signal?.reason || "").trim().toLowerCase();
+        const shouldSendMissed = localCall.direction === "outgoing" && (reasonCode === "not_answered" || reasonCode === "timeout");
         const reason = mapRemoteCallEndReason(signal);
         await endActiveCall(false, reason);
+        if(shouldSendMissed){
+          sendMissedCallThreadMessage(signal.call_id, localCall.mediaType || signal.media_type).catch(() => {});
+        }
       }
     }
   }
