@@ -209,6 +209,10 @@
             .top-tabs { justify-content: center; gap: 14px; padding-left: 18px; padding-right: 18px; }
         }
 
+        .hidden-chat-section { margin: 14px 12px 20px; border: 1px solid #f0d8c4; border-radius: 12px; overflow: hidden; background: #fff8f2; }
+        .hidden-chat-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #9a4b10; border-bottom: 1px solid #f4dfcf; background: #fff3e8; }
+        .hidden-chat-item { background: #fffaf6; }
+        .hidden-chat-item .chat-time-label { color: #b66a2b; font-weight: 600; }
         .switch { position: relative; display: inline-block; width: 45px; height: 24px; }
         .switch input { opacity: 0; width: 0; height: 0; }
         .slider { position: absolute; cursor: pointer; inset: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
@@ -223,8 +227,8 @@
         <div id="normalNav" class="flex justify-between items-center p-4">
             <h1 class="text-2xl font-bold tracking-tight">NovaGapp</h1>
             <div class="flex gap-5 text-xl relative">
-                <span onclick="event.stopPropagation(); toggleSearch()" class="cursor-pointer">ðŸ”</span>
-                <span onclick="event.stopPropagation(); toggleMenu('mainMenu')" class="cursor-pointer">â‹®</span>
+                <span onclick="event.stopPropagation(); toggleSearch()" class="cursor-pointer">S</span>
+                <span onclick="event.stopPropagation(); toggleMenu('mainMenu')" class="cursor-pointer">...</span>
                 <div id="mainMenu">
                     <div class="menu-item" onclick="startGroupCreation()">New Group</div>
                     <div class="menu-item" onclick="clearAllData()">Clear All Data</div>
@@ -234,16 +238,16 @@
 
         <div id="selectionNav" class="hidden flex justify-between items-center p-4 h-[64px]">
             <div class="flex items-center gap-6">
-                <span onclick="cancelSelection()" class="cursor-pointer text-2xl">âœ•</span>
+                <span onclick="cancelSelection()" class="cursor-pointer text-2xl">X</span>
                 <span id="selectCount" class="text-xl font-medium">1</span>
             </div>
             <div class="flex gap-6 text-xl relative">
-                <span onclick="handleQuickAction('deleteChat')" class="cursor-pointer">ðŸ—‘ï¸</span>
-                <span onclick="event.stopPropagation(); toggleMenu('selectionMenu')" class="cursor-pointer">â‹®</span>
+                <span onclick="handleQuickAction('deleteChat')" class="cursor-pointer">DEL</span>
+                <span onclick="event.stopPropagation(); toggleMenu('selectionMenu')" class="cursor-pointer">...</span>
                 <div id="selectionMenu">
                     <div class="menu-item" onclick="handleQuickAction('deleteChat')">Delete Chat</div>
-                    <div class="menu-item" onclick="handleQuickAction('block')">Block Contact</div>
-                    <div class="menu-item" onclick="handleQuickAction('hide')">Hide Chat</div>
+                    <div class="menu-item" onclick="handleQuickAction('hide')">Hide Account</div>
+                    <div class="menu-item" onclick="handleQuickAction('cancel')">Cancel</div>
                 </div>
             </div>
         </div>
@@ -266,17 +270,17 @@
     </div>
 
     <div id="groupStep1" class="full-screen-modal">
-        <div class="step-header"><button onclick="closeGroupModal()" class="text-2xl">â†</button><div><h2 class="font-bold">New Group</h2><p class="text-xs">Add participants</p></div></div>
+        <div class="step-header"><button onclick="closeGroupModal()" class="text-2xl"><-</button><div><h2 class="font-bold">New Group</h2><p class="text-xs">Add participants</p></div></div>
         <div id="contactSelectionList" class="flex-1 overflow-y-auto"></div>
-        <button onclick="openGroupDetails()" class="fixed modal-fab w-14 h-14 bg-orange-600 rounded-full text-white shadow-xl text-2xl">â†’</button>
+        <button onclick="openGroupDetails()" class="fixed modal-fab w-14 h-14 bg-orange-600 rounded-full text-white shadow-xl text-2xl">-></button>
     </div>
 
     <div id="groupStep2" class="full-screen-modal">
-        <div class="step-header"><button onclick="document.getElementById('groupStep2').style.display='none'" class="text-2xl">â†</button><h2 class="font-bold">Group Details</h2></div>
+        <div class="step-header"><button onclick="document.getElementById('groupStep2').style.display='none'" class="text-2xl"><-</button><h2 class="font-bold">Group Details</h2></div>
         <div class="p-6 flex flex-col gap-5 text-center">
             <input type="file" id="groupIconInput" accept="image/*" class="hidden" onchange="previewImage(this)">
             <div id="groupIconPreview" onclick="document.getElementById('groupIconInput').click()" class="w-24 h-24 bg-gray-200 rounded-full mx-auto flex items-center justify-center border-2 border-dashed border-gray-400 overflow-hidden cursor-pointer">
-                <span id="camPlaceholderText">ðŸ“·</span>
+                <span id="camPlaceholderText">CAM</span>
             </div>
             <p class="text-xs text-gray-500">Tap to select Group Icon</p>
             
@@ -294,14 +298,14 @@
                 </label>
             </div>
         </div>
-        <button onclick="finishGroupCreation()" class="fixed modal-fab w-14 h-14 bg-orange-600 rounded-full text-white shadow-xl flex items-center justify-center text-2xl">âœ“</button>
+        <button onclick="finishGroupCreation()" class="fixed modal-fab w-14 h-14 bg-orange-600 rounded-full text-white shadow-xl flex items-center justify-center text-2xl">OK</button>
     </div>
 
     <script>
         const supa = window.supa;
         let selectedImgData = "";
-        let selectedContact = null;
-        let pressTimer;
+        let selectionPressTimer = null;
+        const selectedContactsByKey = new Map();
         let currentUser = null;
         let currentUserId = "";
         let realtimeListChannel = null;
@@ -312,6 +316,100 @@
         const manualChatTargets = new Map();
         const MANUAL_TARGET_KEY_PREFIX = "manual_chat_targets:";
         const PENDING_REEL_SHARE_KEY = "nova_pending_reel_share";
+        const HIDDEN_CHATS_KEY = "hiddenChats";
+        const BLOCKED_CONTACTS_KEY = "blockedContacts";
+        const MANUAL_GROUP_KEY_PREFIX = "manual_groups:";
+        const MANUAL_GROUP_MAX = 200;
+        const manualGroups = new Map();
+
+        function rowIdForKey(key){
+            return "chat-" + String(key || "").replace(/[^a-z0-9_-]/gi, "_");
+        }
+
+        function getStoredSet(key){
+            return new Set(getStoredArray(key).map(v => String(v || "").trim()).filter(Boolean));
+        }
+
+        function saveStoredSet(key, setObj){
+            localStorage.setItem(key, JSON.stringify(Array.from(setObj || [])));
+        }
+
+        function isSelectionMode(){
+            return selectedContactsByKey.size > 0;
+        }
+
+        function manualGroupStorageKey(){
+            return `${MANUAL_GROUP_KEY_PREFIX}${currentUserId}`;
+        }
+
+        function loadManualGroups(){
+            manualGroups.clear();
+            if(!isUuid(currentUserId)) return;
+            const rows = getStoredArray(manualGroupStorageKey());
+            rows.forEach(row => {
+                const id = String(row?.id || "").trim();
+                if(!id) return;
+                manualGroups.set(id, {
+                    id,
+                    name: String(row?.name || "Group").trim() || "Group",
+                    img: String(row?.img || "").trim(),
+                    isGroup: true,
+                    updated_at: Number(row?.updated_at || 0) || 0
+                });
+            });
+        }
+
+        function saveManualGroups(){
+            if(!isUuid(currentUserId)) return;
+            const rows = Array.from(manualGroups.values())
+                .sort((a, b) => Number(b?.updated_at || 0) - Number(a?.updated_at || 0))
+                .slice(0, MANUAL_GROUP_MAX)
+                .map(row => ({
+                    id: String(row?.id || "").trim(),
+                    name: String(row?.name || "Group").trim() || "Group",
+                    img: String(row?.img || "").trim(),
+                    updated_at: Number(row?.updated_at || Date.now()) || Date.now()
+                }));
+            localStorage.setItem(manualGroupStorageKey(), JSON.stringify(rows));
+        }
+
+        function rememberManualGroup(group){
+            const row = group && typeof group === "object" ? group : {};
+            const id = String(row?.id || "").trim();
+            if(!id) return;
+            manualGroups.set(id, {
+                id,
+                name: String(row?.name || "Group").trim() || "Group",
+                img: String(row?.img || "").trim(),
+                isGroup: true,
+                updated_at: Date.now()
+            });
+            saveManualGroups();
+        }
+
+        function applySelectionUiState(){
+            const active = isSelectionMode();
+            document.getElementById("mainHeader").classList.toggle("header-selection", active);
+            document.getElementById("normalNav").classList.toggle("hidden", active);
+            document.getElementById("selectionNav").classList.toggle("hidden", !active);
+            document.getElementById("fabBtn").classList.toggle("hidden", active);
+            document.getElementById("selectCount").textContent = String(selectedContactsByKey.size || 0);
+        }
+
+        function clearSelectionHighlight(){
+            document.querySelectorAll(".chat-item.selected").forEach(row => row.classList.remove("selected"));
+        }
+
+        function setChatClearedLocally(item){
+            const row = item && typeof item === "object" ? item : {};
+            const targetId = String(row?.id || "").trim();
+            if(!targetId || !isUuid(currentUserId)) return;
+            localStorage.setItem(`chat_cleared_at:${currentUserId}:${targetId}`, String(Date.now()));
+            localStorage.removeItem(`deleted_for_me:${currentUserId}:${targetId}`);
+            const key = itemKey(row);
+            setLocalUnreadCountForKey(key, 0);
+            dbUnreadByKey.set(key, 0);
+        }
 
         function isUuid(value){
             return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
@@ -724,6 +822,26 @@
 
         async function fetchMyGroups(){
             const groupIds = new Set();
+            const byId = new Map();
+            const addGroupRows = (rows) => {
+                (rows || []).forEach(g => {
+                    const id = String(g?.id || g?.group_id || "").trim();
+                    if(!id) return;
+                    groupIds.add(id);
+                    byId.set(id, {
+                        id,
+                        name: String(g?.name || g?.group_name || byId.get(id)?.name || "Group").trim() || "Group",
+                        img: String(g?.icon_url || g?.group_icon || byId.get(id)?.img || "").trim(),
+                        isGroup: true,
+                        sortTs: Number(g?.updated_at || g?.created_at || byId.get(id)?.sortTs || 0) || 0
+                    });
+                });
+            };
+
+            manualGroups.forEach(group => {
+                addGroupRows([group]);
+            });
+
             try{
                 const memberAttempts = [
                     { field: "user_id", select: "group_id" },
@@ -744,9 +862,7 @@
                         if(groupIds.size) break;
                         continue;
                     }
-                    if(maybeMissingColumn(memberError)){
-                        continue;
-                    }
+                    if(maybeMissingColumn(memberError)) continue;
                     if(!maybeMissingResource(memberError, "group_members")){
                         console.error("group_members_fetch_failed", memberError);
                     }
@@ -755,14 +871,50 @@
             }catch(err){
                 console.error("group_members_fetch_exception", err);
             }
-            if(!groupIds.size) return [];
+
+            try{
+                const ownerFieldAttempts = ["created_by", "owner_id", "user_id", "admin_id"];
+                const ownerSelectAttempts = [
+                    "id,name,group_name,icon_url,group_icon,created_at,updated_at",
+                    "id,name,group_name,icon_url,group_icon,created_at",
+                    "id,name,group_name,icon_url,group_icon"
+                ];
+                for(const field of ownerFieldAttempts){
+                    let fetched = false;
+                    for(const fields of ownerSelectAttempts){
+                        const { data, error } = await supa
+                            .from("groups")
+                            .select(fields)
+                            .eq(field, currentUserId)
+                            .limit(300);
+                        if(error){
+                            if(maybeMissingColumn(error)) continue;
+                            if(!maybeMissingResource(error, "groups")){
+                                console.error("groups_owner_fetch_failed", error);
+                            }
+                            fetched = true;
+                            break;
+                        }
+                        addGroupRows(data || []);
+                        fetched = true;
+                        break;
+                    }
+                    if(fetched && groupIds.size) break;
+                }
+            }catch(err){
+                console.error("groups_owner_fetch_exception", err);
+            }
+
+            if(!groupIds.size){
+                return Array.from(byId.values());
+            }
 
             try{
                 const groupSelectAttempts = [
-                    "id,name,icon_url",
-                    "id,group_name,group_icon",
-                    "id,name,group_icon",
-                    "id,group_name,icon_url"
+                    "id,name,icon_url,created_at,updated_at",
+                    "id,group_name,group_icon,created_at,updated_at",
+                    "id,name,group_icon,created_at,updated_at",
+                    "id,group_name,icon_url,created_at,updated_at"
                 ];
                 for(const fields of groupSelectAttempts){
                     const { data: groups, error } = await supa
@@ -771,26 +923,24 @@
                         .in("id", Array.from(groupIds))
                         .limit(300);
                     if(error){
-                        if(maybeMissingColumn(error)){
-                            continue;
-                        }
+                        if(maybeMissingColumn(error)) continue;
                         if(!maybeMissingResource(error, "groups")){
                             console.error("groups_fetch_failed", error);
                         }
-                        return [];
+                        break;
                     }
-                    return (groups || []).map(g => ({
-                        id: String(g?.id || "").trim(),
-                        name: String(g?.name || g?.group_name || "Group").trim() || "Group",
-                        img: String(g?.icon_url || g?.group_icon || "").trim(),
-                        isGroup: true
-                    })).filter(g => g.id);
+                    addGroupRows(groups || []);
+                    break;
                 }
-                return [];
             }catch(err){
                 console.error("groups_fetch_exception", err);
-                return [];
             }
+
+            return Array.from(byId.values()).sort((a, b) => {
+                const diff = Number(b.sortTs || 0) - Number(a.sortTs || 0);
+                if(diff !== 0) return diff;
+                return String(a.name || "").localeCompare(String(b.name || ""));
+            });
         }
 
         async function fetchUnreadCountsFromDatabase(){
@@ -863,8 +1013,8 @@
         function renderChatRows(items){
             const list = document.getElementById("chatList");
             list.innerHTML = "";
-            const blocked = new Set(getStoredArray("blockedContacts"));
-            const hidden = new Set(getStoredArray("hiddenChats"));
+            const blocked = getStoredSet(BLOCKED_CONTACTS_KEY);
+            const hidden = getStoredSet(HIDDEN_CHATS_KEY);
 
             if(pendingReelShare){
                 const banner = document.createElement("div");
@@ -873,20 +1023,20 @@
                 list.appendChild(banner);
             }
 
-            const visibleItems = (items || []).filter(item => {
+            const visibleItems = [];
+            const hiddenItems = [];
+            (items || []).forEach(item => {
                 const key = itemKey(item);
-                return !blocked.has(key) && !hidden.has(key);
+                if(blocked.has(key)) return;
+                if(hidden.has(key)){
+                    hiddenItems.push(item);
+                }else{
+                    visibleItems.push(item);
+                }
             });
 
-            if(!visibleItems.length){
-                const empty = document.createElement("p");
-                empty.className = "text-center p-10 text-gray-400";
-                empty.textContent = "No chats found.";
-                list.appendChild(empty);
-                return;
-            }
-
-            visibleItems.forEach(item => {
+            const buildRow = (item, opts) => {
+                const options = opts || {};
                 const key = itemKey(item);
                 const localUnread = getLocalUnreadCountForKey(key);
                 const dbUnread = Number(dbUnreadByKey.get(key) || 0);
@@ -908,28 +1058,66 @@
                 const badge = isGroup ? `<span class="group-badge">Group</span>` : "";
 
                 const row = document.createElement("div");
-                row.className = "chat-item";
-                row.id = "chat-" + key.replace(/[^a-z0-9_-]/gi, "_");
+                row.className = `chat-item ${options.hidden ? "hidden-chat-item" : ""}`.trim();
+                row.id = rowIdForKey(key);
+                row.dataset.skipClick = "0";
                 row.innerHTML = `
                     ${avatarHTML}
                     <div class="flex-1 min-w-0">
                         <div class="flex justify-between items-center chat-title-line">
                             <span class="font-bold text-gray-800 truncate">${name}${badge}</span>
-                            <span class="text-xs text-gray-400 chat-time-label">Realtime</span>
+                            <span class="text-xs text-gray-400 chat-time-label">${options.hidden ? "Hidden" : "Realtime"}</span>
                         </div>
                         <div class="flex items-center">
-                            <div class="text-sm text-gray-500 truncate">${isGroup ? "Group chat" : "Tap to chat..."}</div>
+                            <div class="text-sm text-gray-500 truncate">${options.hidden ? "Hidden account" : (isGroup ? "Group chat" : "Tap to chat...")}</div>
                         </div>
                     </div>
                 `;
 
-                row.onmousedown = () => {
-                    pressTimer = setTimeout(() => startSelection(item), 600);
+                if(selectedContactsByKey.has(key)){
+                    row.classList.add("selected");
+                }
+
+                const clearPress = () => {
+                    if(selectionPressTimer){
+                        clearTimeout(selectionPressTimer);
+                        selectionPressTimer = null;
+                    }
                 };
-                row.onmouseup = () => clearTimeout(pressTimer);
-                row.onmouseleave = () => clearTimeout(pressTimer);
-                row.onclick = async () => {
-                    if(selectedContact) return;
+
+                row.addEventListener("pointerdown", (event) => {
+                    if(event.pointerType === "mouse" && event.button !== 0) return;
+                    if(isSelectionMode()) return;
+                    clearPress();
+                    selectionPressTimer = setTimeout(() => {
+                        row.dataset.skipClick = "1";
+                        startSelection(item);
+                    }, 560);
+                });
+                row.addEventListener("pointerup", clearPress);
+                row.addEventListener("pointercancel", clearPress);
+                row.addEventListener("pointerleave", clearPress);
+                row.addEventListener("contextmenu", (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    clearPress();
+                    row.dataset.skipClick = "1";
+                    startSelection(item);
+                });
+
+                row.addEventListener("click", async (event) => {
+                    event.stopPropagation();
+                    clearPress();
+                    if(row.dataset.skipClick === "1"){
+                        row.dataset.skipClick = "0";
+                        return;
+                    }
+
+                    if(isSelectionMode()){
+                        startSelection(item);
+                        return;
+                    }
+
                     setLocalUnreadCountForKey(key, 0);
                     dbUnreadByKey.set(key, 0);
 
@@ -958,10 +1146,33 @@
                     }
                     markDirectThreadRead(item.id).catch(() => {});
                     openChat(name, img, item.id);
-                };
+                });
 
-                list.appendChild(row);
+                return row;
+            };
+
+            visibleItems.forEach(item => {
+                list.appendChild(buildRow(item, { hidden: false }));
             });
+
+            if(hiddenItems.length){
+                const hiddenSection = document.createElement("section");
+                hiddenSection.className = "hidden-chat-section";
+                hiddenSection.innerHTML = `<div class="hidden-chat-title">Hidden Accounts</div>`;
+                hiddenItems.forEach(item => {
+                    hiddenSection.appendChild(buildRow(item, { hidden: true }));
+                });
+                list.appendChild(hiddenSection);
+            }
+
+            if(!visibleItems.length && !hiddenItems.length){
+                const empty = document.createElement("p");
+                empty.className = "text-center p-10 text-gray-400";
+                empty.textContent = "No chats found.";
+                list.appendChild(empty);
+            }
+
+            applySelectionUiState();
         }
 
         async function renderChats(){
@@ -977,37 +1188,43 @@
         }
 
         function startSelection(item){
-            selectedContact = item;
-            const key = itemKey(item);
-            const row = document.getElementById("chat-" + key.replace(/[^a-z0-9_-]/gi, "_"));
-            if(row) row.classList.add("selected");
-            document.getElementById("mainHeader").classList.add("header-selection");
-            document.getElementById("normalNav").classList.add("hidden");
-            document.getElementById("selectionNav").classList.remove("hidden");
-            document.getElementById("fabBtn").classList.add("hidden");
-            document.getElementById("selectCount").textContent = "1";
+            const row = item && typeof item === "object" ? item : null;
+            if(!row) return;
+            const key = itemKey(row);
+            if(!key) return;
+            if(!selectedContactsByKey.has(key)){
+                selectedContactsByKey.set(key, row);
+            }
+            const el = document.getElementById(rowIdForKey(key));
+            if(el) el.classList.add("selected");
+            applySelectionUiState();
         }
 
         function cancelSelection(){
-            if(selectedContact){
-                const key = itemKey(selectedContact);
-                const row = document.getElementById("chat-" + key.replace(/[^a-z0-9_-]/gi, "_"));
-                if(row) row.classList.remove("selected");
-            }
-            selectedContact = null;
-            document.getElementById("mainHeader").classList.remove("header-selection");
-            document.getElementById("normalNav").classList.remove("hidden");
-            document.getElementById("selectionNav").classList.add("hidden");
-            document.getElementById("fabBtn").classList.remove("hidden");
+            selectedContactsByKey.clear();
+            clearSelectionHighlight();
+            closeAllMenus();
+            applySelectionUiState();
         }
 
         function handleQuickAction(action){
-            if(!selectedContact) return;
-            const key = itemKey(selectedContact);
-            const listName = action === "block" ? "blockedContacts" : "hiddenChats";
-            const list = getStoredArray(listName);
-            if(!list.includes(key)) list.push(key);
-            localStorage.setItem(listName, JSON.stringify(list));
+            if(action === "cancel"){
+                cancelSelection();
+                return;
+            }
+            const selectedItems = Array.from(selectedContactsByKey.values());
+            if(!selectedItems.length) return;
+
+            if(action === "hide"){
+                const hidden = getStoredSet(HIDDEN_CHATS_KEY);
+                selectedItems.forEach(item => hidden.add(itemKey(item)));
+                saveStoredSet(HIDDEN_CHATS_KEY, hidden);
+            }
+
+            if(action === "deleteChat"){
+                selectedItems.forEach(item => setChatClearedLocally(item));
+            }
+
             cancelSelection();
             renderChatRows(chatCache);
         }
@@ -1036,7 +1253,7 @@
             if(adminOnly) adminOnly.checked = false;
             const iconPreview = document.getElementById("groupIconPreview");
             if(iconPreview){
-                iconPreview.innerHTML = '<span id="camPlaceholderText">ðŸ“·</span>';
+                iconPreview.innerHTML = '<span id="camPlaceholderText">CAM</span>';
             }
             document.querySelectorAll("[data-group-member-id]").forEach(box => {
                 box.checked = false;
@@ -1097,14 +1314,23 @@
                 { group_id: cleanGroupId, user_id: cleanUserId, user_name: name, user_avatar: avatar },
                 { group_id: cleanGroupId, user_id: cleanUserId, name, avatar_url: avatar, role, is_admin: isAdmin },
                 { group_id: cleanGroupId, user_id: cleanUserId, name, avatar_url: avatar, role },
-                { group_id: cleanGroupId, user_id: cleanUserId }
+                { group_id: cleanGroupId, user_id: cleanUserId },
+                { group_id: cleanGroupId, member_id: cleanUserId, member_name: name, member_avatar: avatar, role, is_admin: isAdmin },
+                { group_id: cleanGroupId, member_id: cleanUserId, member_name: name, member_avatar: avatar, role },
+                { group_id: cleanGroupId, member_id: cleanUserId, name, avatar_url: avatar, role, is_admin: isAdmin },
+                { group_id: cleanGroupId, member_id: cleanUserId, name, avatar_url: avatar, role },
+                { group_id: cleanGroupId, member_id: cleanUserId },
+                { group_id: cleanGroupId, user_uuid: cleanUserId, user_name: name, user_avatar: avatar, role, is_admin: isAdmin },
+                { group_id: cleanGroupId, user_uuid: cleanUserId, name, avatar_url: avatar, role, is_admin: isAdmin },
+                { group_id: cleanGroupId, user_uuid: cleanUserId }
             ];
 
             for(const candidate of candidates){
                 const { error } = await supa.from("group_members").insert(candidate);
                 if(!error) return true;
                 if(!maybeMissingColumn(error)){
-                    const duplicate = `${error?.message || ""}`.toLowerCase().includes("duplicate");
+                    const txt = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+                    const duplicate = txt.includes("duplicate") || String(error?.code || "") === "23505";
                     if(duplicate) return true;
                     return false;
                 }
@@ -1172,6 +1398,7 @@
                 });
             }
 
+            rememberManualGroup({ id: groupId, name: gName, img: selectedImgData });
             document.getElementById("groupStep1").style.display = "none";
             document.getElementById("groupStep2").style.display = "none";
             resetGroupDraft();
@@ -1277,6 +1504,11 @@
                     const key = `group:${groupId}`;
                     dbUnreadByKey.set(key, Number(dbUnreadByKey.get(key) || 0) + 1);
                     bumpLocalUnreadCountForKey(key, 1);
+                    const hidden = getStoredSet(HIDDEN_CHATS_KEY);
+                    if(hidden.has(key)){
+                        hidden.delete(key);
+                        saveStoredSet(HIDDEN_CHATS_KEY, hidden);
+                    }
                     renderChatRows(chatCache);
                     return;
                 }
@@ -1285,6 +1517,11 @@
                 const key = `user:${sender}`;
                 dbUnreadByKey.set(key, Number(dbUnreadByKey.get(key) || 0) + 1);
                 bumpLocalUnreadCountForKey(key, 1);
+                const hidden = getStoredSet(HIDDEN_CHATS_KEY);
+                if(hidden.has(key)){
+                    hidden.delete(key);
+                    saveStoredSet(HIDDEN_CHATS_KEY, hidden);
+                }
                 renderChatRows(chatCache);
             };
             realtimeListChannel = supa
@@ -1316,6 +1553,7 @@
                 return;
             }
             loadManualChatTargets();
+            loadManualGroups();
             pendingReelShare = loadPendingReelShare();
             if(await maybeRouteDirectChat()){
                 return;
@@ -1343,4 +1581,9 @@
     </script>
 </body>
 </html>
+
+
+
+
+
 
