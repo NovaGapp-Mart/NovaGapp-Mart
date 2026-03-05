@@ -19,9 +19,11 @@
         body { background-color: #fff; font-family: sans-serif; overflow-x: hidden; user-select: none; }
         .header { background: var(--nova-gradient); color: white; position: sticky; top: 0; z-index: 100; transition: 0.3s; }
         .header-selection { background: var(--selection-bg) !important; }
-        .chat-item { display: flex; align-items: center; padding: 12px 15px; border-bottom: 1px solid #f2f2f2; cursor: pointer; transition: 0.2s; position: relative; }
+        .chat-item { display: flex; align-items: center; gap: 12px; padding: 12px 15px; border-bottom: 1px solid #f2f2f2; cursor: pointer; transition: 0.2s; position: relative; min-height: 76px; }
         .chat-item.selected { background: #e9edef; }
+        .avatar-wrap { position: relative; flex-shrink: 0; }
         .avatar { width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; color: white; flex-shrink: 0; font-size: 20px; overflow: hidden; background-size: cover; background-position: center; border: 1px solid #eee; }
+        .avatar-unread-dot { position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: #ff6a00; color: #fff; border: 2px solid #fff; font-size: 10px; font-weight: 700; line-height: 1; display: flex; align-items: center; justify-content: center; }
         .full-screen-modal { position: fixed; inset: 0; background: white; z-index: 1000; display: none; flex-direction: column; }
         .step-header { background: var(--nova-gradient); color: white; padding: 16px; display: flex; align-items: center; gap: 15px; }
         
@@ -32,7 +34,22 @@
         .fab { position: fixed; bottom: 25px; right: 25px; width: 60px; height: 60px; background: #ff6a00; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 15px rgba(0,0,0,0.3); z-index: 90; cursor: pointer; }
 
         .group-badge { background: #ff6a00; color: white; font-size: 9px; padding: 2px 5px; border-radius: 4px; margin-left: 5px; vertical-align: middle; text-transform: uppercase; }
-        .unread-badge { background: #ff6a00; color: white; font-size: 11px; min-width: 20px; height: 20px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: bold; margin-top: 5px; }
+        .pending-share-banner { margin: 10px 14px 0; padding: 10px 12px; border: 1px solid #ffd3b4; border-radius: 12px; background: #fff7f1; color: #8a4d12; font-size: 12px; line-height: 1.35; }
+        .pending-share-banner strong { color: #7a3700; }
+
+        @media (max-width: 640px) {
+            .chat-item { padding: 10px 12px; min-height: 68px; gap: 10px; }
+            .avatar { width: 46px; height: 46px; font-size: 18px; }
+            .avatar-unread-dot { min-width: 16px; height: 16px; font-size: 9px; padding: 0 3px; }
+            .fab { width: 56px; height: 56px; bottom: 18px; right: 16px; }
+        }
+
+        @media (min-width: 768px) {
+            body { background: #f4f4f4; }
+            .header, #chatList, .full-screen-modal { width: min(100%, 860px); margin: 0 auto; }
+            #chatList { background: #fff; min-height: calc(100dvh - 128px); box-shadow: 0 14px 38px rgba(0,0,0,0.08); }
+            .fab { right: max(28px, calc((100vw - 860px) / 2 + 18px)); }
+        }
 
         .switch { position: relative; display: inline-block; width: 45px; height: 24px; }
         .switch input { opacity: 0; width: 0; height: 0; }
@@ -132,8 +149,11 @@
         let realtimeListChannel = null;
         let chatCache = [];
         let dbUnreadByKey = new Map();
+        let selectedGroupMemberIds = new Set();
+        let pendingReelShare = null;
         const manualChatTargets = new Map();
         const MANUAL_TARGET_KEY_PREFIX = "manual_chat_targets:";
+        const PENDING_REEL_SHARE_KEY = "nova_pending_reel_share";
 
         function isUuid(value){
             return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
@@ -168,6 +188,121 @@
 
         function itemKey(item){
             return item?.isGroup ? `group:${item.id}` : `user:${item.id}`;
+        }
+
+        function unseenStorageKeyForItemKey(key){
+            return "unseen_" + String(key || "").replace(/[^a-z0-9_-]/gi, "_");
+        }
+
+        function getLocalUnreadCountForKey(key){
+            const storageKey = unseenStorageKeyForItemKey(key);
+            return parseInt(localStorage.getItem(storageKey) || "0", 10) || 0;
+        }
+
+        function setLocalUnreadCountForKey(key, count){
+            const storageKey = unseenStorageKeyForItemKey(key);
+            const next = Math.max(0, Number(count) || 0);
+            localStorage.setItem(storageKey, String(next));
+            return next;
+        }
+
+        function bumpLocalUnreadCountForKey(key, delta){
+            const next = getLocalUnreadCountForKey(key) + (Number(delta) || 0);
+            return setLocalUnreadCountForKey(key, next);
+        }
+
+        function truncateText(value, maxLen){
+            const text = String(value || "").trim();
+            const limit = Math.max(1, Number(maxLen) || 0);
+            if(!limit || text.length <= limit) return text;
+            return text.slice(0, limit).trim() + "...";
+        }
+
+        function normalizePendingReelShare(raw){
+            const row = raw && typeof raw === "object" ? raw : {};
+            const url = String(row.url || "").trim();
+            if(!url) return null;
+            const createdAt = Number(row.created_at || row.createdAt || Date.now()) || Date.now();
+            if(Date.now() - createdAt > (45 * 60 * 1000)) return null;
+            return {
+                title: truncateText(row.title || "Reel", 160) || "Reel",
+                url,
+                reelId: String(row.reel_id || row.reelId || "").trim(),
+                created_at: createdAt
+            };
+        }
+
+        function loadPendingReelShare(){
+            try{
+                const raw = localStorage.getItem(PENDING_REEL_SHARE_KEY);
+                if(!raw) return null;
+                const parsed = JSON.parse(raw);
+                const normalized = normalizePendingReelShare(parsed);
+                if(!normalized){
+                    localStorage.removeItem(PENDING_REEL_SHARE_KEY);
+                    return null;
+                }
+                return normalized;
+            }catch(_){
+                return null;
+            }
+        }
+
+        function clearPendingReelShare(){
+            pendingReelShare = null;
+            try{
+                localStorage.removeItem(PENDING_REEL_SHARE_KEY);
+            }catch(_){ }
+        }
+
+        function buildPendingReelMessage(payload){
+            const share = payload && typeof payload === "object" ? payload : {};
+            const title = truncateText(share.title || "Reel", 160) || "Reel";
+            const url = String(share.url || "").trim();
+            if(!url) return "";
+            return `Reel: ${title}\n${url}`;
+        }
+
+        async function sendPendingReelShareToChat(item){
+            if(!pendingReelShare) return true;
+            const row = item && typeof item === "object" ? item : {};
+            const targetId = String(row.id || "").trim();
+            const isGroup = !!row.isGroup;
+            if(!targetId) return false;
+            const messageText = buildPendingReelMessage(pendingReelShare);
+            if(!messageText) return false;
+
+            let sent = false;
+            try{
+                const base = isGroup
+                    ? { sender_id: currentUserId, group_id: targetId, content: messageText }
+                    : { sender_id: currentUserId, receiver_id: targetId, content: messageText };
+                const candidates = [
+                    { ...base, message_type: "reel", reel_url: pendingReelShare.url, is_read: false },
+                    { ...base, message_type: "text", is_read: false },
+                    { ...base, is_read: false },
+                    base
+                ];
+                for(const candidate of candidates){
+                    const { error } = await supa.from("messages").insert(candidate);
+                    if(!error){
+                        sent = true;
+                        break;
+                    }
+                    const missingSchema = maybeMissingColumn(error) || maybeMissingResource(error, "messages");
+                    if(!missingSchema){
+                        break;
+                    }
+                }
+            }catch(_){ }
+
+            if(!sent && !isGroup && window.NOVA && typeof window.NOVA.sendChatMessage === "function"){
+                try{
+                    const res = await window.NOVA.sendChatMessage(targetId, messageText);
+                    sent = !!res?.ok;
+                }catch(_){ }
+            }
+            return sent;
         }
 
         function getStoredArray(key){
@@ -432,18 +567,32 @@
         async function fetchMyGroups(){
             const groupIds = new Set();
             try{
-                const { data: memberRows, error: memberError } = await supa
-                    .from("group_members")
-                    .select("group_id")
-                    .eq("user_id", currentUserId)
-                    .limit(1000);
-                if(!memberError){
-                    (memberRows || []).forEach(row => {
-                        const id = String(row?.group_id || "").trim();
-                        if(id) groupIds.add(id);
-                    });
-                }else if(!maybeMissingResource(memberError, "group_members")){
-                    console.error("group_members_fetch_failed", memberError);
+                const memberAttempts = [
+                    { field: "user_id", select: "group_id" },
+                    { field: "member_id", select: "group_id" },
+                    { field: "user_uuid", select: "group_id" }
+                ];
+                for(const attempt of memberAttempts){
+                    const { data: memberRows, error: memberError } = await supa
+                        .from("group_members")
+                        .select(attempt.select)
+                        .eq(attempt.field, currentUserId)
+                        .limit(1000);
+                    if(!memberError){
+                        (memberRows || []).forEach(row => {
+                            const id = String(row?.group_id || "").trim();
+                            if(id) groupIds.add(id);
+                        });
+                        if(groupIds.size) break;
+                        continue;
+                    }
+                    if(maybeMissingColumn(memberError)){
+                        continue;
+                    }
+                    if(!maybeMissingResource(memberError, "group_members")){
+                        console.error("group_members_fetch_failed", memberError);
+                    }
+                    break;
                 }
             }catch(err){
                 console.error("group_members_fetch_exception", err);
@@ -451,23 +600,35 @@
             if(!groupIds.size) return [];
 
             try{
-                const { data: groups, error } = await supa
-                    .from("groups")
-                    .select("id,name,icon_url")
-                    .in("id", Array.from(groupIds))
-                    .limit(300);
-                if(error){
-                    if(!maybeMissingResource(error, "groups")){
-                        console.error("groups_fetch_failed", error);
+                const groupSelectAttempts = [
+                    "id,name,icon_url",
+                    "id,group_name,group_icon",
+                    "id,name,group_icon",
+                    "id,group_name,icon_url"
+                ];
+                for(const fields of groupSelectAttempts){
+                    const { data: groups, error } = await supa
+                        .from("groups")
+                        .select(fields)
+                        .in("id", Array.from(groupIds))
+                        .limit(300);
+                    if(error){
+                        if(maybeMissingColumn(error)){
+                            continue;
+                        }
+                        if(!maybeMissingResource(error, "groups")){
+                            console.error("groups_fetch_failed", error);
+                        }
+                        return [];
                     }
-                    return [];
+                    return (groups || []).map(g => ({
+                        id: String(g?.id || "").trim(),
+                        name: String(g?.name || g?.group_name || "Group").trim() || "Group",
+                        img: String(g?.icon_url || g?.group_icon || "").trim(),
+                        isGroup: true
+                    })).filter(g => g.id);
                 }
-                return (groups || []).map(g => ({
-                    id: String(g?.id || "").trim(),
-                    name: String(g?.name || "Group").trim() || "Group",
-                    img: String(g?.icon_url || "").trim(),
-                    isGroup: true
-                })).filter(g => g.id);
+                return [];
             }catch(err){
                 console.error("groups_fetch_exception", err);
                 return [];
@@ -547,24 +708,45 @@
             const blocked = new Set(getStoredArray("blockedContacts"));
             const hidden = new Set(getStoredArray("hiddenChats"));
 
+            if(pendingReelShare){
+                const banner = document.createElement("div");
+                banner.className = "pending-share-banner";
+                banner.innerHTML = `<strong>Send to Friend enabled:</strong> Kisi bhi chat par tap karke reel link bhej do.`;
+                list.appendChild(banner);
+            }
+
             const visibleItems = (items || []).filter(item => {
                 const key = itemKey(item);
                 return !blocked.has(key) && !hidden.has(key);
             });
 
+            if(!visibleItems.length){
+                const empty = document.createElement("p");
+                empty.className = "text-center p-10 text-gray-400";
+                empty.textContent = "No chats found.";
+                list.appendChild(empty);
+                return;
+            }
+
             visibleItems.forEach(item => {
                 const key = itemKey(item);
-                const unseenKey = "unseen_" + key.replace(/[^a-z0-9_-]/gi, "_");
-                const localUnread = parseInt(localStorage.getItem(unseenKey) || "0", 10) || 0;
+                const localUnread = getLocalUnreadCountForKey(key);
                 const dbUnread = Number(dbUnreadByKey.get(key) || 0);
                 const unreadCount = Math.max(localUnread, dbUnread);
                 const name = String(item.name || "User");
                 const img = String(item.img || "");
                 const isGroup = !!item.isGroup;
+                const unreadLabel = unreadCount > 99 ? "99+" : String(unreadCount);
 
-                const avatarHTML = img
+                const avatarCore = img
                     ? `<div class="avatar" style="background-image:url('${img.replace(/'/g, "%27")}')"></div>`
                     : `<div class="avatar" style="background-color:#ff6a00">${name[0] || "U"}</div>`;
+                const avatarHTML = `
+                    <div class="avatar-wrap">
+                        ${avatarCore}
+                        ${unreadCount > 0 ? `<span class="avatar-unread-dot">${unreadLabel}</span>` : ""}
+                    </div>
+                `;
                 const badge = isGroup ? `<span class="group-badge">Group</span>` : "";
 
                 const row = document.createElement("div");
@@ -572,14 +754,13 @@
                 row.id = "chat-" + key.replace(/[^a-z0-9_-]/gi, "_");
                 row.innerHTML = `
                     ${avatarHTML}
-                    <div class="ml-4 flex-1">
+                    <div class="flex-1 min-w-0">
                         <div class="flex justify-between items-center">
-                            <span class="font-bold text-gray-800">${name}${badge}</span>
+                            <span class="font-bold text-gray-800 truncate">${name}${badge}</span>
                             <span class="text-xs text-gray-400">Realtime</span>
                         </div>
-                        <div class="flex justify-between items-center">
-                            <div class="text-sm text-gray-500 truncate w-4/5">${isGroup ? "Group chat" : "Tap to chat..."}</div>
-                            ${unreadCount > 0 ? `<div class="unread-badge">${unreadCount}</div>` : ""}
+                        <div class="flex items-center">
+                            <div class="text-sm text-gray-500 truncate">${isGroup ? "Group chat" : "Tap to chat..."}</div>
                         </div>
                     </div>
                 `;
@@ -589,9 +770,22 @@
                 };
                 row.onmouseup = () => clearTimeout(pressTimer);
                 row.onmouseleave = () => clearTimeout(pressTimer);
-                row.onclick = () => {
+                row.onclick = async () => {
                     if(selectedContact) return;
-                    localStorage.setItem(unseenKey, "0");
+                    setLocalUnreadCountForKey(key, 0);
+                    dbUnreadByKey.set(key, 0);
+
+                    if(pendingReelShare){
+                        row.style.pointerEvents = "none";
+                        const sent = await sendPendingReelShareToChat(item);
+                        row.style.pointerEvents = "";
+                        if(!sent){
+                            alert("Reel link send nahi ho paya. Dubara try karein.");
+                            return;
+                        }
+                        clearPendingReelShare();
+                    }
+
                     if(isGroup){
                         location.href = buildOpenChatUrl(item.id, {
                             name: name || "Group",
@@ -604,7 +798,6 @@
                         alert("Invalid user id.");
                         return;
                     }
-                    dbUnreadByKey.set(key, 0);
                     markDirectThreadRead(item.id).catch(() => {});
                     openChat(name, img, item.id);
                 };
@@ -672,23 +865,158 @@
             }
         }
 
+        function resetGroupDraft(){
+            selectedImgData = "";
+            selectedGroupMemberIds = new Set();
+            const iconInput = document.getElementById("groupIconInput");
+            if(iconInput) iconInput.value = "";
+            const nameInp = document.getElementById("groupNameInp");
+            if(nameInp) nameInp.value = "";
+            const sloganInp = document.getElementById("groupSloganInp");
+            if(sloganInp) sloganInp.value = "";
+            const adminOnly = document.getElementById("adminOnlyCheck");
+            if(adminOnly) adminOnly.checked = false;
+            const iconPreview = document.getElementById("groupIconPreview");
+            if(iconPreview){
+                iconPreview.innerHTML = '<span id="camPlaceholderText">📷</span>';
+            }
+            document.querySelectorAll("[data-group-member-id]").forEach(box => {
+                box.checked = false;
+            });
+        }
+
+        async function insertGroupWithFallback(payload){
+            const row = payload && typeof payload === "object" ? payload : {};
+            const cleanName = String(row.name || row.group_name || "").trim();
+            const cleanIcon = String(row.icon_url || row.group_icon || "").trim();
+            const cleanSlogan = String(row.slogan || "").trim();
+            const adminOnly = !!row.is_admin_only;
+            const payloadBases = [
+                { name: cleanName, group_name: cleanName, icon_url: cleanIcon, group_icon: cleanIcon, slogan: cleanSlogan, is_admin_only: adminOnly },
+                { name: cleanName, icon_url: cleanIcon, slogan: cleanSlogan, is_admin_only: adminOnly },
+                { name: cleanName, icon_url: cleanIcon },
+                { group_name: cleanName, group_icon: cleanIcon, slogan: cleanSlogan, is_admin_only: adminOnly },
+                { group_name: cleanName, group_icon: cleanIcon }
+            ];
+            const candidates = [];
+            payloadBases.forEach(base => {
+                candidates.push({ ...base, created_by: currentUserId, owner_id: currentUserId });
+                candidates.push({ ...base, created_by: currentUserId });
+                candidates.push({ ...base, owner_id: currentUserId });
+                candidates.push({ ...base });
+            });
+            for(const candidate of candidates){
+                const { data, error } = await supa
+                    .from("groups")
+                    .insert(candidate)
+                    .select("id,name,group_name,icon_url,group_icon")
+                    .maybeSingle();
+                if(!error){
+                    return {
+                        ok: true,
+                        data: data || null
+                    };
+                }
+                if(!maybeMissingColumn(error)){
+                    return { ok: false, error };
+                }
+            }
+            return { ok: false, error: new Error("group_insert_failed") };
+        }
+
+        async function insertGroupMemberCompat(groupId, member){
+            const cleanGroupId = String(groupId || "").trim();
+            const cleanUserId = String(member?.user_id || "").trim();
+            if(!cleanGroupId || !cleanUserId) return false;
+            const name = String(member?.user_name || "Member").trim() || "Member";
+            const avatar = String(member?.user_avatar || "").trim();
+            const role = String(member?.role || "member").trim() || "member";
+            const isAdmin = role.toLowerCase() === "admin";
+
+            const candidates = [
+                { group_id: cleanGroupId, user_id: cleanUserId, user_name: name, user_avatar: avatar, role, is_admin: isAdmin },
+                { group_id: cleanGroupId, user_id: cleanUserId, user_name: name, user_avatar: avatar, role },
+                { group_id: cleanGroupId, user_id: cleanUserId, user_name: name, user_avatar: avatar },
+                { group_id: cleanGroupId, user_id: cleanUserId, name, avatar_url: avatar, role, is_admin: isAdmin },
+                { group_id: cleanGroupId, user_id: cleanUserId, name, avatar_url: avatar, role },
+                { group_id: cleanGroupId, user_id: cleanUserId }
+            ];
+
+            for(const candidate of candidates){
+                const { error } = await supa.from("group_members").insert(candidate);
+                if(!error) return true;
+                if(!maybeMissingColumn(error)){
+                    const duplicate = `${error?.message || ""}`.toLowerCase().includes("duplicate");
+                    if(duplicate) return true;
+                    return false;
+                }
+            }
+            return false;
+        }
+
         async function finishGroupCreation(){
             const gName = document.getElementById("groupNameInp").value.trim();
             const gSlogan = document.getElementById("groupSloganInp").value.trim();
             const isAdminOnly = document.getElementById("adminOnlyCheck").checked;
             if(!gName) return alert("Please enter Group Name!");
-            const { error } = await supa.from("groups").insert([{
+
+            const membersToAdd = Array.from(new Set([currentUserId, ...Array.from(selectedGroupMemberIds)]))
+                .filter(id => isUuid(id));
+            if(!membersToAdd.length){
+                return alert("Please select at least one member.");
+            }
+
+            const basePayload = {
                 name: gName,
+                group_name: gName,
                 slogan: gSlogan,
                 is_admin_only: isAdminOnly,
-                icon_url: selectedImgData
-            }]);
-            if(error){
+                icon_url: selectedImgData,
+                group_icon: selectedImgData
+            };
+            const groupRes = await insertGroupWithFallback(basePayload);
+            if(!groupRes.ok){
                 alert("Error creating group on backend");
                 return;
             }
+            const groupId = String(groupRes?.data?.id || "").trim();
+            if(!groupId){
+                alert("Group created but id missing.");
+                return;
+            }
+
+            const profileRows = await fetchUsersByIds(membersToAdd);
+            const profileById = new Map();
+            (profileRows || []).forEach(profile => {
+                const uid = String(profile?.user_id || "").trim();
+                if(uid) profileById.set(uid, profile);
+            });
+
+            const ownerName = displayName(currentUser || {}) || "You";
+            const ownerPhoto = avatarUrl(currentUser || {}) || "";
+            const ownerAdded = await insertGroupMemberCompat(groupId, {
+                user_id: currentUserId,
+                user_name: ownerName,
+                user_avatar: ownerPhoto,
+                role: "admin"
+            });
+            if(!ownerAdded){
+                alert("Group created but owner member add failed.");
+            }
+            for(const memberId of membersToAdd){
+                if(memberId === currentUserId) continue;
+                const profile = profileById.get(memberId) || {};
+                await insertGroupMemberCompat(groupId, {
+                    user_id: memberId,
+                    user_name: displayName(profile),
+                    user_avatar: avatarUrl(profile),
+                    role: "member"
+                });
+            }
+
             document.getElementById("groupStep1").style.display = "none";
             document.getElementById("groupStep2").style.display = "none";
+            resetGroupDraft();
             await renderChats();
         }
 
@@ -715,6 +1043,7 @@
         }
 
         function startGroupCreation(){
+            resetGroupDraft();
             document.getElementById("groupStep1").style.display = "flex";
             loadSelectionContacts().catch(() => {});
         }
@@ -722,22 +1051,47 @@
         async function loadSelectionContacts(){
             const selList = document.getElementById("contactSelectionList");
             selList.innerHTML = "<p class='p-4'>Loading contacts...</p>";
+            selectedGroupMemberIds = new Set();
             const rows = await fetchPrivateUserRows();
             selList.innerHTML = "";
             rows.forEach(row => {
+                const userId = String(row?.id || "").trim();
+                if(!isUuid(userId) || userId === currentUserId) return;
                 const name = String(row?.name || "User");
                 const img = String(row?.img || "");
                 selList.innerHTML += `
                 <div class="flex items-center p-4 border-b">
-                    <input type="checkbox" class="w-5 h-5 mr-4 accent-orange-600">
+                    <input type="checkbox" data-group-member-id="${userId}" class="w-5 h-5 mr-4 accent-orange-600">
                     <div class="avatar w-10 h-10 text-sm" style="background-image:url('${(img || "").replace(/'/g, "%27")}');background-color:#ff6a00">${img ? "" : (name[0] || "U")}</div>
                     <span class="ml-4 font-bold">${name}</span>
                 </div>`;
             });
+            selList.querySelectorAll("[data-group-member-id]").forEach(box => {
+                box.addEventListener("change", (event) => {
+                    const id = String(event?.target?.getAttribute("data-group-member-id") || "").trim();
+                    if(!isUuid(id)) return;
+                    if(event.target.checked){
+                        selectedGroupMemberIds.add(id);
+                    }else{
+                        selectedGroupMemberIds.delete(id);
+                    }
+                });
+            });
         }
 
-        function openGroupDetails(){ document.getElementById("groupStep2").style.display = "flex"; }
-        function closeGroupModal(){ document.getElementById("groupStep1").style.display = "none"; }
+        function openGroupDetails(){
+            if(selectedGroupMemberIds.size < 1){
+                alert("Please select at least one member.");
+                return;
+            }
+            document.getElementById("groupStep2").style.display = "flex";
+        }
+
+        function closeGroupModal(){
+            document.getElementById("groupStep1").style.display = "none";
+            document.getElementById("groupStep2").style.display = "none";
+            resetGroupDraft();
+        }
         function clearAllData(){ if(confirm("Clear local cache?")){ localStorage.clear(); location.reload(); } }
         function toggleSearch(){ document.getElementById("searchBox").classList.toggle("hidden"); }
 
@@ -758,9 +1112,21 @@
             const bumpUnreadFromMessage = (row) => {
                 const receiver = String(row?.receiver_id || "").trim();
                 const sender = String(row?.sender_id || "").trim();
+                const groupId = String(row?.group_id || "").trim();
+
+                if(groupId){
+                    if(sender === currentUserId) return;
+                    const key = `group:${groupId}`;
+                    dbUnreadByKey.set(key, Number(dbUnreadByKey.get(key) || 0) + 1);
+                    bumpLocalUnreadCountForKey(key, 1);
+                    renderChatRows(chatCache);
+                    return;
+                }
+
                 if(receiver !== currentUserId || !isUuid(sender) || sender === currentUserId) return;
                 const key = `user:${sender}`;
                 dbUnreadByKey.set(key, Number(dbUnreadByKey.get(key) || 0) + 1);
+                bumpLocalUnreadCountForKey(key, 1);
                 renderChatRows(chatCache);
             };
             realtimeListChannel = supa
@@ -792,6 +1158,7 @@
                 return;
             }
             loadManualChatTargets();
+            pendingReelShare = loadPendingReelShare();
             if(await maybeRouteDirectChat()){
                 return;
             }

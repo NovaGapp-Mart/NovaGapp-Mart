@@ -28,6 +28,12 @@
   const infoMeta = document.getElementById("infoMeta");
   const groupMembersSection = document.getElementById("groupMembersSection");
   const groupMembersList = document.getElementById("groupMembersList");
+  const infoTabMedia = document.getElementById("infoTabMedia");
+  const infoTabChatting = document.getElementById("infoTabChatting");
+  const infoMediaPanel = document.getElementById("infoMediaPanel");
+  const infoChattingPanel = document.getElementById("infoChattingPanel");
+  const infoMediaStrip = document.getElementById("infoMediaStrip");
+  const infoChattingStrip = document.getElementById("infoChattingStrip");
   const mediaPreviewModal = document.getElementById("mediaPreviewModal");
   const mediaPreviewImage = document.getElementById("mediaPreviewImage");
   const mediaPreviewVideo = document.getElementById("mediaPreviewVideo");
@@ -77,6 +83,7 @@
   let groupInfo = null;
   let groupMembers = [];
   let groupOwnerId = "";
+  let activeInfoTab = "media";
   let noticeTimer = null;
   const URL_PATTERN = /(https?:\/\/[^\s]+)/ig;
 
@@ -145,8 +152,10 @@
     const ownerId = String(ownerHint || groupOwnerId || "").trim();
     if(!cleanGroupId) return [];
     const selections = [
-      "group_id,user_id,user_name,user_avatar,role",
-      "group_id,user_id,user_name,user_avatar"
+      "group_id,user_id,user_name,user_avatar,role,member_role,user_role,name,avatar_url,is_admin",
+      "group_id,user_id,user_name,user_avatar,role,is_admin",
+      "group_id,user_id,name,avatar_url,member_role,is_admin",
+      "group_id,user_id"
     ];
     for(const fields of selections){
       try{
@@ -162,10 +171,12 @@
         return (data || []).map((row, index) => {
           const userId = String(row?.user_id || `member_${index}`).trim();
           const admin = isMemberAdmin(row, ownerId);
+          const displayName = String(row?.user_name || row?.name || row?.member_name || "Member").trim() || "Member";
+          const avatar = String(row?.user_avatar || row?.avatar_url || row?.member_avatar || "").trim();
           return {
             user_id: userId,
-            display_name: String(row?.user_name || "Member").trim() || "Member",
-            photo: String(row?.user_avatar || "").trim(),
+            display_name: displayName,
+            photo: avatar,
             role: parseRoleText(row),
             is_admin: admin
           };
@@ -179,8 +190,9 @@
     const cleanGroupId = String(groupId || receiverId || "").trim();
     let groupRow = null;
     const selections = [
-      "id,name,icon_url,created_by,owner_id,user_id,admin_id",
-      "id,name,icon_url,created_by",
+      "id,name,group_name,icon_url,group_icon,created_by,owner_id,user_id,admin_id",
+      "id,name,group_name,icon_url,group_icon,created_by",
+      "id,name,group_name,icon_url,group_icon",
       "id,name,icon_url"
     ];
     for(const fields of selections){
@@ -210,8 +222,8 @@
     }
     return {
       id: resolvedGroupId,
-      name: String(groupRow?.name || receiverNameParam || "Group").trim() || "Group",
-      icon_url: String(groupRow?.icon_url || receiverPicParam || "").trim(),
+      name: String(groupRow?.name || groupRow?.group_name || receiverNameParam || "Group").trim() || "Group",
+      icon_url: String(groupRow?.icon_url || groupRow?.group_icon || receiverPicParam || "").trim(),
       member_count: normalizeMemberCount(members.length),
       members
     };
@@ -676,6 +688,116 @@
     });
   }
 
+  function collectInfoMediaEntries(){
+    const rows = [...messageRows]
+      .filter(row => !shouldHideRow(row))
+      .sort((a, b) => toEpoch(b?.created_at) - toEpoch(a?.created_at));
+    const out = [];
+    const seen = new Set();
+    rows.forEach((row) => {
+      const messageId = getMessageId(row) || `${row?.created_at || ""}_${row?.sender_id || ""}`;
+      const attachments = getAttachmentUrls(row);
+      attachments.forEach((url, index) => {
+        const clean = String(url || "").trim();
+        if(!clean) return;
+        if(seen.has(clean)) return;
+        seen.add(clean);
+        out.push({
+          id: `${messageId}_${index}`,
+          url: clean,
+          type: isVideoUrl(clean) ? "video" : "image"
+        });
+      });
+    });
+    return out.slice(0, 60);
+  }
+
+  function collectInfoChattingEntries(){
+    const rows = [...messageRows]
+      .filter(row => !shouldHideRow(row))
+      .sort((a, b) => toEpoch(b?.created_at) - toEpoch(a?.created_at));
+    const out = [];
+    rows.forEach(row => {
+      const text = getMessageTextForPreview(row);
+      if(!text) return;
+      out.push(text);
+    });
+    return out.slice(0, 40);
+  }
+
+  function renderInfoMediaStrip(){
+    if(!infoMediaStrip) return;
+    infoMediaStrip.innerHTML = "";
+    const media = collectInfoMediaEntries();
+    if(!media.length){
+      infoMediaStrip.innerHTML = "<div class='info-empty'>No media shared yet.</div>";
+      return;
+    }
+    media.forEach(entry => {
+      const tile = document.createElement("button");
+      tile.type = "button";
+      tile.className = "info-media-tile";
+      tile.addEventListener("click", () => {
+        openMediaPreview(entry.url, entry.type);
+      });
+      if(entry.type === "video"){
+        const video = document.createElement("video");
+        video.src = entry.url;
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = "metadata";
+        tile.appendChild(video);
+        const badge = document.createElement("span");
+        badge.className = "info-media-video-badge";
+        badge.textContent = "Video";
+        tile.appendChild(badge);
+      }else{
+        const img = document.createElement("img");
+        img.src = entry.url;
+        img.alt = "media";
+        img.loading = "lazy";
+        tile.appendChild(img);
+      }
+      infoMediaStrip.appendChild(tile);
+    });
+  }
+
+  function renderInfoChattingStrip(){
+    if(!infoChattingStrip) return;
+    infoChattingStrip.innerHTML = "";
+    const snippets = collectInfoChattingEntries();
+    if(!snippets.length){
+      infoChattingStrip.innerHTML = "<div class='info-empty'>No chats yet.</div>";
+      return;
+    }
+    snippets.forEach(text => {
+      const chip = document.createElement("div");
+      chip.className = "info-chat-chip";
+      chip.textContent = text.length > 180 ? `${text.slice(0, 177)}...` : text;
+      infoChattingStrip.appendChild(chip);
+    });
+  }
+
+  function applyInfoTabUi(){
+    if(!infoTabMedia || !infoTabChatting || !infoMediaPanel || !infoChattingPanel) return;
+    const showMedia = activeInfoTab !== "chatting";
+    infoTabMedia.classList.toggle("active", showMedia);
+    infoTabChatting.classList.toggle("active", !showMedia);
+    infoMediaPanel.classList.toggle("show", showMedia);
+    infoChattingPanel.classList.toggle("show", !showMedia);
+  }
+
+  function switchInfoTab(tabName){
+    activeInfoTab = String(tabName || "media").toLowerCase() === "chatting" ? "chatting" : "media";
+    applyInfoTabUi();
+  }
+
+  function renderInfoPanels(){
+    renderInfoMediaStrip();
+    renderInfoChattingStrip();
+    applyInfoTabUi();
+  }
+
   function renderPeerHeader(){
     const name = isGroupChat
       ? String(groupInfo?.name || receiverNameParam || "Group").trim() || "Group"
@@ -923,9 +1045,11 @@
       .sort((a, b) => toEpoch(a?.created_at) - toEpoch(b?.created_at));
     if(!rows.length){
       msgHolder.innerHTML = "<p class='text-center text-xs text-gray-400'>No messages.</p>";
+      renderInfoPanels();
       return;
     }
     rows.forEach(row => msgHolder.appendChild(buildMessageBubble(row)));
+    renderInfoPanels();
   }
 
   function addMessageRow(row){
@@ -1881,8 +2005,13 @@
 
   function openProfile(){
     closeHeaderMenu();
-    const name = getDisplayName(peerProfile, receiverNameParam || "User");
-    setAvatar(document.getElementById("infoPic"), getProfilePhoto(peerProfile, receiverPicParam), name);
+    const name = isGroupChat
+      ? String(groupInfo?.name || receiverNameParam || "Group").trim() || "Group"
+      : getDisplayName(peerProfile, receiverNameParam || "User");
+    const photo = isGroupChat
+      ? String(groupInfo?.icon_url || receiverPicParam || "").trim()
+      : getProfilePhoto(peerProfile, receiverPicParam);
+    setAvatar(document.getElementById("infoPic"), photo, name);
     document.getElementById("infoName").textContent = name;
     if(isGroupChat){
       const count = normalizeMemberCount(groupInfo?.member_count || groupMembers.length);
@@ -1892,6 +2021,7 @@
       if(infoMeta) infoMeta.textContent = "Real-time verified account";
       renderGroupMembers();
     }
+    renderInfoPanels();
     document.getElementById("profileOverlay").style.display = "flex";
   }
 
@@ -2160,6 +2290,7 @@
   window.handleMediaUpload = handleMediaUpload;
   window.openProfile = openProfile;
   window.closeProfile = closeProfile;
+  window.switchInfoTab = switchInfoTab;
   window.confirmAction = confirmAction;
   window.handleBackNavigation = handleBackNavigation;
   window.toggleHeaderMenu = toggleHeaderMenu;

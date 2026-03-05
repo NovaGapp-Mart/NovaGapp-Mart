@@ -226,9 +226,10 @@ body{background:#000;color:#fff;height:100dvh;overflow:hidden}
 .comments-panel,
 .share-sheet,
 .shop-sheet{
-  position:fixed;left:0;right:0;bottom:-80vh;
+  position:fixed;left:50%;transform:translateX(-50%);bottom:-80vh;
+  width:min(100%, 680px);
   background:#fff;color:#111;border-radius:16px 16px 0 0;
-  max-height:70vh;display:flex;flex-direction:column;
+  max-height:78vh;display:flex;flex-direction:column;
   z-index:80;transition:0.25s;
 }
 .comments-panel.show,
@@ -339,7 +340,7 @@ body{background:#000;color:#fff;height:100dvh;overflow:hidden}
   border:1px dashed #ddd;border-radius:10px;padding:10px;font-size:12px;color:#666;text-align:center
 }
 .share-chat-item{
-  display:flex;align-items:center;gap:10px;border:1px solid #eee;border-radius:10px;padding:8px
+  display:flex;align-items:center;gap:10px;border:1px solid #eee;border-radius:10px;padding:8px;cursor:pointer
 }
 .share-chat-item img,.share-chat-avatar{
   width:34px;height:34px;border-radius:50%;object-fit:cover;background:linear-gradient(45deg,#ff6a00,#ff2d55);
@@ -352,6 +353,18 @@ body{background:#000;color:#fff;height:100dvh;overflow:hidden}
   border:none;background:#111;color:#fff;border-radius:999px;padding:7px 11px;font-size:11px;cursor:pointer
 }
 .share-chat-send:disabled{opacity:.6;cursor:default}
+
+@media (max-width:760px){
+  .comments-panel,
+  .share-sheet,
+  .shop-sheet{
+    left:0;
+    right:0;
+    transform:none;
+    width:100%;
+    max-height:74vh;
+  }
+}
 
 .shop-head{
   display:flex;align-items:center;justify-content:space-between;
@@ -479,7 +492,7 @@ body{background:#000;color:#fff;height:100dvh;overflow:hidden}
     <button class="primary" data-share="native">Share...</button>
     <button data-share="copy">Copy Link</button>
     <button data-share="whatsapp">WhatsApp</button>
-    <button data-share="telegram">Telegram</button>
+    <button data-share="friend">Send to Friend</button>
   </div>
   <div class="share-chat-head">Send to chats</div>
   <div class="share-chat-list" id="shareChatList"></div>
@@ -565,6 +578,7 @@ const SAVE_KEY = "nova_saved_reels";
 const renderedIds = new Set();
 const LAST_REEL_KEY = "nova_last_reel_upload";
 const REEL_SHARE_KEY = "nova_reel_share_count_";
+const REEL_PENDING_SHARE_KEY = "nova_pending_reel_share";
 const viewedInSession = new Set();
 const boostedOwnReelIds = new Set();
 const realtimeTimers = {};
@@ -2217,10 +2231,11 @@ shareButtons.forEach(btn => {
   btn.addEventListener("click", () => handleShareAction(btn.getAttribute("data-share") || ""));
 });
 shareChatList.addEventListener("click", e => {
-  const btn = e.target.closest("[data-send-chat]");
-  if(!btn) return;
-  const targetId = btn.getAttribute("data-send-chat") || "";
-  sendShareToChat(targetId, btn);
+  const row = e.target.closest("[data-send-chat]");
+  if(!row) return;
+  const targetId = row.getAttribute("data-send-chat") || "";
+  const sendBtn = e.target.closest("[data-send-btn]") || row.querySelector("[data-send-btn]");
+  sendShareToChat(targetId, sendBtn || null);
 });
 if(shopBackdrop){
   shopBackdrop.addEventListener("click", closeShopSheet);
@@ -2561,8 +2576,11 @@ function renderShareChatTargets(list){
     return;
   }
   list.forEach(contact => {
+    const contactId = String(contact?.id || "").trim();
+    if(!contactId) return;
     const row = document.createElement("div");
     row.className = "share-chat-item";
+    row.setAttribute("data-send-chat", contactId);
     const name = contact?.name || "User";
     const username = contact?.username ? "@" + contact.username : "";
     const initial = (name || "U").slice(0, 1).toUpperCase();
@@ -2572,7 +2590,7 @@ function renderShareChatTargets(list){
         <div class="share-chat-name">${escapeHtml(name)}</div>
         <div class="share-chat-user">${escapeHtml(username)}</div>
       </div>
-      <button type="button" class="share-chat-send" data-send-chat="${escapeHtml(contact.id)}">Send</button>
+      <button type="button" class="share-chat-send" data-send-btn="1">Send</button>
     `;
     shareChatList.appendChild(row);
   });
@@ -2654,6 +2672,24 @@ async function sendShareToChat(userId, sendBtn){
   }
 }
 
+function queueShareForFriend(){
+  if(!activeShareItem) return false;
+  const payload = getSharePayload();
+  const queue = {
+    title: payload.text,
+    url: payload.url,
+    reel_id: String(activeShareItem?.id || ""),
+    created_at: Date.now()
+  };
+  try{
+    localStorage.setItem(REEL_PENDING_SHARE_KEY, JSON.stringify(queue));
+  }catch(_){
+    return false;
+  }
+  location.href = "chat.html?share_reel=1";
+  return true;
+}
+
 async function handleShareAction(action){
   if(!activeShareItem) return;
   const payload = getSharePayload();
@@ -2690,10 +2726,12 @@ async function handleShareAction(action){
     const msg = encodeURIComponent(text + "\n" + shareUrl);
     window.open(`https://wa.me/?text=${msg}`, "_blank");
     shared = true;
-  }else if(action === "telegram"){
-    const msg = encodeURIComponent(text);
-    const url = encodeURIComponent(shareUrl);
-    window.open(`https://t.me/share/url?url=${url}&text=${msg}`, "_blank");
+  }else if(action === "friend"){
+    shared = queueShareForFriend();
+    if(!shared){
+      alert("Unable to open chats right now.");
+      return;
+    }
     shared = true;
   }
 

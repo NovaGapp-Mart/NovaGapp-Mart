@@ -82,12 +82,26 @@
     .media-preview-download{background:#ff6a00;color:#fff}
     .media-preview-body{flex:1;display:flex;align-items:center;justify-content:center;padding:12px}
     .media-preview-body img,.media-preview-body video{max-width:100%;max-height:100%;border-radius:8px}
+    .info-tabs-wrap{padding:0 14px 14px}
+    .info-tabs{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px}
+    .info-tab{border:1px solid #ffd3b4;background:#fff7f1;color:#8d4d10;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:700;white-space:nowrap}
+    .info-tab.active{background:#ff6a00;color:#fff;border-color:#ff6a00}
+    .info-panel{display:none}
+    .info-panel.show{display:block}
+    .info-strip{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}
+    .info-media-tile{width:88px;height:88px;flex:0 0 auto;border:none;border-radius:10px;background:#f4f4f4;overflow:hidden;position:relative;padding:0}
+    .info-media-tile img,.info-media-tile video{width:100%;height:100%;object-fit:cover;display:block}
+    .info-media-video-badge{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.62);color:#fff;border-radius:999px;padding:2px 6px;font-size:10px;font-weight:700}
+    .info-chat-chip{flex:0 0 auto;min-width:140px;max-width:230px;border:1px solid #ffd3b4;background:#fff7f1;border-radius:10px;padding:8px 10px;color:#603100;font-size:12px;line-height:1.35;word-break:break-word}
+    .info-empty{width:100%;border:1px dashed #e6c4a8;border-radius:10px;padding:10px 12px;font-size:12px;color:#7d5b43;background:#fff}
     #mainInput{min-width:0}
     @media (max-width:640px){
       .chat-bg{padding:10px}
       .bubble{max-width:94%;font-size:14px}
       .attachment-grid{max-width:100%}
       .attachment-tile img,.attachment-tile video{height:108px}
+      .info-media-tile{width:76px;height:76px}
+      .info-chat-chip{min-width:130px;max-width:200px}
       footer{padding:8px calc(8px + env(safe-area-inset-right,0px)) calc(8px + env(safe-area-inset-bottom,0px)) calc(8px + env(safe-area-inset-left,0px))}
       .call-btn{width:32px;height:32px}
       .chat-shell{max-width:100%;margin:0}
@@ -113,6 +127,18 @@
     </div>
     <div class="p-4">
       <button onclick="confirmAction()" class="w-full p-4 text-left bg-gray-100 text-gray-700 font-semibold rounded-lg">Clear chat history</button>
+    </div>
+    <div class="info-tabs-wrap">
+      <div class="info-tabs">
+        <button id="infoTabMedia" class="info-tab active" type="button" onclick="switchInfoTab('media')">Media</button>
+        <button id="infoTabChatting" class="info-tab" type="button" onclick="switchInfoTab('chatting')">Chatting</button>
+      </div>
+      <div id="infoMediaPanel" class="info-panel show">
+        <div id="infoMediaStrip" class="info-strip"></div>
+      </div>
+      <div id="infoChattingPanel" class="info-panel">
+        <div id="infoChattingStrip" class="info-strip"></div>
+      </div>
     </div>
     <div id="groupMembersSection" class="p-4 border-t hidden">
       <h3 class="font-bold text-gray-800 mb-2">Group Members</h3>
