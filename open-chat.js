@@ -116,21 +116,31 @@
     return n > 0 ? `${n} Members` : "Members";
   }
 
-  function resolveGroupOwnerId(groupRow){
-    const row = groupRow && typeof groupRow === "object" ? groupRow : {};
-    const candidates = [
-      row.created_by,
-      row.owner_id,
-      row.user_id,
-      row.admin_id,
-      row.createdBy,
-      row.ownerId
-    ];
-    for(const candidate of candidates){
-      const id = String(candidate || "").trim();
-      if(isUuid(id)) return id;
+  function readFirstValue(row, keys){
+    const source = row && typeof row === "object" ? row : {};
+    const list = Array.isArray(keys) ? keys : [];
+    for(const key of list){
+      const value = String(source?.[key] || "").trim();
+      if(value) return value;
     }
     return "";
+  }
+
+  function resolveGroupOwnerId(groupRow){
+    const row = groupRow && typeof groupRow === "object" ? groupRow : {};
+    return readFirstValue(row, [
+      "created_by",
+      "owner_id",
+      "user_id",
+      "admin_id",
+      "createdBy",
+      "ownerId",
+      "user_uuid",
+      "owner_uuid",
+      "creator_id",
+      "admin_uuid",
+      "uid"
+    ]);
   }
 
   function parseRoleText(row){
@@ -138,9 +148,25 @@
     return value;
   }
 
-  function isMemberAdmin(row, ownerHint){
+  function resolveMemberUserId(row, index){
+    return readFirstValue(row, ["user_id", "member_id", "user_uuid", "member_uuid", "uid"]) || `member_${index}`;
+  }
+
+  function resolveMemberName(row){
+    return String(row?.user_name || row?.name || row?.member_name || "Member").trim() || "Member";
+  }
+
+  function resolveMemberAvatar(row){
+    return String(row?.user_avatar || row?.avatar_url || row?.member_avatar || "").trim();
+  }
+
+  function resolveMemberGroupId(row){
+    return readFirstValue(row, ["group_id", "gid", "groupId"]);
+  }
+
+  function isMemberAdmin(row, ownerHint, memberUserId){
     const role = parseRoleText(row);
-    const userId = String(row?.user_id || "").trim();
+    const userId = String(memberUserId || resolveMemberUserId(row, 0) || "").trim();
     if(role === "admin" || role === "owner" || role === "creator") return true;
     if(ownerHint && userId && userId === ownerHint) return true;
     if(row?.is_admin === true || row?.is_admin === 1) return true;
@@ -151,68 +177,48 @@
     const cleanGroupId = String(groupId || receiverId || "").trim();
     const ownerId = String(ownerHint || groupOwnerId || "").trim();
     if(!cleanGroupId) return [];
-    const selections = [
-      "group_id,user_id,user_name,user_avatar,role,member_role,user_role,name,avatar_url,is_admin",
-      "group_id,user_id,user_name,user_avatar,role,is_admin",
-      "group_id,user_id,name,avatar_url,member_role,is_admin",
-      "group_id,user_id"
-    ];
-    for(const fields of selections){
-      try{
-        const { data, error } = await supa
-          .from("group_members")
-          .select(fields)
-          .eq("group_id", cleanGroupId)
-          .limit(500);
-        if(error){
-          if(maybeMissingColumn(error)) continue;
-          return [];
-        }
-        return (data || []).map((row, index) => {
-          const userId = String(row?.user_id || `member_${index}`).trim();
-          const admin = isMemberAdmin(row, ownerId);
-          const displayName = String(row?.user_name || row?.name || row?.member_name || "Member").trim() || "Member";
-          const avatar = String(row?.user_avatar || row?.avatar_url || row?.member_avatar || "").trim();
+    try{
+      const { data, error } = await supa
+        .from("group_members")
+        .select("*")
+        .limit(1200);
+      if(error){
+        return [];
+      }
+      return (data || [])
+        .filter(row => String(resolveMemberGroupId(row) || "").trim() === cleanGroupId)
+        .map((row, index) => {
+          const userId = String(resolveMemberUserId(row, index) || `member_${index}`).trim();
+          const admin = isMemberAdmin(row, ownerId, userId);
           return {
             user_id: userId,
-            display_name: displayName,
-            photo: avatar,
+            display_name: resolveMemberName(row),
+            photo: resolveMemberAvatar(row),
             role: parseRoleText(row),
             is_admin: admin
           };
         });
-      }catch(_){ }
-    }
+    }catch(_){ }
     return [];
   }
 
   async function fetchGroupInfo(groupId){
     const cleanGroupId = String(groupId || receiverId || "").trim();
     let groupRow = null;
-    const selections = [
-      "id,name,group_name,icon_url,group_icon,created_by,owner_id,user_id,admin_id",
-      "id,name,group_name,icon_url,group_icon,created_by",
-      "id,name,group_name,icon_url,group_icon",
-      "id,name,icon_url"
-    ];
-    for(const fields of selections){
-      try{
-        const { data, error } = await supa
-          .from("groups")
-          .select(fields)
-          .eq("id", cleanGroupId)
-          .maybeSingle();
-        if(!error){
-          groupRow = data || null;
-          break;
-        }
-        if(!maybeMissingColumn(error)){
-          break;
-        }
-      }catch(_){ }
-    }
+    try{
+      const { data, error } = await supa
+        .from("groups")
+        .select("*")
+        .limit(800);
+      if(!error){
+        groupRow = (data || []).find(row => {
+          const id = readFirstValue(row, ["id", "group_id", "gid"]);
+          return id && id === cleanGroupId;
+        }) || null;
+      }
+    }catch(_){ }
     groupOwnerId = resolveGroupOwnerId(groupRow);
-    const resolvedGroupId = String(groupRow?.id || cleanGroupId).trim();
+    const resolvedGroupId = String(readFirstValue(groupRow, ["id", "group_id", "gid"]) || cleanGroupId).trim();
     const members = await fetchGroupMembers(resolvedGroupId, groupOwnerId);
     if(!groupOwnerId){
       const adminMember = members.find(member => member?.is_admin);
