@@ -326,11 +326,25 @@ function normalizeCallSignalPayload(raw){
   const rawType = sanitizeCallType(body.type || body.signal_type || body.signalType || body.event || body.kind);
   const typeAlias = {
     offer: "call-offer",
+    "call-offer": "call-offer",
+    calloffer: "call-offer",
     answer: "call-answer",
+    "call-answer": "call-answer",
+    accept: "call-answer",
+    "call-accept": "call-answer",
+    callaccept: "call-answer",
+    accepted: "call-answer",
     end: "call-end",
+    "call-end": "call-end",
+    callend: "call-end",
     decline: "call-decline",
+    "call-decline": "call-decline",
+    calldecline: "call-decline",
     busy: "call-busy",
+    "call-busy": "call-busy",
+    callbusy: "call-busy",
     icecandidate: "ice",
+    "ice-candidate": "ice",
     candidate: "ice"
   };
   const type = typeAlias[rawType] || rawType;

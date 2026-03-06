@@ -798,8 +798,12 @@
             return null;
         }
 
-        async function fetchUsersByIds(userIds){
-            const ids = Array.from(userIds || []).map(id => String(id || "").trim()).filter(id => isUuid(id) && id !== currentUserId);
+        async function fetchUsersByIds(userIds, opts){
+            const options = opts || {};
+            const includeCurrent = !!options.includeCurrent;
+            const ids = Array.from(userIds || [])
+                .map(id => String(id || "").trim())
+                .filter(id => isUuid(id) && (includeCurrent || id !== currentUserId));
             if(!ids.length) return [];
             const attempts = [
                 "user_id,username,full_name,display_name,photo,avatar_url",
@@ -1291,6 +1295,34 @@
                 }
             }
 
+            const ownerIds = Array.from(new Set(Array.from(byId.values())
+                .map(row => String(row?.owner_id || "").trim())
+                .filter(id => isUuid(id))));
+            if(ownerIds.length){
+                const ownerRows = await fetchUsersByIds(ownerIds, { includeCurrent: true });
+                const ownerById = new Map();
+                (ownerRows || []).forEach(row => {
+                    const id = String(row?.user_id || "").trim();
+                    if(id) ownerById.set(id, row);
+                });
+                byId.forEach((groupRow, id) => {
+                    const ownerId = String(groupRow?.owner_id || "").trim();
+                    const ownerProfile = ownerById.get(ownerId) || null;
+                    if(ownerProfile){
+                        const resolvedName = displayName(ownerProfile);
+                        if(!groupRow.owner_name || /^(user|owner)$/i.test(String(groupRow.owner_name || "").trim())){
+                            groupRow.owner_name = resolvedName;
+                        }
+                        if(!groupRow.img){
+                            groupRow.img = avatarUrl(ownerProfile);
+                        }
+                    }else if(ownerId && ownerId === currentUserId && (!groupRow.owner_name || /^(user|owner)$/i.test(String(groupRow.owner_name || "").trim()))){
+                        groupRow.owner_name = displayName(currentUser || {});
+                    }
+                    byId.set(id, groupRow);
+                });
+            }
+
             return Array.from(byId.values()).sort((a, b) => {
                 const diff = Number(b.sortTs || 0) - Number(a.sortTs || 0);
                 if(diff !== 0) return diff;
@@ -1403,9 +1435,13 @@
                 const isGroup = !!item.isGroup;
                 const unreadLabel = unreadCount > 99 ? "99+" : String(unreadCount);
 
+                const fallbackLetter = (name[0] || "U").toUpperCase();
+                const safeImgSrc = img
+                    ? img.replace(/"/g, "&quot;").replace(/'/g, "%27")
+                    : "";
                 const avatarCore = img
-                    ? `<div class="avatar" style="background-image:url('${img.replace(/'/g, "%27")}')"></div>`
-                    : `<div class="avatar" style="background-color:#ff6a00">${name[0] || "U"}</div>`;
+                    ? `<img class="avatar" src="${safeImgSrc}" alt="${fallbackLetter}" style="object-fit:cover;" onerror="this.onerror=null;this.src='Images/no-image.png';">`
+                    : `<div class="avatar" style="background-color:#ff6a00">${fallbackLetter}</div>`;
                 const avatarHTML = `
                     <div class="avatar-wrap">
                         ${avatarCore}
@@ -2018,8 +2054,10 @@
             }
 
             const createdGroupIcon = String(groupRes?.data?.group_icon || groupRes?.data?.icon_url || selectedImgData || "").trim();
-            const ownerName = displayName(currentUser || {}) || "You";
-            const ownerPhoto = avatarUrl(currentUser || {}) || "";
+            const ownerProfile = await fetchUserById(currentUserId).catch(() => null);
+            const ownerSource = ownerProfile || currentUser || {};
+            const ownerName = displayName(ownerSource) || "You";
+            const ownerPhoto = avatarUrl(ownerSource) || "";
             const ownerAdded = await insertGroupMemberCompat(groupId, {
                 user_id: currentUserId,
                 user_name: ownerName,
@@ -2030,7 +2068,7 @@
                 alert("Group created but owner member add failed.");
             }
 
-            const profileRows = await fetchUsersByIds(membersToAdd);
+            const profileRows = await fetchUsersByIds(membersToAdd, { includeCurrent: true });
             const profileById = new Map();
             (profileRows || []).forEach(profile => {
                 const uid = String(profile?.user_id || "").trim();

@@ -546,8 +546,6 @@ let activeItemMenu = null;
 let editingMediaItem = null;
 const MEDIA_META_KEY_PREFIX = "m_media_meta_";
 const VIDEO_THUMBNAIL_FALLBACK = "Images/no-image.png";
-const videoThumbDataCache = new Map();
-const videoThumbPending = new Map();
 
 const sheet = document.getElementById("createSheet");
 const backdrop = document.getElementById("sheetBackdrop");
@@ -1112,119 +1110,52 @@ function getMissingColumnName(error){
   return "";
 }
 
-async function fetchPublicLongVideosForUser(targetId, options){
+async function fetchMediaRows(table, targetId){
+  const tableName = String(table || "").trim();
   const uid = String(targetId || "").trim();
-  if(!uid) return [];
+  if(!tableName || !uid) return [];
 
-  const page = Math.max(0, Number(options?.page) || 0);
-  const size = Math.max(1, Math.min(20, Number(options?.size) || 20));
-  const from = page * size;
-  const to = from + size - 1;
-  const { data, error } = await window.NOVA.supa
-    .from("videos")
-    .select("*")
+  const fieldsByTable = {
+    reels: ["id", "video_url", "user_id", "created_at"],
+    long_videos: ["id", "video_url", "user_id", "created_at"],
+    posts: ["id", "media_url", "user_id", "created_at"]
+  };
+  const fields = Array.isArray(fieldsByTable[tableName]) ? fieldsByTable[tableName].slice() : ["id", "user_id", "created_at"];
+
+  let query = window.NOVA.supa
+    .from(tableName)
+    .select(fields.join(","))
     .eq("user_id", uid)
-    .eq("type", "long")
-    .order("created_at", { ascending:false })
-    .range(from, to);
+    .limit(40);
 
-  if(error) throw error;
-  if(!Array.isArray(data)) return [];
-  return data.map(row => ({
-    ...row,
-    video_url: row.video_url || row.media_url || "",
-    created_at: row.created_at || row.updated_at || null
-  }));
-}
+  if(fields.includes("created_at")){
+    query = query.order("created_at", { ascending:false });
+  }
 
-async function fetchMediaRows(table, fields, targetId){
-  if(table === "long_videos"){
-    try{
-      const firstPage = await fetchPublicLongVideosForUser(targetId, { page:0, size:20 });
-      let rows = firstPage;
-      if(firstPage.length === 20){
-        const secondPage = await fetchPublicLongVideosForUser(targetId, { page:1, size:20 });
-        rows = firstPage.concat(secondPage);
-      }
-      return rows.slice(0, 30).map(row => ({
-        ...row,
-        title: row.title ?? null,
-        description: row.description ?? null,
-        keywords: row.keywords ?? null
-      }));
-    }catch(err){
-      console.warn("Public long videos fetch failed; falling back to direct query.", err);
+  let { data, error } = await query;
+  if(error){
+    const missing = getMissingColumnName(error);
+    if(missing === "created_at"){
+      const fallbackFields = fields.filter(col => col !== "created_at");
+      ({ data, error } = await window.NOVA.supa
+        .from(tableName)
+        .select(fallbackFields.join(","))
+        .eq("user_id", uid)
+        .limit(40));
     }
   }
 
-  const selectFields = [...fields];
-  let useOrder = selectFields.includes("created_at");
-  let attempts = 0;
-
-  const optionalColumns = [
-    "keywords",
-    "description",
-    "title",
-    "media_type",
-    "thumb_url",
-    "thumbnail_url",
-    "poster_url",
-    "created_at"
-  ];
-
-  while(selectFields.length && attempts < 20){
-    attempts += 1;
-    let query = window.NOVA.supa
-      .from(table)
-      .select(selectFields.join(","))
-      .eq("user_id", targetId)
-      .limit(30);
-
-    if(useOrder && selectFields.includes("created_at")){
-      query = query.order("created_at", { ascending:false });
+  if(error){
+    const text = getSupabaseErrorText(error).toLowerCase();
+    if(text.includes("column") && text.includes("does not exist")){
+      console.warn(`Skipping ${tableName} due to schema mismatch.`);
+      return [];
     }
-
-    const { data, error } = await query;
-    if(!error){
-      return (data || []).map(row => ({
-        ...row,
-        title: row.title ?? null,
-        description: row.description ?? null,
-        keywords: row.keywords ?? null
-      }));
-    }
-
-    const missingColumn = getMissingColumnName(error);
-    if(missingColumn){
-      if(selectFields.includes(missingColumn)){
-        selectFields.splice(selectFields.indexOf(missingColumn), 1);
-        if(missingColumn === "created_at") useOrder = false;
-        continue;
-      }
-      if(missingColumn === "created_at"){
-        useOrder = false;
-        continue;
-      }
-    }
-
-    const errText = getSupabaseErrorText(error).toLowerCase();
-    if(useOrder && (errText.includes("order") || errText.includes("sort"))){
-      useOrder = false;
-      continue;
-    }
-
-    const removable = optionalColumns.find(col => selectFields.includes(col));
-    if(removable){
-      selectFields.splice(selectFields.indexOf(removable), 1);
-      if(removable === "created_at") useOrder = false;
-      continue;
-    }
-
-    console.error(`Failed to load ${table}`, error);
+    console.error(`Failed to load ${tableName}`, error);
     return [];
   }
 
-  return [];
+  return Array.isArray(data) ? data : [];
 }
 
 async function updateMediaPayloadWithFallback(targetItem, payload){
@@ -1257,56 +1188,61 @@ async function updateMediaPayloadWithFallback(targetItem, payload){
 async function loadUploads(){
   const targetId = profileUserId || user.id;
   const [reelsRows, longRows, postsRows] = await Promise.all([
-    fetchMediaRows("reels", ["id","video_url","created_at","title","description","keywords","thumb_url","thumbnail_url","poster_url"], targetId),
-    fetchMediaRows("long_videos", ["id","video_url","created_at","title","description","thumb_url","thumbnail_url","poster_url"], targetId),
-    fetchMediaRows("posts", ["id","media_url","media_type","thumb_url","thumbnail_url"], targetId)
+    fetchMediaRows("reels", targetId),
+    fetchMediaRows("long_videos", targetId),
+    fetchMediaRows("posts", targetId)
   ]);
 
   allItems = [];
   (reelsRows || []).forEach(r => {
+    const mediaUrl = String(r?.video_url || "").trim();
+    if(!mediaUrl) return;
     const item = {
       id:r.id,
       table:"reels",
       type:"reel",
-      url:r.video_url,
-      created_at:r.created_at,
+      url:mediaUrl,
+      created_at:r.created_at || null,
       isVideo:true,
-      title:r.title,
-      description:r.description,
-      keywords:r.keywords,
-      thumbnail_url:r.thumbnail_url || r.thumb_url || r.poster_url || ""
+      title:"",
+      description:"",
+      keywords:[]
     };
     applyLocalMediaMeta(item);
     allItems.push(item);
   });
+
   (longRows || []).forEach(v => {
+    const mediaUrl = String(v?.video_url || "").trim();
+    if(!mediaUrl) return;
     const item = {
       id:v.id,
       table:"long_videos",
       type:"video",
-      url:v.video_url,
-      created_at:v.created_at,
+      url:mediaUrl,
+      created_at:v.created_at || null,
       isVideo:true,
-      title:v.title,
-      description:v.description,
-      keywords:v.keywords,
-      thumbnail_url:v.thumbnail_url || v.thumb_url || v.poster_url || ""
+      title:"",
+      description:"",
+      keywords:[]
     };
     applyLocalMediaMeta(item);
     allItems.push(item);
   });
+
   (postsRows || []).forEach(p => {
+    const mediaUrl = String(p?.media_url || "").trim();
+    if(!mediaUrl) return;
     const item = {
       id:p.id,
       table:"posts",
       type:"post",
-      url:p.media_url,
-      created_at:p.created_at,
+      url:mediaUrl,
+      created_at:p.created_at || null,
       isVideo:isPostVideo(p),
-      title:p.title,
-      description:p.description,
-      keywords:p.keywords,
-      thumbnail_url:p.thumbnail_url || p.thumb_url || ""
+      title:"",
+      description:"",
+      keywords:[]
     };
     applyLocalMediaMeta(item);
     allItems.push(item);
@@ -1320,176 +1256,11 @@ async function loadUploads(){
   renderGrid();
 }
 
-function getVideoThumbCacheKey(item){
-  return `${String(item?.table || "")}:${String(item?.id || "")}:${String(item?.url || "")}`;
-}
-
 function withVideoThumbSeekTime(url){
   const src = String(url || "").trim();
   if(!src) return "";
   if(src.includes("#")) return src;
   return `${src}#t=0.1`;
-}
-
-function createFirstFrameThumbnail(videoUrl){
-  const src = String(videoUrl || "").trim();
-  if(!src) return Promise.resolve("");
-  return new Promise(resolve => {
-    const video = document.createElement("video");
-    let settled = false;
-
-    const cleanup = () => {
-      video.removeEventListener("loadeddata", onLoadedData);
-      video.removeEventListener("loadedmetadata", onLoadedMeta);
-      video.removeEventListener("seeked", onSeeked);
-      video.removeEventListener("error", onError);
-      try{ video.pause(); }catch(_){ }
-      try{
-        video.removeAttribute("src");
-        video.load();
-      }catch(_){ }
-    };
-
-    const finish = (value) => {
-      if(settled) return;
-      settled = true;
-      cleanup();
-      resolve(String(value || ""));
-    };
-
-    const capture = () => {
-      if(!video.videoWidth || !video.videoHeight) return false;
-      const canvas = document.createElement("canvas");
-      const width = Math.min(video.videoWidth, 640);
-      const height = Math.max(1, Math.round(width * (video.videoHeight / video.videoWidth)));
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      if(!ctx) return false;
-      try{
-        ctx.drawImage(video, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.84);
-        if(dataUrl){
-          finish(dataUrl);
-          return true;
-        }
-      }catch(_){ }
-      return false;
-    };
-
-    const seekNearStart = () => {
-      try{
-        const duration = Number(video.duration || 0);
-        const target = duration > 0 ? Math.min(0.18, Math.max(0.05, duration * 0.02)) : 0.05;
-        video.currentTime = target;
-      }catch(_){
-        if(!capture()) finish("");
-      }
-    };
-
-    const onLoadedData = () => {
-      if(capture()) return;
-      seekNearStart();
-    };
-    const onLoadedMeta = () => {
-      if(capture()) return;
-      seekNearStart();
-    };
-    const onSeeked = () => {
-      if(capture()) return;
-      finish("");
-    };
-    const onError = () => finish("");
-
-    video.preload = "auto";
-    video.muted = true;
-    video.defaultMuted = true;
-    video.playsInline = true;
-    video.crossOrigin = "anonymous";
-    video.addEventListener("loadeddata", onLoadedData);
-    video.addEventListener("loadedmetadata", onLoadedMeta);
-    video.addEventListener("seeked", onSeeked);
-    video.addEventListener("error", onError);
-    video.src = withVideoThumbSeekTime(src);
-    video.load();
-    setTimeout(() => {
-      if(settled) return;
-      if(!capture()) finish("");
-    }, 5000);
-  });
-}
-
-function bindVideoGridThumbnail(imgEl, item){
-  if(!imgEl || !item?.isVideo) return;
-  const directThumb = String(item.thumbnail_url || "").trim();
-  if(directThumb){
-    imgEl.src = directThumb;
-    imgEl.onerror = () => {
-      imgEl.onerror = null;
-      const key = getVideoThumbCacheKey(item);
-      const cached = videoThumbDataCache.get(key);
-      if(cached){
-        imgEl.src = cached;
-        return;
-      }
-      imgEl.src = VIDEO_THUMBNAIL_FALLBACK;
-      let pending = videoThumbPending.get(key);
-      if(!pending){
-        pending = createFirstFrameThumbnail(item.url)
-          .then(dataUrl => {
-            const clean = String(dataUrl || "").trim();
-            if(clean) videoThumbDataCache.set(key, clean);
-            return clean;
-          })
-          .catch(() => "")
-          .finally(() => {
-            videoThumbPending.delete(key);
-          });
-        videoThumbPending.set(key, pending);
-      }
-      pending.then(dataUrl => {
-        const clean = String(dataUrl || "").trim();
-        if(!clean) return;
-        if(document.body.contains(imgEl)){
-          imgEl.src = clean;
-          imgEl.onerror = null;
-        }
-      });
-    };
-    return;
-  }
-
-  const key = getVideoThumbCacheKey(item);
-  const cached = videoThumbDataCache.get(key);
-  if(cached){
-    imgEl.src = cached;
-    return;
-  }
-
-  imgEl.src = VIDEO_THUMBNAIL_FALLBACK;
-  let pending = videoThumbPending.get(key);
-  if(!pending){
-    pending = createFirstFrameThumbnail(item.url)
-      .then(dataUrl => {
-        const clean = String(dataUrl || "").trim();
-        if(clean) videoThumbDataCache.set(key, clean);
-        return clean;
-      })
-      .catch(() => "")
-      .finally(() => {
-        videoThumbPending.delete(key);
-      });
-    videoThumbPending.set(key, pending);
-  }
-
-  pending.then(dataUrl => {
-    const clean = String(dataUrl || "").trim();
-    if(!clean) return;
-    if(document.body.contains(imgEl)){
-      imgEl.src = clean;
-      imgEl.onerror = null;
-    }
-  });
 }
 
 function renderGrid(){
@@ -1506,17 +1277,31 @@ function renderGrid(){
   list.forEach(item => {
     const cell = document.createElement("div");
     cell.className = "media-item";
-    const mediaEl = document.createElement("img");
-    mediaEl.alt = "";
-    mediaEl.loading = "lazy";
+    let mediaEl = null;
     if(item.isVideo){
-      bindVideoGridThumbnail(mediaEl, item);
-    }else{
-      mediaEl.src = String(item.url || "").trim() || VIDEO_THUMBNAIL_FALLBACK;
-      mediaEl.onerror = () => {
-        mediaEl.onerror = null;
-        mediaEl.src = VIDEO_THUMBNAIL_FALLBACK;
+      const videoEl = document.createElement("video");
+      videoEl.src = withVideoThumbSeekTime(String(item.url || "").trim());
+      videoEl.preload = "metadata";
+      videoEl.muted = true;
+      videoEl.defaultMuted = true;
+      videoEl.playsInline = true;
+      videoEl.poster = VIDEO_THUMBNAIL_FALLBACK;
+      videoEl.setAttribute("aria-hidden", "true");
+      videoEl.onerror = () => {
+        videoEl.onerror = null;
+        videoEl.poster = VIDEO_THUMBNAIL_FALLBACK;
       };
+      mediaEl = videoEl;
+    }else{
+      const imgEl = document.createElement("img");
+      imgEl.alt = "";
+      imgEl.loading = "lazy";
+      imgEl.src = String(item.url || "").trim() || VIDEO_THUMBNAIL_FALLBACK;
+      imgEl.onerror = () => {
+        imgEl.onerror = null;
+        imgEl.src = VIDEO_THUMBNAIL_FALLBACK;
+      };
+      mediaEl = imgEl;
     }
     cell.appendChild(mediaEl);
     const badge = document.createElement("div");
