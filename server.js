@@ -323,19 +323,58 @@ function normalizeIceCandidatePayload(raw){
 
 function normalizeCallSignalPayload(raw){
   const body = raw && typeof raw === "object" ? raw : {};
-  const type = sanitizeCallType(body.type);
+  const rawType = sanitizeCallType(body.type || body.signal_type || body.signalType || body.event || body.kind);
+  const typeAlias = {
+    offer: "call-offer",
+    answer: "call-answer",
+    end: "call-end",
+    decline: "call-decline",
+    busy: "call-busy",
+    icecandidate: "ice",
+    candidate: "ice"
+  };
+  const type = typeAlias[rawType] || rawType;
   if(!CALL_SIGNAL_TYPES.has(type)) return null;
-  const toUserId = sanitizeCallUserId(body.to_user_id || body.to);
-  const fromUserId = sanitizeCallUserId(body.from_user_id || body.from);
-  const callId = sanitizeCallId(body.call_id || body.callId);
+
+  const toUserId = sanitizeCallUserId(
+    body.to_user_id || body.to || body.toUserId || body.receiver_id || body.receiverId || body.target_user_id || body.targetUserId
+  );
+  const fromUserId = sanitizeCallUserId(
+    body.from_user_id || body.from || body.fromUserId || body.sender_id || body.senderId || body.user_id || body.userId
+  );
+  const callId = sanitizeCallId(
+    body.call_id || body.callId || body.room_id || body.roomId || body.session_id || body.sessionId || body.signal_id || body.signalId
+  );
   if(!type || !toUserId || !fromUserId || !callId) return null;
 
-  const mediaType = sanitizeCallMediaType(body.media_type || body.mediaType);
-  const reason = sanitizeCallReason(body.reason);
+  const mediaType = sanitizeCallMediaType(body.media_type || body.mediaType || body.call_type || body.callType);
+  const reason = sanitizeCallReason(body.reason || body.message || body.status_reason || body.statusReason);
   const defaultTtl = type === "call-offer" ? 90 : (type === "ice" ? 30 : CALL_SIGNAL_DEFAULT_TTL_SEC);
-  const ttlSec = clampInt(body.ttl_sec, CALL_SIGNAL_MIN_TTL_SEC, CALL_SIGNAL_MAX_TTL_SEC, defaultTtl);
-  const sdp = normalizeSdpPayload(body.sdp);
-  const candidate = normalizeIceCandidatePayload(body.candidate);
+  const ttlSec = clampInt(body.ttl_sec || body.ttlSec, CALL_SIGNAL_MIN_TTL_SEC, CALL_SIGNAL_MAX_TTL_SEC, defaultTtl);
+
+  const rawSdp = body.sdp || body.offer || body.answer || body.description || body.rtc_sdp || body.rtcDescription;
+  let sdp = normalizeSdpPayload(rawSdp);
+  if(!sdp && typeof rawSdp === "string"){
+    const fallbackType = type === "call-answer" ? "answer" : "offer";
+    const sdpText = String(rawSdp || "").slice(0, 18000);
+    if(sdpText) sdp = { type: fallbackType, sdp: sdpText };
+  }
+
+  const rawCandidate = body.candidate || body.ice || body.ice_candidate || body.iceCandidate;
+  let candidate = normalizeIceCandidatePayload(rawCandidate);
+  if(!candidate && typeof rawCandidate === "string"){
+    const candidateText = String(rawCandidate || "").slice(0, 6000);
+    if(candidateText){
+      candidate = {
+        candidate: candidateText,
+        sdpMid: String(body.sdpMid || body.sdp_mid || "").slice(0, 160),
+        sdpMLineIndex: Number.isFinite(Number(body.sdpMLineIndex || body.sdp_mline_index))
+          ? Number(body.sdpMLineIndex || body.sdp_mline_index)
+          : null,
+        usernameFragment: String(body.usernameFragment || body.username_fragment || "").slice(0, 160)
+      };
+    }
+  }
 
   if((type === "call-offer" || type === "call-answer") && !sdp){
     return null;

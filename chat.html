@@ -1749,7 +1749,29 @@
                     error = err;
                 }
                 if(!error){
-                    const candidateId = extractGroupId(insertedRow) || extractGroupId(candidate);
+                    const insertedId = extractGroupId(insertedRow);
+                    if(insertedId){
+                        return {
+                            ok: true,
+                            data: insertedRow || candidate,
+                            groupId: insertedId
+                        };
+                    }
+                    const preferredCandidateId = String(extractGroupId(candidate) || generatedId || "").trim();
+                    const resolved = await resolveInsertedGroupRow({
+                        expectedName: cleanName,
+                        preferredId: preferredCandidateId,
+                        startedAt
+                    });
+                    const resolvedId = extractGroupId(resolved);
+                    if(resolvedId){
+                        return {
+                            ok: true,
+                            data: resolved || insertedRow || candidate,
+                            groupId: resolvedId
+                        };
+                    }
+                    const candidateId = extractGroupId(candidate);
                     if(candidateId){
                         return {
                             ok: true,
@@ -1757,21 +1779,20 @@
                             groupId: candidateId
                         };
                     }
-                    const resolved = await resolveInsertedGroupRow({
-                        expectedName: cleanName,
-                        preferredId: "",
-                        startedAt
-                    });
-                    const resolvedId = extractGroupId(resolved);
-                    return {
-                        ok: true,
-                        data: resolved || insertedRow || candidate,
-                        groupId: resolvedId
-                    };
+                    return { ok: false, error: new Error("group_id_resolve_failed"), groupId: "" };
                 }
                 lastError = error;
                 if(String(error?.code || "").trim() === "23505"){
-                    const duplicateId = extractGroupId(candidate);
+                    const duplicateId = String(extractGroupId(candidate) || generatedId || "").trim();
+                    const resolvedDuplicate = await resolveInsertedGroupRow({
+                        expectedName: cleanName,
+                        preferredId: duplicateId,
+                        startedAt
+                    });
+                    const resolvedDuplicateId = extractGroupId(resolvedDuplicate);
+                    if(resolvedDuplicateId){
+                        return { ok: true, data: resolvedDuplicate || candidate, groupId: resolvedDuplicateId };
+                    }
                     if(duplicateId){
                         return { ok: true, data: candidate, groupId: duplicateId };
                     }
@@ -1817,32 +1838,103 @@
         }
         async function insertGroupMemberCompat(groupId, member){
             const cleanGroupId = String(groupId || "").trim();
-            const cleanUserId = String(member?.user_id || "").trim();
+            const cleanUserId = String(member?.user_id || member?.id || member?.member_id || member?.user_uuid || member?.uid || "").trim();
             if(!cleanGroupId || !cleanUserId) return false;
-            const name = String(member?.user_name || "Member").trim() || "Member";
-            const avatar = String(member?.user_avatar || "").trim();
+            const name = String(member?.user_name || member?.name || "Member").trim() || "Member";
+            const avatar = String(member?.user_avatar || member?.avatar_url || "").trim();
             const role = String(member?.role || "member").trim() || "member";
             const isAdmin = role.toLowerCase() === "admin";
+            const nowIso = new Date().toISOString();
 
-            const candidates = [
-                { group_id: cleanGroupId, user_id: cleanUserId, user_name: name, user_avatar: avatar, role, is_admin: isAdmin },
-                { group_id: cleanGroupId, user_id: cleanUserId, user_name: name, user_avatar: avatar, role },
-                { group_id: cleanGroupId, user_id: cleanUserId, user_name: name, user_avatar: avatar },
-                { group_id: cleanGroupId, user_id: cleanUserId, name, avatar_url: avatar, role, is_admin: isAdmin },
-                { group_id: cleanGroupId, user_id: cleanUserId, name, avatar_url: avatar, role },
-                { group_id: cleanGroupId, user_id: cleanUserId },
-                { group_id: cleanGroupId, member_id: cleanUserId, member_name: name, member_avatar: avatar, role, is_admin: isAdmin },
-                { group_id: cleanGroupId, member_id: cleanUserId, member_name: name, member_avatar: avatar, role },
-                { group_id: cleanGroupId, member_id: cleanUserId, name, avatar_url: avatar, role, is_admin: isAdmin },
-                { group_id: cleanGroupId, member_id: cleanUserId, name, avatar_url: avatar, role },
-                { group_id: cleanGroupId, member_id: cleanUserId },
-                { group_id: cleanGroupId, user_uuid: cleanUserId, user_name: name, user_avatar: avatar, role, is_admin: isAdmin },
-                { group_id: cleanGroupId, user_uuid: cleanUserId, name, avatar_url: avatar, role, is_admin: isAdmin },
-                { group_id: cleanGroupId, user_uuid: cleanUserId },
-                { group_id: cleanGroupId, member_uuid: cleanUserId, member_name: name, member_avatar: avatar, role, is_admin: isAdmin },
-                { group_id: cleanGroupId, member_uuid: cleanUserId },
-                { group_id: cleanGroupId, uid: cleanUserId }
+            const groupKeyRows = [
+                { group_id: cleanGroupId },
+                { group_uuid: cleanGroupId },
+                { gid: cleanGroupId },
+                { chat_id: cleanGroupId },
+                { room_id: cleanGroupId },
+                { conversation_id: cleanGroupId },
+                { group: cleanGroupId },
+                { groupId: cleanGroupId }
             ];
+            const memberKeyRows = [
+                { user_id: cleanUserId, user_name: name, user_avatar: avatar, role, is_admin: isAdmin },
+                { user_id: cleanUserId, user_name: name, user_avatar: avatar, member_role: role, is_admin: isAdmin },
+                { user_id: cleanUserId, user_name: name, user_avatar: avatar, role_name: role, admin: isAdmin },
+                { user_id: cleanUserId, user_name: name, user_avatar: avatar, role },
+                { user_id: cleanUserId, name, avatar_url: avatar, role, is_admin: isAdmin },
+                { user_id: cleanUserId, name, avatar_url: avatar, role },
+                { user_id: cleanUserId, role, joined_at: nowIso, created_at: nowIso },
+                { user_id: cleanUserId },
+                { member_id: cleanUserId, member_name: name, member_avatar: avatar, role, is_admin: isAdmin },
+                { member_id: cleanUserId, member_name: name, member_avatar: avatar, member_role: role, is_admin: isAdmin },
+                { member_id: cleanUserId, member_name: name, member_avatar: avatar, role },
+                { member_id: cleanUserId, name, avatar_url: avatar, role, is_admin: isAdmin },
+                { member_id: cleanUserId, name, avatar_url: avatar, role },
+                { member_id: cleanUserId, role, joined_at: nowIso, created_at: nowIso },
+                { member_id: cleanUserId },
+                { user_uuid: cleanUserId, user_name: name, user_avatar: avatar, role, is_admin: isAdmin },
+                { user_uuid: cleanUserId, name, avatar_url: avatar, role, is_admin: isAdmin },
+                { user_uuid: cleanUserId, role, joined_at: nowIso, created_at: nowIso },
+                { user_uuid: cleanUserId },
+                { member_uuid: cleanUserId, member_name: name, member_avatar: avatar, role, is_admin: isAdmin },
+                { member_uuid: cleanUserId, role, joined_at: nowIso, created_at: nowIso },
+                { member_uuid: cleanUserId },
+                { uid: cleanUserId, role, is_admin: isAdmin },
+                { uid: cleanUserId },
+                { user: cleanUserId, role, is_admin: isAdmin },
+                { user: cleanUserId },
+                { userId: cleanUserId, role, is_admin: isAdmin },
+                { userId: cleanUserId },
+                { member: cleanUserId, role, is_admin: isAdmin },
+                { member: cleanUserId },
+                { member_user_id: cleanUserId, role, is_admin: isAdmin },
+                { member_user_id: cleanUserId },
+                { profile_id: cleanUserId, role, is_admin: isAdmin },
+                { profile_id: cleanUserId },
+                { account_id: cleanUserId, role, is_admin: isAdmin },
+                { account_id: cleanUserId }
+            ];
+
+            const candidates = [];
+            const seen = new Set();
+            const pushCandidate = (row) => {
+                const compact = Object.fromEntries(Object.entries(row || {}).filter(([, value]) => value !== "" && value !== null && value !== undefined));
+                if(!Object.keys(compact).length) return;
+                const key = JSON.stringify(Object.keys(compact).sort().map(name => [name, compact[name]]));
+                if(seen.has(key)) return;
+                seen.add(key);
+                candidates.push(compact);
+            };
+
+            const verifyMembership = async () => {
+                const groupKeys = ["group_id", "group_uuid", "gid", "chat_id", "room_id", "conversation_id", "group", "groupId"];
+                const userKeys = ["user_id", "member_id", "user_uuid", "member_uuid", "uid", "user", "userId", "member", "member_user_id", "profile_id", "account_id"];
+                for(const groupKey of groupKeys){
+                    for(const userKey of userKeys){
+                        try{
+                            const { data, error } = await supa
+                                .from("group_members")
+                                .select("*")
+                                .eq(groupKey, cleanGroupId)
+                                .eq(userKey, cleanUserId)
+                                .limit(1);
+                            if(!error){
+                                if(Array.isArray(data) && data.length) return true;
+                                continue;
+                            }
+                            if(maybeMissingColumn(error)) continue;
+                            if(maybeMissingResource(error, "group_members")) return false;
+                        }catch(_){ }
+                    }
+                }
+                return false;
+            };
+
+            groupKeyRows.forEach(groupKey => {
+                memberKeyRows.forEach(memberKey => {
+                    pushCandidate({ ...groupKey, ...memberKey });
+                });
+            });
 
             for(const candidate of candidates){
                 const { error } = await supa.from("group_members").insert(candidate);
@@ -1851,10 +1943,12 @@
                     const txt = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
                     const duplicate = txt.includes("duplicate") || String(error?.code || "") === "23505";
                     if(duplicate) return true;
+                    const exists = await verifyMembership();
+                    if(exists) return true;
                     return false;
                 }
             }
-            return false;
+            return verifyMembership();
         }
 
         async function insertGroupSystemMessage(groupId, text){

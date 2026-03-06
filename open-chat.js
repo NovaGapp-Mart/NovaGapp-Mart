@@ -76,7 +76,7 @@
   let ringAudioCtx = null;
   let ringAudioElement = null;
   let ringMode = "";
-  let supportsUsersOnCallColumn = true;
+  let supportsUsersOnCallColumn = !["0", "false", "off", "no"].includes(String(window.CALL_USE_USERS_ON_CALL || "true").trim().toLowerCase());
   const bufferedIceByCall = new Map();
   const callOutcomeMessageKeys = new Set();
   let messageRows = [];
@@ -99,6 +99,7 @@
   let noticeTimer = null;
   const CALL_RING_TIMEOUT_MS = 30000;
   const CALL_SIGNAL_BROADCAST_EVENT = "call-signal";
+  const CALL_RINGTONE_URL = String(window.CALL_RINGTONE_URL || "").trim();
   const URL_PATTERN = /(https?:\/\/[^\s]+)/ig;
 
   function isUuid(value){
@@ -114,6 +115,13 @@
     if(text.includes("column") && text.includes("does not exist")) return true;
     if(text.includes("unknown column")) return true;
     return false;
+  }
+
+  function extractMissingColumnName(error){
+    const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`;
+    if(!text) return "";
+    const match = text.match(/column\s+["'`]?([a-zA-Z0-9_]+)["'`]?/i);
+    return match && match[1] ? String(match[1]).trim() : "";
   }
 
   function isUsersOnCallColumnError(error){
@@ -1388,8 +1396,15 @@
     messageSyncTimer = null;
   }
 
+  function canMarkDirectMessagesReadNow(){
+    if(document.visibilityState && document.visibilityState !== "visible") return false;
+    if(typeof document.hasFocus === "function" && !document.hasFocus()) return false;
+    return true;
+  }
+
   async function markDirectMessagesRead(){
     if(isGroupChat || !isUuid(myId) || !isUuid(receiverId)) return;
+    if(!canMarkDirectMessagesReadNow()) return;
     const attempts = [
       () => supa
         .from("messages")
@@ -1414,20 +1429,32 @@
 
   async function insertMessageWithFallback(payload){
     const variants = [];
-    variants.push({ ...payload });
-    if("reply_preview" in payload){ const v = { ...payload }; delete v.reply_preview; variants.push(v); }
-    if("reply_to_id" in payload){ const v = { ...payload }; delete v.reply_to_id; variants.push(v); }
-    if("attachment_urls" in payload){ const v = { ...payload }; delete v.attachment_urls; variants.push(v); }
-    if("attachment_url" in payload){ const v = { ...payload }; delete v.attachment_url; variants.push(v); }
-    if("message_type" in payload){ const v = { ...payload }; delete v.message_type; variants.push(v); }
-    if("is_read" in payload){ const v = { ...payload }; delete v.is_read; variants.push(v); }
-    variants.push({
+    const seen = new Set();
+    const pushVariant = (candidate) => {
+      const row = candidate && typeof candidate === "object" ? candidate : {};
+      const compact = Object.fromEntries(Object.entries(row).filter(([, value]) => value !== undefined));
+      if(!Object.keys(compact).length) return;
+      const key = JSON.stringify(Object.keys(compact).sort().map(name => [name, compact[name]]));
+      if(seen.has(key)) return;
+      seen.add(key);
+      variants.push(compact);
+    };
+
+    pushVariant({ ...payload });
+    if("reply_preview" in payload){ const v = { ...payload }; delete v.reply_preview; pushVariant(v); }
+    if("reply_to_id" in payload){ const v = { ...payload }; delete v.reply_to_id; pushVariant(v); }
+    if("attachment_urls" in payload){ const v = { ...payload }; delete v.attachment_urls; pushVariant(v); }
+    if("attachment_url" in payload){ const v = { ...payload }; delete v.attachment_url; pushVariant(v); }
+    if("message_type" in payload){ const v = { ...payload }; delete v.message_type; pushVariant(v); }
+    pushVariant({
       sender_id: payload.sender_id,
       ...buildThreadPayload(),
-      content: payload.content
+      content: payload.content,
+      is_read: false
     });
 
-    for(const candidate of variants){
+    for(let idx = 0; idx < variants.length; idx += 1){
+      const candidate = variants[idx];
       const { data, error } = await supa
         .from("messages")
         .insert(candidate)
@@ -1435,6 +1462,12 @@
         .maybeSingle();
       if(!error) return { data: data ? { ...candidate, ...data } : null, error: null };
       if(!maybeMissingColumn(error)) return { data: null, error };
+      const missingColumn = extractMissingColumnName(error);
+      if(missingColumn && Object.prototype.hasOwnProperty.call(candidate, missingColumn)){
+        const stripped = { ...candidate };
+        delete stripped[missingColumn];
+        pushVariant(stripped);
+      }
     }
     return { data: null, error: new Error("message_insert_failed") };
   }
@@ -1487,6 +1520,15 @@
       return false;
     }
     if(data){
+      if(!isGroupChat && String(data?.sender_id || "") === myId && String(data?.receiver_id || "") === receiverId){
+        if(toReadFlag(data?.is_read) === 1){
+          data.is_read = false;
+          const messageId = String(data?.id || "").trim();
+          if(messageId){
+            updateMessageRowWithFallback(messageId, [{ is_read: false }]).catch(() => {});
+          }
+        }
+      }
       addMessageRow(data);
       scrollBottom();
     }
@@ -1873,9 +1915,10 @@
   }
 
   function playRingFile(){
+    if(!CALL_RINGTONE_URL) return false;
     try{
-      if(!ringAudioElement){
-        ringAudioElement = new Audio("ringtone.mp3");
+      if(!ringAudioElement || ringAudioElement.src !== CALL_RINGTONE_URL){
+        ringAudioElement = new Audio(CALL_RINGTONE_URL);
         ringAudioElement.loop = true;
         ringAudioElement.preload = "auto";
       }
@@ -1884,7 +1927,10 @@
       if(playPromise && typeof playPromise.catch === "function"){
         playPromise.catch(() => {});
       }
-    }catch(_){ }
+      return true;
+    }catch(_){
+      return false;
+    }
   }
 
   function stopRingFile(){
@@ -1901,10 +1947,10 @@
     if(ringMode === cleanMode && (ringToneTimer || fileIsPlaying)) return;
     stopRingTone();
     ringMode = cleanMode;
-    playRingFile();
+    const fileStarted = playRingFile();
     ringFallbackTimer = setTimeout(() => {
       if(ringMode !== cleanMode) return;
-      const filePlayingNow = !!(ringAudioElement && !ringAudioElement.paused);
+      const filePlayingNow = !!(fileStarted && ringAudioElement && !ringAudioElement.paused);
       if(filePlayingNow) return;
       playRingBurst(cleanMode);
       ringToneTimer = setInterval(() => { playRingBurst(cleanMode); }, 1400);
@@ -1997,6 +2043,15 @@
       return false;
     }
     if(data){
+      if(!isGroupChat && String(data?.sender_id || "") === myId && String(data?.receiver_id || "") === receiverId){
+        if(toReadFlag(data?.is_read) === 1){
+          data.is_read = false;
+          const messageId = String(data?.id || "").trim();
+          if(messageId){
+            updateMessageRowWithFallback(messageId, [{ is_read: false }]).catch(() => {});
+          }
+        }
+      }
       addMessageRow(data);
       scrollBottom();
     }
@@ -2010,6 +2065,7 @@
     incomingCallBar.style.display = "flex";
     clearIncomingOfferTimer();
     startRingTone("incoming");
+    try{ if(navigator.vibrate) navigator.vibrate([200, 120, 240, 120, 200]); }catch(_){ }
     incomingOfferTimer = setTimeout(() => { declineIncomingCall("not_answered").catch(() => {}); }, CALL_RING_TIMEOUT_MS);
   }
 
@@ -2911,6 +2967,13 @@
       pollCallSignals(true).catch(() => {});
       syncMessagesSilently().catch(() => {});
       if(!isGroupChat) markDirectMessagesRead().catch(() => {});
+    }
+  });
+
+  window.addEventListener("focus", () => {
+    if(!isGroupChat){
+      pollCallSignals(true).catch(() => {});
+      markDirectMessagesRead().catch(() => {});
     }
   });
 

@@ -533,10 +533,16 @@ async function fetchUsersFromDiscoverApi(q){
   return [];
 }
 
+function isMissingColumnError(error){
+  const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
+  if(!text) return false;
+  return text.includes("column") && text.includes("does not exist");
+}
+
 async function fetchUsersFromApi(q){
   if(!supa) return [];
   const query = String(q || "").trim();
-  const clean = query.replace(/[%*,()]/g, " ").trim();
+  const clean = query.replace(/[%*,()]/g, " ").replace(/["']/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
   const merged = [];
   const seen = new Set();
   const pushRows = (rows) => {
@@ -548,88 +554,123 @@ async function fetchUsersFromApi(q){
     });
   };
 
-  if(clean){
-    const { data: byUsername, error: usernameError } = await supa
-      .from("users")
-      .select("user_id,username,full_name,photo,display_name,email")
-      .ilike("username", `%${clean}%`)
-      .limit(220);
-    if(usernameError){
-      console.error("username ilike fetch error", usernameError);
-    }else{
-      pushRows(byUsername);
+  const selectVariants = [
+    "id,username,avatar_url,full_name,email,display_name,photo,user_id",
+    "user_id,username,photo,full_name,email,display_name,avatar_url,id",
+    "id,username,avatar_url",
+    "user_id,username,photo",
+    "id,username,photo",
+    "user_id,username,avatar_url"
+  ];
+
+  const runVariant = async (selectCols, useSearch) => {
+    let request = supa.from("users").select(selectCols).limit(320);
+    if(useSearch && clean){
+      request = request.ilike("username", `%${clean}%`);
+    }
+    return request;
+  };
+
+  for(const cols of selectVariants){
+    const { data, error } = await runVariant(cols, !!clean);
+    if(error){
+      if(isMissingColumnError(error)) continue;
+      if(!merged.length){
+        console.error("Error fetching users:", error);
+      }
+      break;
+    }
+    pushRows(data);
+    if(clean && merged.length >= 200) break;
+  }
+
+  if(clean && !merged.length){
+    for(const cols of selectVariants){
+      const { data, error } = await runVariant(cols, false);
+      if(error){
+        if(isMissingColumnError(error)) continue;
+        break;
+      }
+      const rows = (Array.isArray(data) ? data : []).filter(row => {
+        const uname = String(row?.username || row?.display_name || row?.full_name || "").toLowerCase();
+        return uname.includes(clean.toLowerCase());
+      });
+      pushRows(rows);
+      if(merged.length >= 200) break;
     }
   }
 
-  let request = supa
-    .from("users")
-    .select("user_id,username,full_name,photo,display_name,email")
-    .limit(220);
-  if(clean){
-    request = request.or(
-      `username.ilike.%${clean}%,full_name.ilike.%${clean}%,display_name.ilike.%${clean}%,email.ilike.%${clean}%`
-    );
-  }
-  const { data, error } = await request;
-  if(error){
-    if(!merged.length){
-      console.error("Error fetching users:", error);
-    }
-    return merged;
-  }
-  pushRows(data);
   return merged;
 }
 
 async function fetchUsersFallback(q){
   if(!supa) return [];
   const query = String(q || "").trim();
-  const buildRequest = (withExtendedColumns) => {
-    let request = supa
-      .from("users")
-      .select(withExtendedColumns
-        ? "user_id,username,full_name,display_name,photo,email"
-        : "user_id,username,full_name,photo,email")
-      .limit(320);
-    if(query){
-      const clean = query.replace(/[%*,()]/g, " ").trim();
-      if(clean){
-        request = request.or(withExtendedColumns
-          ? `username.ilike.%${clean}%,full_name.ilike.%${clean}%,display_name.ilike.%${clean}%,email.ilike.%${clean}%`
-          : `username.ilike.%${clean}%,full_name.ilike.%${clean}%,email.ilike.%${clean}%`);
-      }
-    }
-    return request;
+  const clean = query.replace(/[%*,()]/g, " ").replace(/["']/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+  const variants = [
+    "id,username,avatar_url,full_name,email,display_name,photo,user_id",
+    "user_id,username,photo,full_name,email,display_name,avatar_url,id",
+    "id,username,avatar_url",
+    "user_id,username,photo"
+  ];
+  const merged = [];
+  const seen = new Set();
+  const pushRows = (rows) => {
+    (Array.isArray(rows) ? rows : []).forEach(row => {
+      const id = String(row?.user_id || row?.id || row?.uid || "").trim();
+      if(!id || seen.has(id)) return;
+      seen.add(id);
+      merged.push(row);
+    });
   };
-  let { data, error } = await buildRequest(true);
-  if(error){
-    const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
-    if(text.includes("column") && text.includes("does not exist")){
-      ({ data, error } = await buildRequest(false));
+
+  for(const cols of variants){
+    let request = supa.from("users").select(cols).limit(320);
+    if(clean){
+      request = request.ilike("username", `%${clean}%`);
     }
+    const { data, error } = await request;
+    if(error){
+      if(isMissingColumnError(error)) continue;
+      console.error("users fallback error", error);
+      break;
+    }
+    pushRows(data);
+    if(clean && merged.length >= 160) break;
   }
-  if(error){
-    console.error("users fallback error", error);
-    return [];
-  }
-  return Array.isArray(data) ? data : [];
+
+  return merged;
 }
 
 async function fetchUsers(q){
   const query = String(q || "").trim();
   const tokens = tokenized(query);
-  const [discoverUsers, apiUsers] = await Promise.all([
+  const [discoverUsers, apiUsers, profileUsers] = await Promise.all([
     fetchUsersFromDiscoverApi(query),
-    fetchUsersFromApi(query)
+    fetchUsersFromApi(query),
+    fetchProfilesFromApi(query)
   ]);
 
-  let users = mergeUniqueUsers(discoverUsers, apiUsers);
-  if(!users.length || (query && users.length < 12)){
-    const fallbackUsers = await fetchUsersFallback(query);
-    users = mergeUniqueUsers(users, fallbackUsers);
+  let users = mergeUniqueUsers(discoverUsers, apiUsers, profileUsers);
+  if(!users.length || (query && users.length < 16)){
+    const [fallbackUsers, fallbackProfiles] = await Promise.all([
+      fetchUsersFallback(query),
+      fetchProfilesFromApi(query)
+    ]);
+    users = mergeUniqueUsers(users, fallbackUsers, fallbackProfiles);
   }
 
-  const mapped = users
+  if(query && !users.length){
+    const [discoverAll, apiAll, profilesAll, fallbackAll] = await Promise.all([
+      fetchUsersFromDiscoverApi(""),
+      fetchUsersFromApi(""),
+      fetchProfilesFromApi(""),
+      fetchUsersFallback("")
+    ]);
+    users = mergeUniqueUsers(users, discoverAll, apiAll, profilesAll, fallbackAll);
+  }
+
+  let mapped = users
     .map(user => {
       const normalized = normalizeUserRow(user);
       return {
@@ -641,6 +682,21 @@ async function fetchUsers(q){
     .map(user => ({ ...user, score: scoreUser(user, tokens) }))
     .filter(user => tokens.length ? user.score > 0 : true)
     .sort((a, b) => b.score - a.score);
+
+  if(query && !mapped.length && users.length){
+    mapped = users
+      .map(user => {
+        const normalized = normalizeUserRow(user);
+        return {
+          ...normalized,
+          display_name: safeDisplayName(normalized)
+        };
+      })
+      .filter(user => user.user_id)
+      .map(user => ({ ...user, score: scoreUser(user, tokens) }))
+      .sort((a, b) => b.score - a.score);
+  }
+
   return mapped;
 }
 
@@ -874,7 +930,7 @@ function renderUserSection(users, tabKey, title){
             <b>${escapeHtml(u.display_name || "Member")}</b>
             ${u.verified ? `<span class="verified-badge">Verified</span>` : ""}
           </div>
-          <span>${escapeHtml([subText, trustText].filter(Boolean).join(" | "))}</span>
+          <span>${escapeHtml([subText, trustText].filter(Boolean).join(" - "))}</span>
           <div class="profile-actions">
             <button class="action-btn message js-message">Message</button>
             <button class="action-btn js-view">View profile</button>
