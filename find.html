@@ -5,10 +5,10 @@
 <title>Find - NOVAGAPP</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<!-- Ã°Å¸â€Â¥ SUPABASE SDK -->
+<!-- SUPABASE SDK -->
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 
-<!-- Ã°Å¸â€Â¥ GLOBAL SUPABASE INIT -->
+<!-- GLOBAL SUPABASE INIT -->
 <script src="global.js"></script>
 <script src="public-config.js"></script>
 <script src="social.js"></script>
@@ -20,7 +20,7 @@ body{
   background:#fff;
 }
 
-/* Ã°Å¸â€Â SEARCH BAR */
+/* SEARCH BAR */
 .search{
   position:sticky;
   top:0;
@@ -48,7 +48,7 @@ body{
   cursor:pointer;
 }
 
-/* Ã°Å¸â€˜Â¤ USER LIST */
+/* USER LIST */
 .list{
   max-width:500px;
   margin:auto;
@@ -170,7 +170,7 @@ body{
   color:#fff;
 }
 
-/* Ã°Å¸â€Â» BOTTOM NAV */
+/* BOTTOM NAV */
 .nav{
   position:fixed;
   bottom:0;left:0;
@@ -194,7 +194,7 @@ body{
 
 <body>
 
-<!-- Ã°Å¸â€Â SEARCH -->
+<!-- SEARCH -->
 <div class="search">
   <input type="text" id="searchInput" placeholder="Search reels, videos, posts, users...">
   <button onclick="searchUsers()">&#128269;</button>
@@ -209,10 +209,10 @@ body{
   <button class="tab-btn" data-tab="users">Users</button>
 </div>
 
-<!-- Ã°Å¸â€˜Â¤ RESULTS -->
+<!-- RESULTS -->
 <div class="list" id="list"></div>
 
-<!-- Ã°Å¸â€Â» NAV -->
+<!-- NAV -->
 <div class="nav">
   <div onclick="go('index.html')">
     <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3l-10-9-10 9h3v8z"/></svg>
@@ -245,6 +245,13 @@ function escapeHtml(text){
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function withVideoPreviewTime(url){
+  const src = String(url || "").trim();
+  if(!src) return "";
+  if(src.includes("#")) return src;
+  return `${src}#t=0.1`;
 }
 
 function isPlaceholderName(value){
@@ -530,6 +537,30 @@ async function fetchUsersFromApi(q){
   if(!supa) return [];
   const query = String(q || "").trim();
   const clean = query.replace(/[%*,()]/g, " ").trim();
+  const merged = [];
+  const seen = new Set();
+  const pushRows = (rows) => {
+    (Array.isArray(rows) ? rows : []).forEach(row => {
+      const id = String(row?.user_id || row?.id || row?.uid || "").trim();
+      if(!id || seen.has(id)) return;
+      seen.add(id);
+      merged.push(row);
+    });
+  };
+
+  if(clean){
+    const { data: byUsername, error: usernameError } = await supa
+      .from("users")
+      .select("user_id,username,full_name,photo,display_name,email")
+      .ilike("username", `%${clean}%`)
+      .limit(220);
+    if(usernameError){
+      console.error("username ilike fetch error", usernameError);
+    }else{
+      pushRows(byUsername);
+    }
+  }
+
   let request = supa
     .from("users")
     .select("user_id,username,full_name,photo,display_name,email")
@@ -541,10 +572,13 @@ async function fetchUsersFromApi(q){
   }
   const { data, error } = await request;
   if(error){
-    console.error("Error fetching users:", error);
-    return [];
+    if(!merged.length){
+      console.error("Error fetching users:", error);
+    }
+    return merged;
   }
-  return Array.isArray(data) ? data : [];
+  pushRows(data);
+  return merged;
 }
 
 async function fetchUsersFallback(q){
@@ -730,7 +764,7 @@ function renderReelsSection(reels){
       const row = document.createElement("div");
       row.className = "reel-item";
       row.innerHTML = `
-        <video src="${escapeHtml(r.video_url || "")}" muted></video>
+        <video src="${escapeHtml(withVideoPreviewTime(r.video_url || ""))}" muted preload="metadata"></video>
         <div class="meta">
           <div><b>${escapeHtml(r.title || "Reel")}</b></div>
           <small>${escapeHtml(r.description || "")}</small>
@@ -793,11 +827,12 @@ function renderPostsSection(posts){
     posts.forEach(p => {
       const row = document.createElement("div");
       row.className = "reel-item";
-      const mediaUrl = escapeHtml(p.media_url || "Images/no-image.jpg");
+      const mediaUrl = String(p.media_url || "Images/no-image.jpg").trim() || "Images/no-image.jpg";
+      const safeMediaUrl = escapeHtml(mediaUrl);
       const mediaType = String(p.media_type || "").toLowerCase();
       const preview = mediaType.startsWith("video")
-        ? `<video src="${mediaUrl}" muted></video>`
-        : `<img src="${mediaUrl}" alt="Post preview">`;
+        ? `<video src="${escapeHtml(withVideoPreviewTime(mediaUrl))}" muted preload="metadata"></video>`
+        : `<img src="${safeMediaUrl}" alt="Post preview">`;
       row.innerHTML = `
         ${preview}
         <div class="meta">
@@ -839,7 +874,7 @@ function renderUserSection(users, tabKey, title){
             <b>${escapeHtml(u.display_name || "Member")}</b>
             ${u.verified ? `<span class="verified-badge">Verified</span>` : ""}
           </div>
-          <span>${escapeHtml([subText, trustText].filter(Boolean).join(" � "))}</span>
+          <span>${escapeHtml([subText, trustText].filter(Boolean).join(" | "))}</span>
           <div class="profile-actions">
             <button class="action-btn message js-message">Message</button>
             <button class="action-btn js-view">View profile</button>

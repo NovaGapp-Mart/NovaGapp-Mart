@@ -61,17 +61,22 @@
   let peerProfile = null;
   let renderedMessageIds = new Set();
   let realtimeChannel = null;
+  let callRealtimeChannel = null;
   let messageSyncTimer = null;
   let lastThreadSnapshot = "";
   let callPollTimer = null;
   let incomingOfferTimer = null;
   let outgoingOfferTimer = null;
   let seenCallSignalIds = new Set();
+  let seenCallSignalKeys = new Set();
   let activeCall = null;
   let pendingIncomingOffer = null;
   let ringToneTimer = null;
+  let ringFallbackTimer = null;
   let ringAudioCtx = null;
+  let ringAudioElement = null;
   let ringMode = "";
+  let supportsUsersOnCallColumn = true;
   const bufferedIceByCall = new Map();
   const callOutcomeMessageKeys = new Set();
   let messageRows = [];
@@ -93,6 +98,7 @@
   let activeInfoTab = "media";
   let noticeTimer = null;
   const CALL_RING_TIMEOUT_MS = 30000;
+  const CALL_SIGNAL_BROADCAST_EVENT = "call-signal";
   const URL_PATTERN = /(https?:\/\/[^\s]+)/ig;
 
   function isUuid(value){
@@ -108,6 +114,36 @@
     if(text.includes("column") && text.includes("does not exist")) return true;
     if(text.includes("unknown column")) return true;
     return false;
+  }
+
+  function isUsersOnCallColumnError(error){
+    const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
+    if(!text.includes("is_on_call")) return false;
+    return maybeMissingColumn(error) || text.includes("does not exist");
+  }
+
+  function callSignalKey(signal){
+    const type = String(signal?.type || "").trim().toLowerCase();
+    const callId = String(signal?.call_id || "").trim();
+    const fromUserId = String(signal?.from_user_id || "").trim();
+    const toUserId = String(signal?.to_user_id || "").trim();
+    if(!type || !callId || !fromUserId || !toUserId) return "";
+    if(type === "ice") return "";
+    const reason = String(signal?.reason || "").trim().toLowerCase();
+    return `${type}:${callId}:${fromUserId}:${toUserId}:${reason}`;
+  }
+
+  function rememberCallSignalKey(signal){
+    const key = callSignalKey(signal);
+    if(!key) return true;
+    if(seenCallSignalKeys.has(key)) return false;
+    seenCallSignalKeys.add(key);
+    if(seenCallSignalKeys.size > 900){
+      const trimmed = Array.from(seenCallSignalKeys).slice(-450);
+      seenCallSignalKeys.clear();
+      trimmed.forEach(item => seenCallSignalKeys.add(item));
+    }
+    return true;
   }
 
   function getDisplayName(profile, fallback){
@@ -357,6 +393,7 @@
       id: resolvedGroupId,
       name: String(groupRow?.name || groupRow?.group_name || receiverNameParam || "Group").trim() || "Group",
       icon_url: String(groupRow?.icon_url || groupRow?.group_icon || receiverPicParam || "").trim(),
+      group_icon: String(groupRow?.group_icon || groupRow?.icon_url || receiverPicParam || "").trim(),
       member_count: normalizeMemberCount(members.length),
       members
     };
@@ -938,7 +975,7 @@
       ? String(groupInfo?.name || receiverNameParam || "Group").trim() || "Group"
       : getDisplayName(peerProfile, receiverNameParam || "User");
     const photo = isGroupChat
-      ? String(groupInfo?.icon_url || receiverPicParam || "").trim()
+      ? String(groupInfo?.group_icon || groupInfo?.icon_url || receiverPicParam || "").trim()
       : getProfilePhoto(peerProfile, receiverPicParam);
     document.getElementById("userName").textContent = name;
     document.getElementById("infoName").textContent = name;
@@ -1546,7 +1583,7 @@
     const fromUserId = String(payload.from_user_id || payload.from || src.from_user_id || src.from || "").trim();
     if(!type || !callId || !toUserId || !fromUserId) return null;
     return {
-      id: String(src.id || "").trim(),
+      id: String(src.id || payload.signal_id || payload.signalId || src.signal_id || src.signalId || "").trim(),
       type,
       call_id: callId,
       to_user_id: toUserId,
@@ -1581,6 +1618,137 @@
   function apiUrl(base, path){
     return base ? `${base}${path}` : path;
   }
+
+  function getCallRoomKey(){
+    if(!isUuid(myId) || !isUuid(receiverId)) return "";
+    return [myId, receiverId].sort().join("_");
+  }
+
+  function isPeerOnCallByPresence(){
+    if(!callRealtimeChannel || !isUuid(receiverId)) return false;
+    try{
+      const state = typeof callRealtimeChannel.presenceState === "function" ? callRealtimeChannel.presenceState() : {};
+      const rows = Array.isArray(state?.[receiverId]) ? state[receiverId] : [];
+      return rows.some(row => !!row?.on_call);
+    }catch(_){
+      return false;
+    }
+  }
+
+  async function trackCallPresence(){
+    if(!callRealtimeChannel || !isUuid(myId)) return;
+    try{
+      await callRealtimeChannel.track({ user_id: myId, on_call: !!activeCall, ts: Date.now() });
+    }catch(_){ }
+  }
+
+  function teardownCallRealtimeChannel(){
+    if(!callRealtimeChannel) return;
+    try{ supa.removeChannel(callRealtimeChannel); }catch(_){ }
+    callRealtimeChannel = null;
+  }
+
+  function setupCallRealtimeChannel(){
+    teardownCallRealtimeChannel();
+    if(!supa || isGroupChat) return;
+    const roomKey = getCallRoomKey();
+    if(!roomKey) return;
+    callRealtimeChannel = supa
+      .channel(`call_dm_${roomKey}`, {
+        config: {
+          broadcast: { ack: true },
+          presence: { key: myId }
+        }
+      })
+      .on("broadcast", { event: CALL_SIGNAL_BROADCAST_EVENT }, payload => {
+        const signal = normalizeSignal(payload?.payload || payload);
+        if(signal) handleCallSignal(signal).catch(() => {});
+      })
+      .on("presence", { event: "sync" }, () => {
+        if(!activeCall && isPeerOnCallByPresence()){
+          setCallStatus("User busy in call");
+        }
+      })
+      .subscribe((status) => {
+        if(status === "SUBSCRIBED"){
+          trackCallPresence().catch(() => {});
+        }
+      });
+  }
+
+  async function sendCallSignalBroadcast(reqBody){
+    if(!callRealtimeChannel) return false;
+    try{
+      const status = await callRealtimeChannel.send({
+        type: "broadcast",
+        event: CALL_SIGNAL_BROADCAST_EVENT,
+        payload: reqBody
+      });
+      return status === "ok";
+    }catch(_){
+      return false;
+    }
+  }
+
+  async function setMyOnCallStatus(isOnCall){
+    if(!supa || !isUuid(myId) || !supportsUsersOnCallColumn) return;
+    const nextValue = !!isOnCall;
+    const idColumns = ["user_id", "id"];
+    for(const idColumn of idColumns){
+      try{
+        const { error } = await supa
+          .from("users")
+          .update({ is_on_call: nextValue })
+          .eq(idColumn, myId);
+        if(!error) return;
+        if(isUsersOnCallColumnError(error)){
+          supportsUsersOnCallColumn = false;
+          return;
+        }
+        const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+        const missingIdColumn = maybeMissingColumn(error) && text.includes(idColumn);
+        if(missingIdColumn) continue;
+        return;
+      }catch(_){
+        return;
+      }
+    }
+  }
+
+  async function readUserOnCallStatus(userId){
+    const uid = String(userId || "").trim();
+    if(!supa || !isUuid(uid) || !supportsUsersOnCallColumn) return false;
+    const idColumns = ["user_id", "id"];
+    for(const idColumn of idColumns){
+      try{
+        const { data, error } = await supa
+          .from("users")
+          .select("is_on_call")
+          .eq(idColumn, uid)
+          .maybeSingle();
+        if(!error){
+          return !!(data && data.is_on_call);
+        }
+        if(isUsersOnCallColumnError(error)){
+          supportsUsersOnCallColumn = false;
+          return false;
+        }
+        const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+        const missingIdColumn = maybeMissingColumn(error) && text.includes(idColumn);
+        if(missingIdColumn) continue;
+        return false;
+      }catch(_){
+        return false;
+      }
+    }
+    return false;
+  }
+
+  async function isPeerBusyForOutgoingCall(){
+    if(isPeerOnCallByPresence()) return true;
+    return readUserOnCallStatus(receiverId);
+  }
+
   function getMyDisplayNameForPush(){
     return String(
       myUser?.user_metadata?.full_name ||
@@ -1633,7 +1801,10 @@
       call_id: String(payload?.call_id || "").trim(),
       from_user_id: String(payload?.from_user_id || "").trim(),
       to_user_id: String(payload?.to_user_id || "").trim(),
-      media_type: String(payload?.media_type || "").trim().toLowerCase() === "video" ? "video" : "audio"
+      media_type: String(payload?.media_type || "").trim().toLowerCase() === "video" ? "video" : "audio",
+      signal_id: typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}_${Math.random().toString(16).slice(2)}`
     };
     if(!type || !isUuid(reqBody.from_user_id) || !isUuid(reqBody.to_user_id) || !reqBody.call_id) return false;
     if(type === "call-offer" || type === "call-answer"){
@@ -1646,6 +1817,7 @@
     }
     if(payload?.reason) reqBody.reason = String(payload.reason).slice(0, 120);
 
+    const broadcastOk = await sendCallSignalBroadcast(reqBody);
     const bases = buildApiBases();
     for(const base of bases){
       try{
@@ -1657,7 +1829,7 @@
         if(res.ok) return true;
       }catch(_){ }
     }
-    return false;
+    return broadcastOk;
   }
 
   function clearIncomingOfferTimer(){
@@ -1700,20 +1872,55 @@
     }catch(_){ }
   }
 
+  function playRingFile(){
+    try{
+      if(!ringAudioElement){
+        ringAudioElement = new Audio("ringtone.mp3");
+        ringAudioElement.loop = true;
+        ringAudioElement.preload = "auto";
+      }
+      ringAudioElement.currentTime = 0;
+      const playPromise = ringAudioElement.play();
+      if(playPromise && typeof playPromise.catch === "function"){
+        playPromise.catch(() => {});
+      }
+    }catch(_){ }
+  }
+
+  function stopRingFile(){
+    if(!ringAudioElement) return;
+    try{
+      ringAudioElement.pause();
+      ringAudioElement.currentTime = 0;
+    }catch(_){ }
+  }
+
   function startRingTone(mode){
     const cleanMode = String(mode || "").trim().toLowerCase() === "incoming" ? "incoming" : "outgoing";
-    if(ringMode === cleanMode && ringToneTimer) return;
+    const fileIsPlaying = !!(ringAudioElement && !ringAudioElement.paused);
+    if(ringMode === cleanMode && (ringToneTimer || fileIsPlaying)) return;
     stopRingTone();
     ringMode = cleanMode;
-    playRingBurst(cleanMode);
-    ringToneTimer = setInterval(() => { playRingBurst(cleanMode); }, 1400);
+    playRingFile();
+    ringFallbackTimer = setTimeout(() => {
+      if(ringMode !== cleanMode) return;
+      const filePlayingNow = !!(ringAudioElement && !ringAudioElement.paused);
+      if(filePlayingNow) return;
+      playRingBurst(cleanMode);
+      ringToneTimer = setInterval(() => { playRingBurst(cleanMode); }, 1400);
+    }, 180);
   }
 
   function stopRingTone(){
+    if(ringFallbackTimer){
+      clearTimeout(ringFallbackTimer);
+      ringFallbackTimer = null;
+    }
     if(ringToneTimer){
       clearInterval(ringToneTimer);
       ringToneTimer = null;
     }
+    stopRingFile();
     ringMode = "";
   }
 
@@ -1874,6 +2081,8 @@
     closeCallOverlay();
     muteCallBtn.textContent = "Mute";
     cameraCallBtn.textContent = "Camera Off";
+    setMyOnCallStatus(false).catch(() => {});
+    trackCallPresence().catch(() => {});
   }
 
   async function getLocalStream(mediaType){
@@ -1979,6 +2188,12 @@
       return;
     }
     if(activeCall){ showNotice("A call is already active."); return; }
+    const peerBusy = await isPeerBusyForOutgoingCall();
+    if(peerBusy){
+      showNotice("User Busy");
+      setCallStatus("User busy in call");
+      return;
+    }
     hideIncomingOffer();
     stopRingTone();
     clearOutgoingOfferTimer();
@@ -1987,6 +2202,8 @@
     const callId = typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const call = await createCallSession(callId, mediaType, "outgoing", localStream, receiverId);
     activeCall = call;
+    setMyOnCallStatus(true).catch(() => {});
+    trackCallPresence().catch(() => {});
     showCallOverlay(call);
     setCallStatus("Creating offer...");
     try{
@@ -2042,6 +2259,8 @@
     }
     const call = await createCallSession(offer.call_id, offer.media_type, "incoming", localStream, offer.from_user_id);
     activeCall = call;
+    setMyOnCallStatus(true).catch(() => {});
+    trackCallPresence().catch(() => {});
     showCallOverlay(call);
     setCallStatus("Connecting...");
     try{
@@ -2097,10 +2316,12 @@
 
   async function handleCallSignal(signal){
     if(!signal || signal.to_user_id !== myId) return;
+    if(!rememberCallSignalKey(signal)) return;
     const isActivePeerSignal = signal.from_user_id === receiverId;
     if(!isActivePeerSignal){
       if(signal.type === "call-offer"){
-        const isReallyBusy = !!(activeCall || pendingIncomingOffer);
+        const accountBusy = await readUserOnCallStatus(myId);
+        const isReallyBusy = !!(activeCall || pendingIncomingOffer || accountBusy);
         await sendCallSignal({
           type: isReallyBusy ? "call-busy" : "call-decline",
           call_id: signal.call_id,
@@ -2124,13 +2345,18 @@
         });
         return;
       }
-      if(activeCall || pendingIncomingOffer){
+      if(pendingIncomingOffer && pendingIncomingOffer.call_id === signal.call_id){
+        return;
+      }
+      const accountBusy = await readUserOnCallStatus(myId);
+      if(activeCall || pendingIncomingOffer || accountBusy){
         await sendCallSignal({
           type: "call-busy",
           call_id: signal.call_id,
           from_user_id: myId,
           to_user_id: signal.from_user_id,
-          media_type: signal.media_type
+          media_type: signal.media_type,
+          reason: "busy"
         });
         return;
       }
@@ -2447,7 +2673,7 @@
       ? String(groupInfo?.name || receiverNameParam || "Group").trim() || "Group"
       : getDisplayName(peerProfile, receiverNameParam || "User");
     const photo = isGroupChat
-      ? String(groupInfo?.icon_url || receiverPicParam || "").trim()
+      ? String(groupInfo?.group_icon || groupInfo?.icon_url || receiverPicParam || "").trim()
       : getProfilePhoto(peerProfile, receiverPicParam);
     setAvatar(document.getElementById("infoPic"), photo, name);
     document.getElementById("infoName").textContent = name;
@@ -2616,6 +2842,7 @@
           id: receiverId,
           name: receiverNameParam || "Group",
           icon_url: receiverPicParam,
+          group_icon: receiverPicParam,
           member_count: 0,
           members: []
         };
@@ -2629,7 +2856,7 @@
       }
       peerProfile = {
         display_name: groupInfo?.name || receiverNameParam || "Group",
-        photo: groupInfo?.icon_url || receiverPicParam
+        photo: groupInfo?.group_icon || groupInfo?.icon_url || receiverPicParam
       };
       renderPeerHeader();
       if(!groupMembers.length && receiverId){
@@ -2668,6 +2895,7 @@
     subscribeToMessages();
     startMessageSync();
     markDirectMessagesRead().catch(() => {});
+    setupCallRealtimeChannel();
     startCallPolling();
     const canCall = isUuid(receiverId) && receiverId !== myId && !isPeerBlocked;
     audioCallBtn.disabled = !canCall;
@@ -2725,7 +2953,12 @@
     stopRingTone();
     if(ringAudioCtx){ try{ ringAudioCtx.close(); }catch(_){ } ringAudioCtx = null; }
     if(realtimeChannel){ try{ supa.removeChannel(realtimeChannel); }catch(_){ } }
-    if(activeCall){ closeCallResources(activeCall); activeCall = null; }
+    teardownCallRealtimeChannel();
+    if(activeCall){
+      closeCallResources(activeCall);
+      activeCall = null;
+      setMyOnCallStatus(false).catch(() => {});
+    }
   });
 
   mainInput.addEventListener("keydown", (event) => {

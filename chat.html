@@ -1220,7 +1220,7 @@
                     byId.set(id, {
                         id,
                         name: String(g?.name || g?.group_name || byId.get(id)?.name || "Group").trim() || "Group",
-                        img: String(g?.icon_url || g?.group_icon || byId.get(id)?.img || "").trim(),
+                        img: String(g?.group_icon || g?.icon_url || byId.get(id)?.img || "").trim(),
                         owner_id: String(extractGroupOwnerId(g) || g?.owner_id || byId.get(id)?.owner_id || "").trim(),
                         owner_name: String(g?.owner_name || g?.creator_name || byId.get(id)?.owner_name || "").trim(),
                         isGroup: true,
@@ -1724,15 +1724,36 @@
                 const candidate = candidates[i];
                 if(!candidate || !Object.keys(candidate).length) continue;
                 if(Object.keys(candidate).some(key => blockedColumns.has(String(key || "").trim().toLowerCase()))) continue;
-                const { error } = await supa
-                    .from("groups")
-                    .insert(candidate);
+                let insertedRow = null;
+                let error = null;
+                try{
+                    const inserted = await supa
+                        .from("groups")
+                        .insert(candidate)
+                        .select("*")
+                        .maybeSingle();
+                    error = inserted?.error || null;
+                    insertedRow = inserted?.data && typeof inserted.data === "object" ? inserted.data : null;
+                    if(error){
+                        const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+                        const selectDenied = text.includes("permission") && text.includes("select");
+                        if(selectDenied){
+                            const fallbackInsert = await supa
+                                .from("groups")
+                                .insert(candidate);
+                            error = fallbackInsert?.error || null;
+                            insertedRow = null;
+                        }
+                    }
+                }catch(err){
+                    error = err;
+                }
                 if(!error){
-                    const candidateId = extractGroupId(candidate);
+                    const candidateId = extractGroupId(insertedRow) || extractGroupId(candidate);
                     if(candidateId){
                         return {
                             ok: true,
-                            data: candidate,
+                            data: insertedRow || candidate,
                             groupId: candidateId
                         };
                     }
@@ -1744,7 +1765,7 @@
                     const resolvedId = extractGroupId(resolved);
                     return {
                         ok: true,
-                        data: resolved || candidate,
+                        data: resolved || insertedRow || candidate,
                         groupId: resolvedId
                     };
                 }
@@ -1902,13 +1923,7 @@
                 return;
             }
 
-            const profileRows = await fetchUsersByIds(membersToAdd);
-            const profileById = new Map();
-            (profileRows || []).forEach(profile => {
-                const uid = String(profile?.user_id || "").trim();
-                if(uid) profileById.set(uid, profile);
-            });
-
+            const createdGroupIcon = String(groupRes?.data?.group_icon || groupRes?.data?.icon_url || selectedImgData || "").trim();
             const ownerName = displayName(currentUser || {}) || "You";
             const ownerPhoto = avatarUrl(currentUser || {}) || "";
             const ownerAdded = await insertGroupMemberCompat(groupId, {
@@ -1920,6 +1935,13 @@
             if(!ownerAdded){
                 alert("Group created but owner member add failed.");
             }
+
+            const profileRows = await fetchUsersByIds(membersToAdd);
+            const profileById = new Map();
+            (profileRows || []).forEach(profile => {
+                const uid = String(profile?.user_id || "").trim();
+                if(uid) profileById.set(uid, profile);
+            });
             for(const memberId of membersToAdd){
                 if(memberId === currentUserId) continue;
                 const profile = profileById.get(memberId) || {};
@@ -1935,7 +1957,7 @@
             rememberManualGroup({
                 id: groupId,
                 name: gName,
-                img: selectedImgData,
+                img: createdGroupIcon,
                 owner_id: currentUserId,
                 owner_name: ownerName
             });

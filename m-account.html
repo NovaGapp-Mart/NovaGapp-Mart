@@ -1324,6 +1324,13 @@ function getVideoThumbCacheKey(item){
   return `${String(item?.table || "")}:${String(item?.id || "")}:${String(item?.url || "")}`;
 }
 
+function withVideoThumbSeekTime(url){
+  const src = String(url || "").trim();
+  if(!src) return "";
+  if(src.includes("#")) return src;
+  return `${src}#t=0.1`;
+}
+
 function createFirstFrameThumbnail(videoUrl){
   const src = String(videoUrl || "").trim();
   if(!src) return Promise.resolve("");
@@ -1403,7 +1410,7 @@ function createFirstFrameThumbnail(videoUrl){
     video.addEventListener("loadedmetadata", onLoadedMeta);
     video.addEventListener("seeked", onSeeked);
     video.addEventListener("error", onError);
-    video.src = src;
+    video.src = withVideoThumbSeekTime(src);
     video.load();
     setTimeout(() => {
       if(settled) return;
