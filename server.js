@@ -573,6 +573,29 @@ async function appendNdjsonLine(filePath, payload){
   await fs.appendFile(filePath, line, "utf8");
 }
 
+async function readNdjsonTail(filePath, maxRows){
+  const cap = Math.max(1, Number(maxRows) || 200);
+  try{
+    const raw = await fs.readFile(filePath, "utf8");
+    if(!raw) return [];
+    const lines = raw.split(/\r?\n/).filter(Boolean);
+    const out = [];
+    for(let i = lines.length - 1; i >= 0 && out.length < cap; i -= 1){
+      const line = String(lines[i] || "").trim();
+      if(!line) continue;
+      try{
+        const parsed = JSON.parse(line);
+        if(parsed && typeof parsed === "object"){
+          out.push(parsed);
+        }
+      }catch(_){ }
+    }
+    return out;
+  }catch(_){
+    return [];
+  }
+}
+
 app.options("/api/account/sync", (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
@@ -3541,7 +3564,78 @@ app.get("/api/users/discover", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   const rawQuery = String(req.query?.q || "").trim();
   const cleanQuery = rawQuery.replace(/[%*,()]/g, " ").trim().slice(0, 80);
-  const limit = clampInt(req.query?.limit, 1, 120, 20);
+  const searchQuery = cleanQuery.replace(/["']/g, " ").replace(/\s+/g, " ").trim();
+  const queryTokens = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
+  const limit = clampInt(req.query?.limit, 1, 500, 40);
+  const page = clampInt(req.query?.page, 1, 80, 1);
+  const offset = Math.max(0, (page - 1) * limit);
+
+  const matchesQuery = (row) => {
+    if(!queryTokens.length) return true;
+    const hay = [
+      row?.username || "",
+      row?.full_name || "",
+      row?.display_name || "",
+      row?.email || "",
+      row?.id || ""
+    ].join(" ").toLowerCase();
+    if(!hay.trim()) return false;
+    return queryTokens.every(token => hay.includes(token));
+  };
+
+  const usersById = new Map();
+  const upsertCandidate = (raw, priority) => {
+    const source = raw && typeof raw === "object" ? raw : {};
+    const id = compactText(source.id || source.user_id || source.uid, 128);
+    if(!id) return;
+
+    const email = normalizeEmail(source.email || "");
+    const emailLocal = String((email.split("@")[0] || "")).trim();
+    const fallbackName = compactText(
+      source.display_name || source.full_name || source.username || emailLocal || "User",
+      120
+    );
+    const next = {
+      id,
+      username: compactText(source.username || "", 64),
+      full_name: compactText(fallbackName || "User", 120),
+      display_name: compactText(source.display_name || source.full_name || "", 120),
+      avatar_url: compactText(source.avatar_url || source.photo || "", 700),
+      email,
+      _score: Math.max(0, Number(priority) || 0),
+      _updatedAt: (() => {
+        const tsRaw = String(source.ts || source.updated_at || source.created_at || "");
+        const ts = Date.parse(tsRaw);
+        return Number.isFinite(ts) ? ts : 0;
+      })()
+    };
+    if(!matchesQuery(next)) return;
+
+    const prev = usersById.get(id);
+    if(!prev){
+      usersById.set(id, next);
+      return;
+    }
+
+    const prevName = String(prev.full_name || "").trim().toLowerCase();
+    const prevLooksPlaceholder = !prevName || prevName === "user" || prevName === "member";
+    if(prevLooksPlaceholder && next.full_name){
+      prev.full_name = next.full_name;
+    }
+    if(!prev.username && next.username) prev.username = next.username;
+    if(!prev.avatar_url && next.avatar_url) prev.avatar_url = next.avatar_url;
+    if(!prev.email && next.email) prev.email = next.email;
+    if(!prev.display_name && next.display_name) prev.display_name = next.display_name;
+    prev._score = Math.max(Number(prev._score) || 0, Number(next._score) || 0);
+    prev._updatedAt = Math.max(Number(prev._updatedAt) || 0, Number(next._updatedAt) || 0);
+  };
+
+  const appendRows = (rows, mapFn, priority) => {
+    (Array.isArray(rows) ? rows : []).forEach(row => {
+      const mapped = typeof mapFn === "function" ? mapFn(row) : row;
+      if(mapped) upsertCandidate(mapped, priority);
+    });
+  };
 
   try{
     const supabaseBase = String(CONTEST_SUPABASE_URL || PUBLIC_SUPABASE_URL || "").trim().replace(/\/+$/g, "");
@@ -3552,68 +3646,143 @@ app.get("/api/users/discover", async (req, res) => {
       ""
     ).trim();
 
-    if(!supabaseBase || !supabaseKey){
-      throw new Error("discover_supabase_not_configured");
+    if(supabaseBase && supabaseKey){
+      const headers = {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`
+      };
+
+      const fetchRows = async (table, selectFields, orCandidates) => {
+        const filters = Array.isArray(orCandidates) && orCandidates.length ? orCandidates : [""];
+        let lastError = "";
+        let lastStatus = 0;
+
+        for(const orFilter of filters){
+          const params = new URLSearchParams();
+          params.set("select", selectFields);
+          const fetchLimit = Math.min(1000, Math.max(limit, offset + limit));
+          params.set("limit", String(fetchLimit));
+          if(orFilter) params.set("or", orFilter);
+          const endpoint = `${supabaseBase}/rest/v1/${table}?${params.toString()}`;
+          const response = await fetch(endpoint, { headers, cache: "no-store" });
+          const bodyText = await response.text().catch(() => "");
+          if(!response.ok){
+            lastError = bodyText;
+            lastStatus = response.status;
+            const lower = String(bodyText || "").toLowerCase();
+            if(orFilter && (lower.includes("column") || lower.includes("operator") || lower.includes("syntax"))){
+              continue;
+            }
+            continue;
+          }
+          let parsed = [];
+          try{
+            parsed = bodyText ? JSON.parse(bodyText) : [];
+          }catch(_){
+            parsed = [];
+          }
+          return {
+            ok: true,
+            rows: Array.isArray(parsed) ? parsed : []
+          };
+        }
+
+        return {
+          ok: false,
+          rows: [],
+          error: lastError,
+          status: lastStatus
+        };
+      };
+
+      const profileFilters = searchQuery
+        ? [`(username.ilike.*${searchQuery}*,full_name.ilike.*${searchQuery}*)`]
+        : [""];
+      const userFilters = searchQuery
+        ? [
+          `(username.ilike.*${searchQuery}*,full_name.ilike.*${searchQuery}*,display_name.ilike.*${searchQuery}*,email.ilike.*${searchQuery}*)`,
+          `(username.ilike.*${searchQuery}*,full_name.ilike.*${searchQuery}*)`
+        ]
+        : [""];
+
+      const [profilesResult, usersResult] = await Promise.all([
+        fetchRows("profiles", "id,username,full_name,avatar_url", profileFilters),
+        fetchRows("users", "user_id,username,full_name,display_name,photo,email", userFilters)
+      ]);
+
+      if(profilesResult.ok){
+        appendRows(
+          profilesResult.rows,
+          row => ({
+            id: String(row?.id || "").trim(),
+            username: String(row?.username || "").trim(),
+            full_name: String(row?.full_name || row?.username || "").trim(),
+            avatar_url: String(row?.avatar_url || "").trim(),
+            email: ""
+          }),
+          5
+        );
+      }
+
+      if(usersResult.ok){
+        appendRows(
+          usersResult.rows,
+          row => ({
+            id: String(row?.user_id || row?.id || "").trim(),
+            username: String(row?.username || "").trim(),
+            full_name: String(row?.display_name || row?.full_name || row?.username || "").trim(),
+            display_name: String(row?.display_name || "").trim(),
+            avatar_url: String(row?.photo || row?.avatar_url || "").trim(),
+            email: String(row?.email || "").trim().toLowerCase()
+          }),
+          6
+        );
+      }
+
+      if(!profilesResult.ok && !usersResult.ok){
+        console.error("discover_fetch_warning", {
+          profiles_status: profilesResult.status,
+          users_status: usersResult.status,
+          profiles_error: String(profilesResult.error || "").slice(0, 180),
+          users_error: String(usersResult.error || "").slice(0, 180)
+        });
+      }
     }
 
-    const headers = {
-      apikey: supabaseKey,
-      Authorization: `Bearer ${supabaseKey}`
-    };
-
-    const makeSearch = (table, selectFields) => {
-      const params = new URLSearchParams();
-      params.set("select", selectFields);
-      params.set("limit", String(limit));
-      if(cleanQuery){
-        params.set("or", `(username.ilike.*${cleanQuery}*,full_name.ilike.*${cleanQuery}*)`);
-      }
-      return `${supabaseBase}/rest/v1/${table}?${params.toString()}`;
-    };
-
-    const fetchRows = async (table, selectFields) => {
-      const endpoint = makeSearch(table, selectFields);
-      const response = await fetch(endpoint, { headers, cache: "no-store" });
-      const bodyText = await response.text().catch(() => "");
-      if(!response.ok){
-        return { ok:false, rows:[], error:bodyText, status:response.status };
-      }
-      let parsed = [];
-      try{
-        parsed = bodyText ? JSON.parse(bodyText) : [];
-      }catch(_){
-        parsed = [];
-      }
-      return {
-        ok:true,
-        rows:Array.isArray(parsed) ? parsed : [],
-        error:"",
-        status:response.status
-      };
-    };
-
-    let result = await fetchRows("profiles", "id,username,full_name,avatar_url");
-    if(!result.ok){
-      result = await fetchRows("users", "user_id,username,full_name,display_name,photo");
-      if(!result.ok){
-        throw new Error(`discover_fetch_failed:${result.status}:${String(result.error || "").slice(0, 220)}`);
-      }
-      const users = result.rows.map(row => ({
-        id: String(row?.user_id || "").trim(),
+    const historyRows = await readNdjsonTail(ACCOUNT_SYNC_LOG_PATH, Math.max(1500, (offset + limit) * 8));
+    appendRows(
+      historyRows,
+      row => ({
+        id: String(row?.user_id || row?.id || "").trim(),
         username: String(row?.username || "").trim(),
         full_name: String(row?.display_name || row?.full_name || row?.username || "").trim(),
-        avatar_url: String(row?.photo || "").trim()
-      })).filter(row => row.id);
-      return res.json(users);
-    }
+        display_name: String(row?.display_name || "").trim(),
+        avatar_url: String(row?.photo || row?.avatar_url || "").trim(),
+        email: String(row?.email || "").trim().toLowerCase(),
+        ts: row?.ts
+      }),
+      3
+    );
 
-    const profiles = result.rows.map(row => ({
-      id: String(row?.id || "").trim(),
-      username: String(row?.username || "").trim(),
-      full_name: String(row?.full_name || row?.username || "").trim(),
-      avatar_url: String(row?.avatar_url || "").trim()
-    })).filter(row => row.id);
-    return res.json(profiles);
+    const rows = Array.from(usersById.values())
+      .filter(matchesQuery)
+      .sort((a, b) => {
+        const scoreDiff = (Number(b._score) || 0) - (Number(a._score) || 0);
+        if(scoreDiff !== 0) return scoreDiff;
+        const tsDiff = (Number(b._updatedAt) || 0) - (Number(a._updatedAt) || 0);
+        if(tsDiff !== 0) return tsDiff;
+        return String(a.full_name || "").localeCompare(String(b.full_name || ""));
+      })
+      .slice(offset, offset + limit)
+      .map(row => ({
+        id: row.id,
+        username: row.username,
+        full_name: row.full_name,
+        avatar_url: row.avatar_url,
+        email: row.email
+      }));
+
+    return res.json(rows);
   }catch(err){
     console.error("Discover API Error:", err?.stack || err);
     return res.status(500).json({ error: "Internal Server Error" });
@@ -3677,3 +3846,6 @@ process.on("unhandledRejection", (reason) => {
 });
 
 startServer();
+
+
+

@@ -1037,6 +1037,23 @@
             return String(match?.[1] || "").trim();
         }
 
+        function extractMissingColumnName(error){
+            const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.trim();
+            if(!text) return "";
+            const patterns = [
+                /could not find the ['"]([^'"]+)['"] column/i,
+                /column ['"]([^'"]+)['"] does not exist/i,
+                /unknown column ['"]([^'"]+)['"]/i,
+                /column ['"]([^'"]+)['"]/i
+            ];
+            for(const pattern of patterns){
+                const match = text.match(pattern);
+                const column = String(match?.[1] || "").trim();
+                if(column) return column;
+            }
+            return "";
+        }
+
         function buildGroupColumnFallback(columnName, context){
             const key = String(columnName || "").trim().toLowerCase();
             const cleanName = String(context?.cleanName || "").trim();
@@ -1645,65 +1662,47 @@
             const generatedId = makeClientUuid();
             const nowIso = new Date(startedAt).toISOString();
             const retryContext = { cleanName, cleanIcon, cleanSlogan, adminOnly, ownerId, generatedId, nowIso };
+            if(!cleanName){
+                return { ok: false, error: new Error("group_name_required"), groupId: "" };
+            }
 
             const payloadBases = [
-                { name: cleanName },
-                { group_name: cleanName },
-                { name: cleanName, group_name: cleanName },
-                { name: cleanName, icon_url: cleanIcon },
-                { group_name: cleanName, group_icon: cleanIcon },
+                { name: cleanName, group_name: cleanName, slogan: cleanSlogan, icon_url: cleanIcon, group_icon: cleanIcon, is_admin_only: adminOnly },
                 { name: cleanName, group_name: cleanName, icon_url: cleanIcon, group_icon: cleanIcon },
-                { name: cleanName, group_name: cleanName, icon_url: cleanIcon, group_icon: cleanIcon, slogan: cleanSlogan }
+                { name: cleanName, group_name: cleanName, slogan: cleanSlogan, is_admin_only: adminOnly },
+                { name: cleanName, group_name: cleanName, slogan: cleanSlogan },
+                { name: cleanName, group_name: cleanName },
+                { group_name: cleanName, icon_url: cleanIcon, group_icon: cleanIcon },
+                { group_name: cleanName },
+                { name: cleanName }
             ];
             const ownerHints = ownerId
                 ? [
+                    {},
                     { created_by: ownerId },
                     { owner_id: ownerId },
                     { user_id: ownerId },
-                    { admin_id: ownerId },
-                    { creator_id: ownerId },
-                    { user_uuid: ownerId },
-                    { owner_uuid: ownerId },
-                    { admin_uuid: ownerId },
-                    { uid: ownerId },
-                    { created_by_id: ownerId },
-                    { created_by_user_id: ownerId },
-                    { creator_user_id: ownerId },
-                    { creator_uuid: ownerId },
-                    { created_by_uuid: ownerId },
-                    { group_admin_id: ownerId },
-                    { created_by: ownerId, owner_id: ownerId },
-                    { created_by: ownerId, owner_id: ownerId, user_id: ownerId, admin_id: ownerId },
-                    {}
+                    { admin_id: ownerId }
                 ]
                 : [{}];
-            const idHints = [
-                {},
-                { id: generatedId },
-                { group_id: generatedId },
-                { group_uuid: generatedId }
-            ];
-            const timeHints = [
-                {},
-                { created_at: nowIso },
-                { created_at: nowIso, updated_at: nowIso }
-            ];
-            const adminOnlyHints = [
-                {},
-                { is_admin_only: adminOnly },
-                { is_admin_only: adminOnly ? 1 : 0 }
-            ];
+            const idHints = [{}, { id: generatedId }, { group_id: generatedId }, { group_uuid: generatedId }];
+            const timeHints = [{}, { created_at: nowIso }, { created_at: nowIso, updated_at: nowIso }];
 
+            const blockedColumns = new Set();
             const candidates = [];
             const seen = new Set();
             const pushCandidate = (candidate) => {
                 const compact = Object.fromEntries(
-                    Object.entries(candidate || {}).filter(([, value]) => value !== "" && value !== null && value !== undefined)
+                    Object.entries(candidate || {}).filter(([key, value]) => {
+                        const cleanKey = String(key || "").trim().toLowerCase();
+                        if(!cleanKey || blockedColumns.has(cleanKey)) return false;
+                        return value !== "" && value !== null && value !== undefined;
+                    })
                 );
+                const hasName = Object.prototype.hasOwnProperty.call(compact, "name") || Object.prototype.hasOwnProperty.call(compact, "group_name");
+                if(!hasName) return;
                 if(!Object.keys(compact).length) return;
-                const key = JSON.stringify(
-                    Object.keys(compact).sort().map(name => [name, compact[name]])
-                );
+                const key = JSON.stringify(Object.keys(compact).sort().map(name => [name, compact[name]]));
                 if(seen.has(key)) return;
                 seen.add(key);
                 candidates.push(compact);
@@ -1713,18 +1712,18 @@
                 ownerHints.forEach(owner => {
                     idHints.forEach(idRow => {
                         timeHints.forEach(timeRow => {
-                            adminOnlyHints.forEach(adminRow => {
-                                pushCandidate({ ...base, ...owner, ...idRow, ...timeRow, ...adminRow });
-                            });
+                            pushCandidate({ ...base, ...owner, ...idRow, is_admin_only: adminOnly, ...timeRow });
                         });
                     });
                 });
             });
 
             let lastError = null;
-            const maxAttempts = 180;
+            const maxAttempts = 220;
             for(let i = 0; i < candidates.length && i < maxAttempts; i += 1){
                 const candidate = candidates[i];
+                if(!candidate || !Object.keys(candidate).length) continue;
+                if(Object.keys(candidate).some(key => blockedColumns.has(String(key || "").trim().toLowerCase()))) continue;
                 const { error } = await supa
                     .from("groups")
                     .insert(candidate);
@@ -1756,7 +1755,21 @@
                         return { ok: true, data: candidate, groupId: duplicateId };
                     }
                 }
-                if(maybeMissingColumn(error)) continue;
+                if(maybeMissingColumn(error)){
+                    const missingColumn = extractMissingColumnName(error);
+                    if(missingColumn){
+                        const cleanMissing = String(missingColumn || "").trim().toLowerCase();
+                        if(cleanMissing){
+                            blockedColumns.add(cleanMissing);
+                        }
+                        if(Object.prototype.hasOwnProperty.call(candidate, missingColumn)){
+                            const stripped = { ...candidate };
+                            delete stripped[missingColumn];
+                            pushCandidate(stripped);
+                        }
+                    }
+                    continue;
+                }
                 const normalized = normalizeGroupInsertCandidateFromError(candidate, error, retryContext);
                 if(normalized?.retry && normalized?.candidate){
                     pushCandidate(normalized.candidate);
@@ -2108,6 +2121,7 @@
     </script>
 </body>
 </html>
+
 
 
 

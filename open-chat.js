@@ -1770,7 +1770,8 @@
 
   function buildMissedCallText(mediaType){
     const mode = String(mediaType || "").trim().toLowerCase() === "video" ? "video" : "audio";
-    return `Missed ${mode} call`;
+    const caller = getDisplayName(myUser, "User");
+    return `${caller} missed call in ${mode} call`;
   }
 
   async function sendMissedCallThreadMessage(callId, mediaType){
@@ -2095,7 +2096,22 @@
   }
 
   async function handleCallSignal(signal){
-    if(!signal || signal.to_user_id !== myId || signal.from_user_id !== receiverId) return;
+    if(!signal || signal.to_user_id !== myId) return;
+    const isActivePeerSignal = signal.from_user_id === receiverId;
+    if(!isActivePeerSignal){
+      if(signal.type === "call-offer"){
+        const isReallyBusy = !!(activeCall || pendingIncomingOffer);
+        await sendCallSignal({
+          type: isReallyBusy ? "call-busy" : "call-decline",
+          call_id: signal.call_id,
+          from_user_id: myId,
+          to_user_id: signal.from_user_id,
+          media_type: signal.media_type,
+          reason: isReallyBusy ? "busy" : "not_available"
+        });
+      }
+      return;
+    }
     if(signal.type === "call-offer"){
       if(isPeerBlocked){
         await sendCallSignal({
@@ -2173,8 +2189,7 @@
     // Keep polling even in background so incoming calls are picked without refresh.
     const query = new URLSearchParams();
     query.set("user_id", myId);
-    query.set("with_user_id", receiverId);
-    query.set("limit", "50");
+    query.set("limit", "80");
     const bases = buildApiBases();
     for(const base of bases){
       try{
@@ -2750,3 +2765,5 @@
   window.scrollBottom = scrollBottom;
   window.onload = initPage;
 })();
+
+

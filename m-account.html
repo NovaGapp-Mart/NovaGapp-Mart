@@ -1419,7 +1419,35 @@ function bindVideoGridThumbnail(imgEl, item){
     imgEl.src = directThumb;
     imgEl.onerror = () => {
       imgEl.onerror = null;
+      const key = getVideoThumbCacheKey(item);
+      const cached = videoThumbDataCache.get(key);
+      if(cached){
+        imgEl.src = cached;
+        return;
+      }
       imgEl.src = VIDEO_THUMBNAIL_FALLBACK;
+      let pending = videoThumbPending.get(key);
+      if(!pending){
+        pending = createFirstFrameThumbnail(item.url)
+          .then(dataUrl => {
+            const clean = String(dataUrl || "").trim();
+            if(clean) videoThumbDataCache.set(key, clean);
+            return clean;
+          })
+          .catch(() => "")
+          .finally(() => {
+            videoThumbPending.delete(key);
+          });
+        videoThumbPending.set(key, pending);
+      }
+      pending.then(dataUrl => {
+        const clean = String(dataUrl || "").trim();
+        if(!clean) return;
+        if(document.body.contains(imgEl)){
+          imgEl.src = clean;
+          imgEl.onerror = null;
+        }
+      });
     };
     return;
   }
@@ -1917,3 +1945,4 @@ document.addEventListener("click", () => {
 
 </body>
 </html>
+
