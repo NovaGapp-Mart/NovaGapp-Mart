@@ -76,7 +76,12 @@
   let ringAudioCtx = null;
   let ringAudioElement = null;
   let ringMode = "";
-  let supportsUsersOnCallColumn = !["0", "false", "off", "no"].includes(String(window.CALL_USE_USERS_ON_CALL || "true").trim().toLowerCase());
+    function isUsersOnCallColumnEnabled(){
+    const raw = String(window.CALL_USE_USERS_ON_CALL ?? "").trim().toLowerCase();
+    return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
+  }
+
+  let supportsUsersOnCallColumn = isUsersOnCallColumnEnabled();
   const bufferedIceByCall = new Map();
   const callOutcomeMessageKeys = new Set();
   let messageRows = [];
@@ -154,14 +159,89 @@
     return true;
   }
 
+    function isPlaceholderProfileName(value){
+    const text = String(value || "").trim().toLowerCase();
+    if(!text) return true;
+    if(text === "user" || text === "owner" || text === "member" || text === "guest" || text === "unknown") return true;
+    if(/^user[\s._-]*[a-z0-9]{4,}$/i.test(text)) return true;
+    if(/^member[\s._-]*[a-z0-9]{4,}$/i.test(text)) return true;
+    if(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)) return true;
+    return false;
+  }
+
+  function fallbackNameFromEmail(value){
+    const email = String(value || "").trim().toLowerCase();
+    const local = String(email.split("@")[0] || "").replace(/[^a-z0-9._-]+/g, " ").replace(/[._-]+/g, " ").trim();
+    if(!local) return "";
+    return local.split(/\s+/).map(part => part ? (part[0].toUpperCase() + part.slice(1)) : "").filter(Boolean).join(" ").trim();
+  }
+
   function getDisplayName(profile, fallback){
     const row = profile || {};
-    return String(row.display_name || row.full_name || row.username || fallback || "User").trim() || "User";
+    const meta = row?.user_metadata && typeof row.user_metadata === "object" ? row.user_metadata : {};
+    const candidates = [
+      row.display_name,
+      row.full_name,
+      row.username,
+      row.user_name,
+      row.name,
+      meta.full_name,
+      meta.name,
+      meta.username,
+      fallback
+    ];
+    for(const candidate of candidates){
+      const clean = String(candidate || "").trim();
+      if(clean && !isPlaceholderProfileName(clean)) return clean;
+    }
+    return fallbackNameFromEmail(row.email || meta.email || "") || "User";
   }
 
   function getProfilePhoto(profile, fallback){
     const row = profile || {};
-    return String(row.photo || row.avatar_url || fallback || "").trim();
+    return String(row.photo || row.avatar_url || row.user_avatar || row.member_avatar || row?.user_metadata?.avatar_url || row?.user_metadata?.picture || fallback || "").trim();
+  }
+
+  function normalizeUserProfileRow(raw){
+    const row = raw && typeof raw === "object" ? raw : {};
+    const userId = String(row.user_id || row.id || "").trim();
+    return {
+      ...row,
+      user_id: userId,
+      display_name: getDisplayName(row, "User"),
+      photo: getProfilePhoto(row, "")
+    };
+  }
+
+    async function fetchUsersByIds(userIds){
+    const ids = Array.from(new Set(Array.from(userIds || []).map(id => String(id || "").trim()).filter(id => isUuid(id))));
+    if(!ids.length) return [];
+    const attempts = [
+      "user_id,id,username,full_name,display_name,photo,avatar_url,email",
+      "user_id,username,full_name,display_name,photo,avatar_url,email",
+      "id,username,full_name,display_name,photo,avatar_url,email",
+      "user_id,username,full_name,photo,email",
+      "id,username,full_name,photo,email"
+    ];
+    const idColumns = ["user_id", "id"];
+    for(const fields of attempts){
+      for(const idColumn of idColumns){
+        try{
+          const { data, error } = await supa
+            .from("users")
+            .select(fields)
+            .in(idColumn, ids)
+            .limit(Math.max(50, ids.length + 6));
+          if(!error){
+            return (data || []).map(normalizeUserProfileRow).filter(row => row.user_id);
+          }
+          if(!maybeMissingColumn(error)) return [];
+        }catch(_){
+          return [];
+        }
+      }
+    }
+    return [];
   }
 
   function normalizeMemberCount(value){
@@ -174,11 +254,24 @@
     return n > 0 ? `${n} Members` : "Members";
   }
 
-  function isAdminMemberRow(row){
-    const role = String(row?.role || "").trim().toLowerCase();
+    function isAdminMemberRow(row){
+    const role = String(row?.role || row?.member_role || row?.user_role || "").trim().toLowerCase();
     if(role === "admin" || role === "owner" || role === "creator") return true;
     if(row?.is_admin === true || row?.is_admin === 1) return true;
     return false;
+  }
+
+  function canManageGroupMembers(){
+    if(!isGroupChat || !isUuid(myId)) return false;
+    if(String(groupOwnerId || "").trim() === myId) return true;
+    const currentMember = groupMembers.find(member => String(member?.user_id || "").trim() === myId) || null;
+    return !!currentMember && isAdminMemberRow(currentMember);
+  }
+
+  function closeGroupMemberActionMenus(){
+    document.querySelectorAll(".group-member-menu").forEach(node => {
+      node.classList.add("hidden");
+    });
   }
 
   function findGroupCreatorMember(){
@@ -261,23 +354,23 @@
     return value;
   }
 
-  function resolveMemberUserId(row, index){
-    return readFirstValue(row, ["user_id", "member_id", "user_uuid", "member_uuid", "participant_id", "member", "uid"]) || `member_${index}`;
+    function resolveMemberUserId(row, index){
+    return readFirstValue(row, ["user_id", "member_id", "user_uuid", "member_uuid", "participant_id", "member", "uid", "user", "userId", "member_user_id", "profile_id", "account_id"]) || `member_${index}`;
   }
 
   function resolveMemberName(row){
-    return String(row?.user_name || row?.name || row?.member_name || "Member").trim() || "Member";
+    return String(row?.user_name || row?.display_name || row?.full_name || row?.username || row?.name || row?.member_name || "Member").trim() || "Member";
   }
 
   function resolveMemberAvatar(row){
-    return String(row?.user_avatar || row?.avatar_url || row?.member_avatar || "").trim();
+    return String(row?.user_avatar || row?.avatar_url || row?.photo || row?.member_avatar || "").trim();
   }
 
   function resolveMemberGroupId(row){
     return readFirstValue(row, ["group_id", "group_uuid", "gid", "groupId", "group", "chat_id", "room_id", "conversation_id"]);
   }
 
-  function isMemberAdmin(row, ownerHint, memberUserId){
+    function isMemberAdmin(row, ownerHint, memberUserId){
     const role = parseRoleText(row);
     const userId = String(memberUserId || resolveMemberUserId(row, 0) || "").trim();
     if(role === "admin" || role === "owner" || role === "creator") return true;
@@ -286,7 +379,161 @@
     return false;
   }
 
-  async function fetchGroupMembers(groupId, ownerHint){
+  async function enrichGroupMembers(members, ownerHint){
+    const ownerId = String(ownerHint || groupOwnerId || "").trim();
+    const rows = Array.isArray(members) ? members.slice() : [];
+    const ids = Array.from(new Set(rows.map(member => String(member?.user_id || "").trim()).filter(id => isUuid(id))));
+    const profiles = await fetchUsersByIds(ids);
+    const profileById = new Map();
+    profiles.forEach(profile => {
+      const id = String(profile?.user_id || "").trim();
+      if(id) profileById.set(id, profile);
+    });
+    return rows.map(member => {
+      const userId = String(member?.user_id || "").trim();
+      const owner = !!(ownerId && userId === ownerId);
+      const profile = profileById.get(userId) || null;
+      const next = { ...(member || {}) };
+      next.user_id = userId || String(resolveMemberUserId(member, 0) || "").trim();
+      next.display_name = profile
+        ? getDisplayName(profile, resolveMemberName(member))
+        : getDisplayName(member, resolveMemberName(member));
+      next.photo = profile
+        ? getProfilePhoto(profile, resolveMemberAvatar(member))
+        : getProfilePhoto(member, resolveMemberAvatar(member));
+      next.role = owner ? "owner" : (parseRoleText(member) || (isAdminMemberRow(member) ? "admin" : "member"));
+      next.is_admin = owner || isAdminMemberRow(member);
+      if(!next._source && member && typeof member === "object" && member !== next){
+        next._source = member._source || member;
+      }
+      return next;
+    }).filter(member => String(member?.user_id || "").trim());
+  }
+
+  const GROUP_MEMBER_GROUP_KEYS = ["group_id", "group_uuid", "gid", "groupId", "group", "chat_id", "room_id", "conversation_id"];
+  const GROUP_MEMBER_USER_KEYS = ["user_id", "member_id", "user_uuid", "member_uuid", "uid", "user", "userId", "member", "member_user_id", "profile_id", "account_id"];
+
+  function buildGroupMemberKeyPairs(member, groupId, memberUserId){
+    const source = member?._source && typeof member._source === "object" ? member._source : (member && typeof member === "object" ? member : {});
+    const pairs = [];
+    const seen = new Set();
+    const addPair = (groupKey, userKey) => {
+      if(!groupKey || !userKey) return;
+      const key = `${groupKey}|${userKey}`;
+      if(seen.has(key)) return;
+      seen.add(key);
+      pairs.push({ groupKey, userKey, groupValue: groupId, userValue: memberUserId });
+    };
+    GROUP_MEMBER_GROUP_KEYS.forEach(groupKey => {
+      GROUP_MEMBER_USER_KEYS.forEach(userKey => {
+        if(Object.prototype.hasOwnProperty.call(source, groupKey) && Object.prototype.hasOwnProperty.call(source, userKey)){
+          addPair(groupKey, userKey);
+        }
+      });
+    });
+    if(!pairs.length){
+      GROUP_MEMBER_GROUP_KEYS.forEach(groupKey => {
+        GROUP_MEMBER_USER_KEYS.forEach(userKey => addPair(groupKey, userKey));
+      });
+    }
+    return pairs;
+  }
+
+  function buildGroupMemberAdminPayloads(member){
+    const source = member?._source && typeof member._source === "object" ? member._source : (member && typeof member === "object" ? member : {});
+    const rows = [];
+    const seen = new Set();
+    const add = (payload) => {
+      const compact = Object.fromEntries(Object.entries(payload || {}).filter(([, value]) => value !== undefined));
+      const key = JSON.stringify(compact);
+      if(!Object.keys(compact).length || seen.has(key)) return;
+      seen.add(key);
+      rows.push(compact);
+    };
+    if(Object.prototype.hasOwnProperty.call(source, "role") || (!Object.prototype.hasOwnProperty.call(source, "member_role") && !Object.prototype.hasOwnProperty.call(source, "user_role"))){
+      add({ role: "admin", is_admin: true });
+      add({ role: "admin" });
+    }
+    if(Object.prototype.hasOwnProperty.call(source, "member_role")){
+      add({ member_role: "admin", is_admin: true });
+      add({ member_role: "admin" });
+    }
+    if(Object.prototype.hasOwnProperty.call(source, "user_role")){
+      add({ user_role: "admin", is_admin: true });
+      add({ user_role: "admin" });
+    }
+    add({ is_admin: true });
+    return rows;
+  }
+
+  async function removeGroupMemberFromDatabase(member){
+    const memberId = String(member?.user_id || "").trim();
+    const cleanGroupId = String(groupInfo?.id || receiverId || "").trim();
+    if(!memberId || !cleanGroupId) return false;
+    const source = member?._source && typeof member._source === "object" ? member._source : (member && typeof member === "object" ? member : {});
+    if(source.id){
+      try{
+        const { data, error } = await supa.from("group_members").delete().eq("id", source.id).select("id");
+        if(!error && Array.isArray(data) && data.length) return true;
+        if(!maybeMissingColumn(error)) return false;
+      }catch(_){
+        return false;
+      }
+    }
+    for(const pair of buildGroupMemberKeyPairs(member, cleanGroupId, memberId)){
+      try{
+        const { data, error } = await supa
+          .from("group_members")
+          .delete()
+          .eq(pair.groupKey, pair.groupValue)
+          .eq(pair.userKey, pair.userValue)
+          .select("id");
+        if(!error && Array.isArray(data) && data.length) return true;
+        if(!maybeMissingColumn(error)) return false;
+      }catch(_){
+        return false;
+      }
+    }
+    return false;
+  }
+
+  async function makeGroupMemberAdminInDatabase(member){
+    const memberId = String(member?.user_id || "").trim();
+    const cleanGroupId = String(groupInfo?.id || receiverId || "").trim();
+    if(!memberId || !cleanGroupId) return false;
+    const source = member?._source && typeof member._source === "object" ? member._source : (member && typeof member === "object" ? member : {});
+    const payloads = buildGroupMemberAdminPayloads(member);
+    if(source.id){
+      for(const payload of payloads){
+        try{
+          const { data, error } = await supa.from("group_members").update(payload).eq("id", source.id).select("id");
+          if(!error && Array.isArray(data) && data.length) return true;
+          if(!maybeMissingColumn(error)) return false;
+        }catch(_){
+          return false;
+        }
+      }
+    }
+    for(const pair of buildGroupMemberKeyPairs(member, cleanGroupId, memberId)){
+      for(const payload of payloads){
+        try{
+          const { data, error } = await supa
+            .from("group_members")
+            .update(payload)
+            .eq(pair.groupKey, pair.groupValue)
+            .eq(pair.userKey, pair.userValue)
+            .select("id");
+          if(!error && Array.isArray(data) && data.length) return true;
+          if(!maybeMissingColumn(error)) return false;
+        }catch(_){
+          return false;
+        }
+      }
+    }
+    return false;
+  }
+
+    async function fetchGroupMembers(groupId, ownerHint){
     const cleanGroupId = String(groupId || receiverId || "").trim();
     const ownerId = String(ownerHint || groupOwnerId || "").trim();
     if(!cleanGroupId) return [];
@@ -307,14 +554,17 @@
               display_name: resolveMemberName(row),
               photo: resolveMemberAvatar(row),
               role: parseRoleText(row),
-              is_admin: admin
+              is_admin: admin,
+              _source: row
             };
           })
           .filter(row => String(row?.user_id || "").trim());
       }
     }catch(_){ }
 
-    if(members.length) return members;
+    if(members.length){
+      return enrichGroupMembers(members, ownerId);
+    }
 
     const fallbackIds = new Set();
     if(isUuid(ownerId)) fallbackIds.add(ownerId);
@@ -334,46 +584,28 @@
 
     const ids = Array.from(fallbackIds);
     if(!ids.length) return [];
-
+    const profiles = await fetchUsersByIds(ids);
     const profileById = new Map();
-    const userSelectAttempts = [
-      "user_id,username,full_name,display_name,photo,avatar_url",
-      "user_id,username,full_name,display_name,photo",
-      "user_id,username,full_name,photo",
-      "user_id,username,full_name"
-    ];
-    for(const fields of userSelectAttempts){
-      try{
-        const { data, error } = await supa
-          .from("users")
-          .select(fields)
-          .in("user_id", ids)
-          .limit(Math.max(50, ids.length + 6));
-        if(!error){
-          (data || []).forEach(row => {
-            const uid = String(row?.user_id || "").trim();
-            if(uid) profileById.set(uid, row);
-          });
-          break;
-        }
-        if(!maybeMissingColumn(error)) break;
-      }catch(_){ break; }
-    }
+    profiles.forEach(profile => {
+      const uid = String(profile?.user_id || "").trim();
+      if(uid) profileById.set(uid, profile);
+    });
 
-    return ids.map((uid) => {
+    return ids.map(uid => {
       const profile = profileById.get(uid) || {};
       const admin = !!(ownerId && uid === ownerId);
       return {
         user_id: uid,
-        display_name: getDisplayName(profile, admin ? "Admin" : "Member"),
+        display_name: getDisplayName(profile, admin ? "Owner" : "Member"),
         photo: getProfilePhoto(profile, ""),
-        role: admin ? "admin" : "member",
-        is_admin: admin
+        role: admin ? "owner" : "member",
+        is_admin: admin,
+        _source: null
       };
     });
   }
 
-  async function fetchGroupInfo(groupId){
+    async function fetchGroupInfo(groupId){
     const cleanGroupId = String(groupId || receiverId || "").trim();
     let groupRow = null;
     try{
@@ -390,7 +622,22 @@
     }catch(_){ }
     groupOwnerId = resolveGroupOwnerId(groupRow);
     const resolvedGroupId = String(readFirstValue(groupRow, ["id", "group_id", "group_uuid", "gid"]) || cleanGroupId).trim();
-    const members = await fetchGroupMembers(resolvedGroupId, groupOwnerId);
+    let members = await fetchGroupMembers(resolvedGroupId, groupOwnerId);
+    if(groupOwnerId && !members.some(member => String(member?.user_id || "").trim() === groupOwnerId)){
+      const ownerProfiles = await fetchUsersByIds([groupOwnerId]);
+      const ownerProfile = ownerProfiles[0] || null;
+      if(ownerProfile){
+        members.unshift({
+          user_id: groupOwnerId,
+          display_name: getDisplayName(ownerProfile, "Owner"),
+          photo: getProfilePhoto(ownerProfile, ""),
+          role: "owner",
+          is_admin: true,
+          _source: null
+        });
+      }
+    }
+    members = await enrichGroupMembers(members, groupOwnerId);
     if(!groupOwnerId){
       const adminMember = members.find(member => member?.is_admin);
       if(adminMember?.user_id){
@@ -825,7 +1072,7 @@
     }, 2800);
   }
 
-  function renderGroupMembers(){
+      function renderGroupMembers(){
     if(!groupMembersSection || !groupMembersList) return;
     if(!isGroupChat){
       groupMembersSection.classList.add("hidden");
@@ -834,10 +1081,12 @@
     }
     groupMembersSection.classList.remove("hidden");
     groupMembersList.innerHTML = "";
+    closeGroupMemberActionMenus();
     if(!groupMembers.length){
       groupMembersList.innerHTML = "<p class='text-sm text-gray-500'>No members found.</p>";
       return;
     }
+    const canManage = canManageGroupMembers();
     groupMembers.forEach(member => {
       const row = member && typeof member === "object" ? member : {};
       const memberId = String(row?.user_id || "").trim();
@@ -864,6 +1113,80 @@
       meta.appendChild(badge);
       line.appendChild(avatar);
       line.appendChild(meta);
+
+      if(canManage && memberId && memberId !== myId && !owner){
+        const actionWrap = document.createElement("div");
+        actionWrap.className = "relative group-member-actions";
+        const actionBtn = document.createElement("button");
+        actionBtn.type = "button";
+        actionBtn.className = "w-8 h-8 rounded-full text-lg text-gray-500 hover:bg-gray-200";
+        actionBtn.textContent = "...";
+        const menu = document.createElement("div");
+        menu.className = "group-member-menu hidden absolute right-0 top-9 min-w-[160px] rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden z-20";
+        const addMenuButton = (label, handler, danger) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = danger
+            ? "block w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50"
+            : "block w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50";
+          btn.textContent = label;
+          btn.addEventListener("click", async event => {
+            event.stopPropagation();
+            closeGroupMemberActionMenus();
+            if(actionBtn.disabled) return;
+            actionBtn.disabled = true;
+            try{
+              await handler();
+            }finally{
+              actionBtn.disabled = false;
+            }
+          });
+          menu.appendChild(btn);
+        };
+        if(!admin){
+          addMenuButton("Make admin", async () => {
+            const ok = await makeGroupMemberAdminInDatabase(row);
+            if(!ok){
+              alert("Unable to update admin role.");
+              return;
+            }
+            row.role = "admin";
+            row.is_admin = true;
+            if(row._source && typeof row._source === "object"){
+              row._source.role = "admin";
+              row._source.is_admin = true;
+            }
+            renderPeerHeader();
+          }, false);
+        }
+        addMenuButton("Remove from group", async () => {
+          const ok = await removeGroupMemberFromDatabase(row);
+          if(!ok){
+            alert("Unable to remove member from group.");
+            return;
+          }
+          groupMembers = groupMembers.filter(memberRow => String(memberRow?.user_id || "").trim() !== memberId);
+          if(groupInfo){
+            groupInfo.members = groupMembers.slice();
+            groupInfo.member_count = normalizeMemberCount(groupMembers.length);
+          }
+          renderPeerHeader();
+        }, true);
+        if(menu.childElementCount){
+          actionBtn.addEventListener("click", event => {
+            event.stopPropagation();
+            const shouldOpen = menu.classList.contains("hidden");
+            closeGroupMemberActionMenus();
+            if(shouldOpen){
+              menu.classList.remove("hidden");
+            }
+          });
+          actionWrap.appendChild(actionBtn);
+          actionWrap.appendChild(menu);
+          line.appendChild(actionWrap);
+        }
+      }
+
       groupMembersList.appendChild(line);
     });
   }
@@ -2984,6 +3307,9 @@
     }
     if(messageContextMenu.style.display === "block" && !messageContextMenu.contains(target)){
       closeContextMenu();
+    }
+    if(target instanceof Element && !target.closest(".group-member-actions")){
+      closeGroupMemberActionMenus();
     }
     if(deleteChoiceModal.style.display === "flex" && target === deleteChoiceModal){
       closeDeleteChoice();

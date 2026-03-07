@@ -563,13 +563,44 @@
             if(text.includes("unknown column")) return true;
             return false;
         }
+        function isPlaceholderProfileName(value){
+            const text = String(value || "").trim().toLowerCase();
+            if(!text) return true;
+            if(text === "user" || text === "owner" || text === "member" || text === "guest" || text === "unknown") return true;
+            if(/^user[\s._-]*[a-z0-9]{4,}$/i.test(text)) return true;
+            if(/^member[\s._-]*[a-z0-9]{4,}$/i.test(text)) return true;
+            if(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)) return true;
+            return false;
+        }
+
+        function fallbackNameFromEmail(value){
+            const email = String(value || "").trim().toLowerCase();
+            const local = String(email.split("@")[0] || "").replace(/[^a-z0-9._-]+/g, " ").replace(/[._-]+/g, " ").trim();
+            if(!local) return "";
+            return local.split(/\s+/).map(part => part ? (part[0].toUpperCase() + part.slice(1)) : "").filter(Boolean).join(" ").trim();
+        }
 
         function displayName(user){
-            return String(user?.display_name || user?.full_name || user?.username || "User").trim() || "User";
+            const source = user && typeof user === "object" ? user : {};
+            const meta = source?.user_metadata && typeof source.user_metadata === "object" ? source.user_metadata : {};
+            const candidates = [
+                source?.display_name,
+                source?.full_name,
+                source?.username,
+                meta?.full_name,
+                meta?.name,
+                meta?.username
+            ];
+            for(const candidate of candidates){
+                const clean = String(candidate || "").trim();
+                if(clean && !isPlaceholderProfileName(clean)) return clean;
+            }
+            const derived = fallbackNameFromEmail(source?.email || meta?.email || "");
+            return derived || "User";
         }
 
         function avatarUrl(user){
-            return String(user?.photo || user?.avatar_url || "").trim();
+            return String(user?.photo || user?.avatar_url || user?.user_metadata?.avatar_url || user?.user_metadata?.picture || "").trim();
         }
 
         function sanitizeNameForQuery(value){
@@ -783,12 +814,12 @@
             return `open-chat.html?${qp.toString()}`;
         }
 
-        async function fetchUserById(uid){
+                async function fetchUserById(uid){
             const attempts = [
-                "user_id,username,full_name,display_name,photo,avatar_url",
-                "user_id,username,full_name,display_name,photo",
-                "user_id,username,full_name,photo",
-                "user_id,username,full_name"
+                "user_id,username,full_name,display_name,photo,avatar_url,email",
+                "user_id,username,full_name,display_name,photo,email",
+                "user_id,username,full_name,photo,email",
+                "user_id,username,full_name,email"
             ];
             for(const fields of attempts){
                 const { data, error } = await supa.from("users").select(fields).eq("user_id", uid).maybeSingle();
@@ -806,10 +837,10 @@
                 .filter(id => isUuid(id) && (includeCurrent || id !== currentUserId));
             if(!ids.length) return [];
             const attempts = [
-                "user_id,username,full_name,display_name,photo,avatar_url",
-                "user_id,username,full_name,display_name,photo",
-                "user_id,username,full_name,photo",
-                "user_id,username,full_name"
+                "user_id,username,full_name,display_name,photo,avatar_url,email",
+                "user_id,username,full_name,display_name,photo,email",
+                "user_id,username,full_name,photo,email",
+                "user_id,username,full_name,email"
             ];
             for(const fields of attempts){
                 const { data, error } = await supa
@@ -825,7 +856,6 @@
             }
             return [];
         }
-
         function putRecentContact(map, userId, createdAt){
             const id = String(userId || "").trim();
             if(!isUuid(id) || id === currentUserId) return;
@@ -1284,15 +1314,11 @@
                     const ownerId = extractGroupOwnerId(row);
                     const memberMatch = groupIds.has(id);
                     const ownerMatch = ownerId && ownerId === currentUserId;
-                    const noOwnerColumns = !hasAnyKnownOwnerField(row);
-                    if(memberMatch || ownerMatch || (!groupIds.size && noOwnerColumns)){
+                    if(memberMatch || ownerMatch){
                         addGroupRows([row]);
                         matchedCount += 1;
                     }
                 });
-                if(!matchedCount && !groupIds.size){
-                    groupRows.slice(0, 120).forEach(row => addGroupRows([row]));
-                }
             }
 
             const ownerIds = Array.from(new Set(Array.from(byId.values())
@@ -1312,9 +1338,6 @@
                         const resolvedName = displayName(ownerProfile);
                         if(!groupRow.owner_name || /^(user|owner)$/i.test(String(groupRow.owner_name || "").trim())){
                             groupRow.owner_name = resolvedName;
-                        }
-                        if(!groupRow.img){
-                            groupRow.img = avatarUrl(ownerProfile);
                         }
                     }else if(ownerId && ownerId === currentUserId && (!groupRow.owner_name || /^(user|owner)$/i.test(String(groupRow.owner_name || "").trim()))){
                         groupRow.owner_name = displayName(currentUser || {});

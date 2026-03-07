@@ -539,6 +539,37 @@ function isMissingColumnError(error){
   return text.includes("column") && text.includes("does not exist");
 }
 
+function buildUserSearchFilters(clean){
+  const value = String(clean || "").replace(/[,%()]/g, " ").replace(/\s+/g, " ").trim();
+  if(!value) return [""];
+  return [
+    `username.ilike.%${value}%,full_name.ilike.%${value}%,display_name.ilike.%${value}%,email.ilike.%${value}%`,
+    `username.ilike.%${value}%,full_name.ilike.%${value}%,display_name.ilike.%${value}%`,
+    `username.ilike.%${value}%,full_name.ilike.%${value}%`,
+    `username.ilike.%${value}%`
+  ];
+}
+
+async function runUsersQuery(selectCols, clean, limit){
+  const filters = buildUserSearchFilters(clean);
+  let lastError = null;
+  for(const filter of filters){
+    let request = supa.from("users").select(selectCols).limit(limit);
+    if(filter){
+      request = request.or(filter);
+    }
+    const { data, error } = await request;
+    if(!error){
+      return { data: Array.isArray(data) ? data : [], error: null };
+    }
+    lastError = error;
+    if(!isMissingColumnError(error)){
+      return { data: [], error };
+    }
+  }
+  return { data: [], error: lastError };
+}
+
 async function fetchUsersFromApi(q){
   if(!supa) return [];
   const query = String(q || "").trim();
@@ -563,16 +594,8 @@ async function fetchUsersFromApi(q){
     "user_id,username,avatar_url"
   ];
 
-  const runVariant = async (selectCols, useSearch) => {
-    let request = supa.from("users").select(selectCols).limit(320);
-    if(useSearch && clean){
-      request = request.ilike("username", `%${clean}%`);
-    }
-    return request;
-  };
-
   for(const cols of selectVariants){
-    const { data, error } = await runVariant(cols, !!clean);
+    const { data, error } = await runUsersQuery(cols, clean, 320);
     if(error){
       if(isMissingColumnError(error)) continue;
       if(!merged.length){
@@ -586,14 +609,19 @@ async function fetchUsersFromApi(q){
 
   if(clean && !merged.length){
     for(const cols of selectVariants){
-      const { data, error } = await runVariant(cols, false);
+      const { data, error } = await runUsersQuery(cols, "", 320);
       if(error){
         if(isMissingColumnError(error)) continue;
         break;
       }
       const rows = (Array.isArray(data) ? data : []).filter(row => {
-        const uname = String(row?.username || row?.display_name || row?.full_name || "").toLowerCase();
-        return uname.includes(clean.toLowerCase());
+        const hay = [
+          row?.username || "",
+          row?.display_name || "",
+          row?.full_name || "",
+          row?.email || ""
+        ].join(" ").toLowerCase();
+        return hay.includes(clean.toLowerCase());
       });
       pushRows(rows);
       if(merged.length >= 200) break;
@@ -625,11 +653,7 @@ async function fetchUsersFallback(q){
   };
 
   for(const cols of variants){
-    let request = supa.from("users").select(cols).limit(320);
-    if(clean){
-      request = request.ilike("username", `%${clean}%`);
-    }
-    const { data, error } = await request;
+    const { data, error } = await runUsersQuery(cols, clean, 320);
     if(error){
       if(isMissingColumnError(error)) continue;
       console.error("users fallback error", error);
@@ -645,28 +669,37 @@ async function fetchUsersFallback(q){
 async function fetchUsers(q){
   const query = String(q || "").trim();
   const tokens = tokenized(query);
-  const [discoverUsers, apiUsers, profileUsers] = await Promise.all([
+  const primaryResults = await Promise.allSettled([
     fetchUsersFromDiscoverApi(query),
     fetchUsersFromApi(query),
     fetchProfilesFromApi(query)
   ]);
+  const discoverUsers = primaryResults[0].status === "fulfilled" ? primaryResults[0].value : [];
+  const apiUsers = primaryResults[1].status === "fulfilled" ? primaryResults[1].value : [];
+  const profileUsers = primaryResults[2].status === "fulfilled" ? primaryResults[2].value : [];
 
   let users = mergeUniqueUsers(discoverUsers, apiUsers, profileUsers);
   if(!users.length || (query && users.length < 16)){
-    const [fallbackUsers, fallbackProfiles] = await Promise.all([
+    const fallbackResults = await Promise.allSettled([
       fetchUsersFallback(query),
       fetchProfilesFromApi(query)
     ]);
+    const fallbackUsers = fallbackResults[0].status === "fulfilled" ? fallbackResults[0].value : [];
+    const fallbackProfiles = fallbackResults[1].status === "fulfilled" ? fallbackResults[1].value : [];
     users = mergeUniqueUsers(users, fallbackUsers, fallbackProfiles);
   }
 
   if(query && !users.length){
-    const [discoverAll, apiAll, profilesAll, fallbackAll] = await Promise.all([
+    const fallbackAllResults = await Promise.allSettled([
       fetchUsersFromDiscoverApi(""),
       fetchUsersFromApi(""),
       fetchProfilesFromApi(""),
       fetchUsersFallback("")
     ]);
+    const discoverAll = fallbackAllResults[0].status === "fulfilled" ? fallbackAllResults[0].value : [];
+    const apiAll = fallbackAllResults[1].status === "fulfilled" ? fallbackAllResults[1].value : [];
+    const profilesAll = fallbackAllResults[2].status === "fulfilled" ? fallbackAllResults[2].value : [];
+    const fallbackAll = fallbackAllResults[3].status === "fulfilled" ? fallbackAllResults[3].value : [];
     users = mergeUniqueUsers(users, discoverAll, apiAll, profilesAll, fallbackAll);
   }
 
@@ -960,12 +993,16 @@ async function searchUsers(){
   list.innerHTML = "<p style='padding:12px;color:#777'>Loading...</p>";
   try{
     await ensureSession();
-    const [users, reels, videos, posts] = await Promise.all([
+    const results = await Promise.allSettled([
       fetchUsers(query),
       fetchReels(query),
       fetchVideos(query),
       fetchPosts(query)
     ]);
+    const users = results[0].status === "fulfilled" ? results[0].value : [];
+    const reels = results[1].status === "fulfilled" ? results[1].value : [];
+    const videos = results[2].status === "fulfilled" ? results[2].value : [];
+    const posts = results[3].status === "fulfilled" ? results[3].value : [];
     list.innerHTML = "";
     list.appendChild(renderReelsSection(reels));
     list.appendChild(renderVideosSection(videos));
@@ -985,7 +1022,15 @@ async function searchUsers(){
     if(String(err?.message || "").toLowerCase() === "login_required"){
       return;
     }
-    list.innerHTML = "<p style='padding:12px;color:#c00'>Unable to load search results</p>";
+    console.error("search_users_failed", err);
+    list.innerHTML = "";
+    list.appendChild(renderReelsSection([]));
+    list.appendChild(renderVideosSection([]));
+    list.appendChild(renderPostsSection([]));
+    list.appendChild(renderUserSection([], "account", "SELLERS & BUYERS"));
+    list.appendChild(renderUserSection([], "profile", "PROFILE"));
+    list.appendChild(renderUserSection([], "users", "USERS"));
+    setActiveTab(activeTab);
   }
 }
 

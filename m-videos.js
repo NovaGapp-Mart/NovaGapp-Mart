@@ -14,6 +14,8 @@
   const VIDEO_MIME_TYPES = new Set(["video/mp4","video/webm","video/quicktime","video/x-matroska","video/ogg","video/mpeg"]);
   const THUMB_MIME_TYPES = new Set(["image/jpeg","image/png","image/webp"]);
   const FALLBACK_THUMBNAIL = "Images/no-image.png";
+  const PREVIEW_FRAME_SEEK_SECONDS = 0.1;
+  const posterFrameCache = new Map();
   const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
   const MONETIZATION_MIN_FOLLOWERS = 5000;
   const MONETIZATION_UNLOCK_USD = 10;
@@ -666,7 +668,7 @@
     return list;
   }
 
-  function setImageSourceWithFallback(image, candidates){
+    function setImageSourceWithFallback(image, candidates){
     if(!image) return;
     const queue = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
     if(!queue.length){
@@ -682,6 +684,105 @@
       image.src = queue[index];
     };
     image.src = queue[0];
+  }
+
+  function capturePosterFrame(source){
+    const cleanSource = util.safe(source);
+    if(!cleanSource) return Promise.resolve("");
+    if(posterFrameCache.has(cleanSource)){
+      return posterFrameCache.get(cleanSource);
+    }
+    const task = new Promise(resolve => {
+      const video = document.createElement("video");
+      let finished = false;
+      const finish = (value) => {
+        if(finished) return;
+        finished = true;
+        clearTimeout(timeoutId);
+        video.pause();
+        video.removeAttribute("src");
+        try{ video.load(); }catch(_){ }
+        resolve(util.safe(value));
+      };
+      const draw = () => {
+        try{
+          const width = Math.max(1, Number(video.videoWidth || 0));
+          const height = Math.max(1, Number(video.videoHeight || 0));
+          if(!width || !height){
+            finish("");
+            return;
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if(!ctx){
+            finish("");
+            return;
+          }
+          ctx.drawImage(video, 0, 0, width, height);
+          finish(canvas.toDataURL("image/jpeg", 0.84));
+        }catch(_){
+          finish("");
+        }
+      };
+      const seekAndDraw = () => {
+        const duration = Math.max(0, util.num(video.duration));
+        const targetTime = duration > PREVIEW_FRAME_SEEK_SECONDS
+          ? Math.min(PREVIEW_FRAME_SEEK_SECONDS, Math.max(0, duration - 0.05))
+          : 0;
+        if(targetTime <= 0){
+          draw();
+          return;
+        }
+        try{
+          video.currentTime = targetTime;
+        }catch(_){
+          draw();
+        }
+      };
+      const timeoutId = setTimeout(() => finish(""), 4500);
+      video.preload = "auto";
+      video.muted = true;
+      video.playsInline = true;
+      video.crossOrigin = "anonymous";
+      video.addEventListener("loadeddata", seekAndDraw, { once:true });
+      video.addEventListener("seeked", draw, { once:true });
+      video.addEventListener("error", () => finish(""), { once:true });
+      video.src = cleanSource;
+      try{ video.load(); }catch(_){ }
+    }).catch(() => "");
+    posterFrameCache.set(cleanSource, task);
+    return task;
+  }
+
+  function setPosterPreviewImage(image, videoRow, onResolved){
+    if(!image) return;
+    const item = videoRow || {};
+    const thumbCandidates = buildAssetCandidates(item.thumbnail_url_raw || item.thumbnail_url, "thumb").filter(candidate => candidate && candidate !== FALLBACK_THUMBNAIL);
+    if(thumbCandidates.length){
+      const queue = thumbCandidates.concat(FALLBACK_THUMBNAIL);
+      setImageSourceWithFallback(image, queue);
+      if(typeof onResolved === "function") onResolved(queue[0]);
+      return;
+    }
+    const sourceCandidates = buildVideoSourceCandidates(item.video_url_raw || item.video_url);
+    if(!sourceCandidates.length){
+      setImageSourceWithFallback(image, [FALLBACK_THUMBNAIL]);
+      if(typeof onResolved === "function") onResolved(FALLBACK_THUMBNAIL);
+      return;
+    }
+    setImageSourceWithFallback(image, [FALLBACK_THUMBNAIL]);
+    capturePosterFrame(sourceCandidates[0]).then(frame => {
+      const resolved = util.safe(frame) || FALLBACK_THUMBNAIL;
+      if(frame){
+        image.onerror = null;
+        image.src = frame;
+      }
+      if(typeof onResolved === "function") onResolved(resolved);
+    }).catch(() => {
+      if(typeof onResolved === "function") onResolved(FALLBACK_THUMBNAIL);
+    });
   }
 
   function buildAutomationApiBases(){
@@ -1477,11 +1578,8 @@
     if(title) title.textContent = video.title;
     if(channelNode) channelNode.textContent = channel.name;
     if(stats) stats.textContent = util.compact(video.views) + " views . " + util.ago(video.created_at);
-    if(image){
-      setImageSourceWithFallback(
-        image,
-        buildAssetCandidates(video.thumbnail_url_raw || video.thumbnail_url, "thumb")
-      );
+        if(image){
+      setPosterPreviewImage(image, video);
     }
     if(duration) duration.textContent = util.duration(video.duration_seconds);
   }
@@ -1494,8 +1592,7 @@
       return;
     }
     const channel = getChannel(item.user_id);
-    const thumbCandidates = buildAssetCandidates(item.thumbnail_url_raw || item.thumbnail_url, "thumb");
-    const thumbSrc = thumbCandidates[0] || FALLBACK_THUMBNAIL;
+        const thumbSrc = FALLBACK_THUMBNAIL;
     const card = document.createElement("article");
     card.className = "mv-card";
     card.dataset.videoId = item.id;
@@ -1529,8 +1626,8 @@
       '</div>';
 
     const menu = card.querySelector("[data-menu='1']");
-    const thumbImage = card.querySelector(".mv-thumb-wrap img");
-    setImageSourceWithFallback(thumbImage, thumbCandidates);
+        const thumbImage = card.querySelector(".mv-thumb-wrap img");
+    setPosterPreviewImage(thumbImage, item);
     card.querySelector("[data-open='1']").addEventListener("click", () => openVideo(item.id, true, true));
     card.querySelectorAll("[data-channel-open='1']").forEach(node => {
       node.addEventListener("click", (event) => {
@@ -1760,16 +1857,18 @@
     await api.fetchProfiles([video.user_id]);
     const channel = getChannel(video.user_id);
 
-    const posterCandidates = buildAssetCandidates(video.thumbnail_url_raw || video.thumbnail_url, "thumb");
-    const posterUrl = posterCandidates[0] || FALLBACK_THUMBNAIL;
+        const thumbCandidates = buildAssetCandidates(video.thumbnail_url_raw || video.thumbnail_url, "thumb").filter(candidate => candidate && candidate !== FALLBACK_THUMBNAIL);
+    const posterUrl = thumbCandidates[0] || "";
     const sourceCandidates = buildVideoSourceCandidates(video.video_url_raw || video.video_url);
     const initialSource = sourceCandidates[0] || "";
     state.playerSources = sourceCandidates;
     state.playerSourceIndex = 0;
     state.playerAutoplayPending = !!autoplay;
     if(dom.playerPoster){
-      setImageSourceWithFallback(dom.playerPoster, posterCandidates);
       dom.playerPoster.alt = util.safe(video.title) || "Video thumbnail";
+      setPosterPreviewImage(dom.playerPoster, video, (resolvedPoster) => {
+        dom.player.poster = util.safe(resolvedPoster) || "";
+      });
     }
     setPlayerLoading(true, true);
     dom.player.poster = posterUrl;
