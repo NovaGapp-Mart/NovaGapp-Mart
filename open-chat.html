@@ -56,9 +56,10 @@
     }
     .chat-bg{background-image:url("https://www.transparenttextures.com/patterns/cubes.png");flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:var(--chat-pad);display:flex;flex-direction:column}
     #msgHolder{width:100%;min-width:0}
-    .chat-head-left{min-width:0;flex:1 1 auto}
-    .chat-head-meta{min-width:0;max-width:100%}
-    #userName,#userMeta{max-width:var(--name-max);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .chat-head-left{min-width:0;flex:1 1 auto;display:flex;align-items:center;gap:8px;overflow:hidden}
+    .chat-head-meta{min-width:0;max-width:100%;display:block;flex:1 1 auto;overflow:hidden}
+    #userAvatar,#infoPic{display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;background-color:rgba(255,255,255,.22);color:#fff;font-weight:700;visibility:visible;opacity:1}
+    #userName,#userMeta{max-width:var(--name-max);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;visibility:visible;opacity:1}
     .chat-head-actions{flex-shrink:0}
     .composer-row{min-width:0}
     .composer-row label,#sendBtn{flex-shrink:0}
@@ -152,6 +153,8 @@
       footer{padding:8px calc(8px + env(safe-area-inset-right,0px)) calc(8px + env(safe-area-inset-bottom,0px)) calc(8px + env(safe-area-inset-left,0px))}
       .call-btn{width:32px;height:32px}
       .incoming-call-bar{width:calc(100% - 20px)}
+      #userAvatar{width:40px;height:40px;min-width:40px;min-height:40px}
+      .chat-head-left{max-width:calc(100% - 116px)}
       #userName{font-size:14px}
       #userMeta{font-size:10px}
       .composer-row{gap:6px}
@@ -277,7 +280,7 @@
   <header class="h-16 flex items-center px-2 justify-between shrink-0 shadow-lg z-50" style="background:var(--nova-gradient)">
     <div class="chat-head-left flex items-center gap-1 cursor-pointer" onclick="openProfile()">
       <button type="button" onclick="handleBackNavigation(event)" class="text-white p-2 text-2xl"><-</button>
-      <div id="userAvatar" class="w-10 h-10 rounded-full bg-white bg-cover bg-center"></div>
+      <div id="userAvatar" class="w-10 h-10 rounded-full bg-cover bg-center"></div>
       <div class="chat-head-meta text-white ml-2">
         <h1 id="userName" class="font-bold">Loading...</h1>
         <p id="userMeta" class="text-[11px] opacity-90"></p>

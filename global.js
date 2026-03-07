@@ -839,6 +839,10 @@ window.translateProductName = function(name){
   let dismissTimer = null;
   let seenSignalIds = new Set();
   let ui = null;
+  let ringToneTimer = null;
+  let ringAudioCtx = null;
+  let ringAudioElement = null;
+  const CALL_RINGTONE_URL = String(window.CALL_RINGTONE_URL || "").trim();
 
   function getCurrentUserId(){
     try{
@@ -865,6 +869,93 @@ window.translateProductName = function(name){
     if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
     push("https://novagapp-mart.onrender.com");
     return out;
+  }
+
+
+  function handledCallKey(callId){
+    const clean = String(callId || "").trim();
+    return clean ? `nova_global_handled_call:${clean}` : "";
+  }
+
+  function hasHandledCall(callId){
+    const key = handledCallKey(callId);
+    if(!key) return false;
+    try{
+      const expiresAt = Number(sessionStorage.getItem(key) || 0);
+      if(expiresAt > Date.now()) return true;
+      if(expiresAt) sessionStorage.removeItem(key);
+    }catch(_){ }
+    return false;
+  }
+
+  function markHandledCall(callId, ttlMs){
+    const key = handledCallKey(callId);
+    if(!key) return;
+    const expiresAt = Date.now() + Math.max(60000, Number(ttlMs) || 120000);
+    try{ sessionStorage.setItem(key, String(expiresAt)); }catch(_){ }
+  }
+
+  function playRingBurst(){
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if(!AudioCtx) return;
+    try{
+      if(!ringAudioCtx) ringAudioCtx = new AudioCtx();
+      if(ringAudioCtx.state === "suspended") ringAudioCtx.resume().catch(() => {});
+      const now = ringAudioCtx.currentTime;
+      [840, 620].forEach((freq, idx) => {
+        const startAt = now + (idx * 0.22);
+        const osc = ringAudioCtx.createOscillator();
+        const gain = ringAudioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, startAt);
+        gain.gain.setValueAtTime(0.0001, startAt);
+        gain.gain.exponentialRampToValueAtTime(0.07, startAt + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.17);
+        osc.connect(gain);
+        gain.connect(ringAudioCtx.destination);
+        osc.start(startAt);
+        osc.stop(startAt + 0.19);
+      });
+    }catch(_){ }
+  }
+
+  function startIncomingRing(){
+    if(ringToneTimer) return;
+    if(CALL_RINGTONE_URL){
+      try{
+        if(!ringAudioElement || ringAudioElement.src !== CALL_RINGTONE_URL){
+          ringAudioElement = new Audio(CALL_RINGTONE_URL);
+          ringAudioElement.loop = true;
+          ringAudioElement.preload = "auto";
+        }
+        ringAudioElement.currentTime = 0;
+        const playPromise = ringAudioElement.play();
+        if(playPromise && typeof playPromise.catch === "function") playPromise.catch(() => {});
+      }catch(_){ }
+    }
+    playRingBurst();
+    ringToneTimer = setInterval(() => { playRingBurst(); }, 1400);
+  }
+
+  function stopIncomingRing(){
+    if(ringToneTimer){
+      clearInterval(ringToneTimer);
+      ringToneTimer = null;
+    }
+    if(ringAudioElement){
+      try{
+        ringAudioElement.pause();
+        ringAudioElement.currentTime = 0;
+      }catch(_){ }
+    }
+  }
+
+  function buildAnswerTarget(offer){
+    const qp = new URLSearchParams();
+    qp.set("id", String(offer?.from_user_id || "").trim());
+    qp.set("call_action", "answer");
+    qp.set("call_id", String(offer?.call_id || "").trim());
+    return `open-chat.html?${qp.toString()}`;
   }
 
   function normalizeSignalRow(row){
@@ -955,9 +1046,9 @@ window.translateProductName = function(name){
     answer.addEventListener("click", () => {
       if(!activeOffer) return;
       const offer = activeOffer;
+      markHandledCall(offer.call_id);
       hideIncomingCallUi();
-      const target = `chat.html?uid=${encodeURIComponent(offer.from_user_id)}&call_action=answer&call_id=${encodeURIComponent(offer.call_id)}`;
-      location.href = target;
+      location.href = buildAnswerTarget(offer);
     });
     decline.addEventListener("click", () => {
       declineIncomingCall("decline");
@@ -970,10 +1061,10 @@ window.translateProductName = function(name){
   function showIncomingCallUi(offer){
     const view = ensureUi();
     const label = offer && offer.media_type === "video" ? "Incoming video call" : "Incoming audio call";
-    const from = String(offer?.from_user_id || "").trim();
-    view.title.textContent = from ? `Incoming call from ${from}` : "Incoming call";
+    view.title.textContent = "Incoming call";
     view.sub.textContent = label;
     view.backdrop.classList.add("show");
+    startIncomingRing();
   }
 
   function hideIncomingCallUi(){
@@ -981,6 +1072,7 @@ window.translateProductName = function(name){
       clearTimeout(dismissTimer);
       dismissTimer = null;
     }
+    stopIncomingRing();
     if(ui && ui.backdrop){
       ui.backdrop.classList.remove("show");
     }
@@ -993,6 +1085,7 @@ window.translateProductName = function(name){
       return;
     }
     const offer = activeOffer;
+    markHandledCall(offer.call_id);
     hideIncomingCallUi();
     await sendCallSignal({
       type: "call-decline",
@@ -1017,14 +1110,18 @@ window.translateProductName = function(name){
   function handleSignal(signal, myUid){
     if(!signal || signal.to_user_id !== myUid) return;
     if(signal.type === "call-offer"){
+      if(hasHandledCall(signal.call_id)) return;
+      if(activeOffer && activeOffer.call_id === signal.call_id) return;
       if(activeOffer && activeOffer.call_id && activeOffer.call_id !== signal.call_id){
         sendCallSignal({
           type: "call-busy",
           call_id: signal.call_id,
           from_user_id: myUid,
           to_user_id: signal.from_user_id,
-          media_type: signal.media_type
+          media_type: signal.media_type,
+          reason: "busy"
         }).catch(() => {});
+        markHandledCall(signal.call_id);
         return;
       }
       activeOffer = signal;
@@ -1033,12 +1130,13 @@ window.translateProductName = function(name){
         clearTimeout(dismissTimer);
       }
       dismissTimer = setTimeout(() => {
-        declineIncomingCall("timeout").catch(() => {});
+        declineIncomingCall("not_answered").catch(() => {});
       }, 60000);
       return;
     }
     if(!activeOffer || signal.call_id !== activeOffer.call_id) return;
     if(signal.type === "call-end" || signal.type === "call-decline" || signal.type === "call-busy"){
+      markHandledCall(signal.call_id);
       hideIncomingCallUi();
     }
   }

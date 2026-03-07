@@ -361,6 +361,7 @@ function normalizeCallSignalPayload(raw){
   );
   if(!type || !toUserId || !fromUserId || !callId) return null;
 
+  const signalId = sanitizeCallId(body.signal_id || body.signalId);
   const mediaType = sanitizeCallMediaType(body.media_type || body.mediaType || body.call_type || body.callType);
   const reason = sanitizeCallReason(body.reason || body.message || body.status_reason || body.statusReason);
   const defaultTtl = type === "call-offer" ? 90 : (type === "ice" ? 30 : CALL_SIGNAL_DEFAULT_TTL_SEC);
@@ -398,6 +399,7 @@ function normalizeCallSignalPayload(raw){
   }
 
   return {
+    signal_id: signalId,
     type,
     to_user_id: toUserId,
     from_user_id: fromUserId,
@@ -1043,9 +1045,24 @@ app.post("/api/call/signal", async (req, res) => {
     const nowMs = Date.now();
     pruneCallSignalStore(nowMs);
 
-    const id = typeof crypto.randomUUID === "function"
+    const duplicate = callSignalStore.find((row) => {
+      if(signal.signal_id && row.id === signal.signal_id) return true;
+      const sameParticipants = row.to_user_id === signal.to_user_id && row.from_user_id === signal.from_user_id;
+      const sameCall = row.call_id === signal.call_id && row.type === signal.type && row.reason === signal.reason;
+      const createdMs = Date.parse(String(row.created_at || ""));
+      return sameParticipants && sameCall && Number.isFinite(createdMs) && createdMs >= (nowMs - 6000);
+    });
+    if(duplicate){
+      return res.json({
+        ok:true,
+        id: duplicate.id,
+        expires_at: duplicate.expires_at
+      });
+    }
+
+    const id = signal.signal_id || (typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
-      : `${nowMs}_${crypto.randomBytes(4).toString("hex")}`;
+      : `${nowMs}_${crypto.randomBytes(4).toString("hex")}`);
     const createdAt = new Date(nowMs).toISOString();
     const expiresAt = new Date(nowMs + (signal.ttl_sec * 1000)).toISOString();
     const row = {

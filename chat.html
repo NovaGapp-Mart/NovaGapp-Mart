@@ -82,8 +82,9 @@
         }
         .chat-item { display: flex; align-items: center; gap: 12px; padding: var(--item-pad-y) var(--item-pad-x); border-bottom: 1px solid #f2f2f2; cursor: pointer; transition: 0.2s; position: relative; min-height: var(--item-min-h); }
         .chat-item.selected { background: #e9edef; }
-        .avatar-wrap { position: relative; flex-shrink: 0; }
+        .avatar-wrap { position: relative; flex-shrink: 0; min-width: var(--avatar-size); min-height: var(--avatar-size); display: block; }
         .avatar { width: var(--avatar-size); height: var(--avatar-size); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; color: white; flex-shrink: 0; font-size: var(--avatar-font-size); overflow: hidden; background-size: cover; background-position: center; border: 1px solid #eee; }
+        img.avatar { display: block; object-fit: cover; }
         .avatar-unread-dot { position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: #ff6a00; color: #fff; border: 2px solid #fff; font-size: 10px; font-weight: 700; line-height: 1; display: flex; align-items: center; justify-content: center; }
         .chat-title-line { min-width: 0; gap: 8px; }
         .chat-title { min-width: 0; }
@@ -147,6 +148,7 @@
             .chat-item { gap: 10px; }
             .avatar-unread-dot { min-width: 16px; height: 16px; font-size: 9px; padding: 0 3px; }
             #normalNav, #selectionNav { padding-left: 12px; padding-right: 12px; }
+            .avatar-wrap, .avatar { visibility: visible; opacity: 1; }
         }
 
         @media (min-width: 641px) and (max-width: 991px) {
@@ -1220,6 +1222,7 @@
         }
 
         async function fetchGroupMembershipRowsForCurrentUser(){
+            if(!isUuid(currentUserId)) return [];
             try{
                 const { data, error } = await supa
                     .from("group_members")
@@ -1239,46 +1242,33 @@
             }
         }
 
-        async function fetchOwnedGroupRowsForCurrentUser(){
-            try{
-                const { data, error } = await supa
-                    .from("groups")
-                    .select("id,group_name,group_icon,owner_id")
-                    .eq("owner_id", currentUserId)
-                    .limit(600);
-                if(error){
-                    if(!maybeMissingResource(error, "groups")){
-                        console.error("groups_fetch_failed", error);
-                    }
-                    return [];
-                }
-                return Array.isArray(data) ? data : [];
-            }catch(err){
-                console.error("groups_fetch_exception", err);
-                return [];
-            }
-        }
-
         async function fetchGroupsByIds(groupIds){
-            const ids = Array.from(new Set(Array.from(groupIds || []).map(id => String(id || "").trim()).filter(Boolean)));
+            const ids = Array.from(new Set(Array.from(groupIds || [])
+                .map(id => String(id || "").trim())
+                .filter(id => isUuid(id))));
             if(!ids.length) return [];
-            try{
-                const { data, error } = await supa
-                    .from("groups")
-                    .select("id,group_name,group_icon,owner_id")
-                    .in("id", ids)
-                    .limit(Math.max(200, ids.length + 20));
-                if(error){
-                    if(!maybeMissingResource(error, "groups")){
-                        console.error("groups_fetch_failed", error);
+            const rows = [];
+            for(const id of ids){
+                try{
+                    const { data, error } = await supa
+                        .from("groups")
+                        .select("id,group_name,group_icon")
+                        .eq("id", id)
+                        .limit(1);
+                    if(error){
+                        if(!maybeMissingResource(error, "groups")){
+                            console.error("group_fetch_failed", error);
+                        }
+                        continue;
                     }
-                    return [];
+                    if(Array.isArray(data) && data.length){
+                        rows.push(data[0]);
+                    }
+                }catch(err){
+                    console.error("group_fetch_exception", err);
                 }
-                return Array.isArray(data) ? data : [];
-            }catch(err){
-                console.error("groups_fetch_exception", err);
-                return [];
             }
+            return rows;
         }
 
         async function fetchMyGroups(){
@@ -1290,11 +1280,8 @@
                 if(id) candidateGroupIds.add(id);
             });
 
-            const ownedGroupRows = await fetchOwnedGroupRowsForCurrentUser();
-            ownedGroupRows.forEach(row => {
-                mergeGroupListRow(byId, row);
-                const id = String(extractGroupId(row) || "").trim();
-                if(id) candidateGroupIds.add(id);
+            Array.from(manualGroups.keys()).forEach(id => {
+                if(isUuid(id)) candidateGroupIds.add(id);
             });
 
             const groupRows = await fetchGroupsByIds(candidateGroupIds);
@@ -1315,33 +1302,6 @@
                     sortTs: Math.max(Number(prev.sortTs || 0), Number(manual.updated_at || manual.sortTs || 0) || 0)
                 });
             });
-
-            const ownerIds = Array.from(new Set(Array.from(byId.values())
-                .map(row => String(row?.owner_id || "").trim())
-                .filter(id => isUuid(id))));
-            if(ownerIds.length){
-                const ownerRows = await fetchUsersByIds(ownerIds, { includeCurrent: true });
-                const ownerById = new Map();
-                (ownerRows || []).forEach(row => {
-                    const id = String(row?.user_id || row?.id || "").trim();
-                    if(id) ownerById.set(id, row);
-                });
-                byId.forEach((groupRow, id) => {
-                    const ownerId = String(groupRow?.owner_id || "").trim();
-                    const ownerProfile = ownerById.get(ownerId) || null;
-                    if(ownerProfile){
-                        const resolvedName = displayName(ownerProfile);
-                        if(!groupRow.owner_name || /^(user|owner)$/i.test(String(groupRow.owner_name || "").trim())){
-                            groupRow.owner_name = resolvedName;
-                        }
-                    }else if(ownerId && ownerId === currentUserId){
-                        if(!groupRow.owner_name || /^(user|owner)$/i.test(String(groupRow.owner_name || "").trim())){
-                            groupRow.owner_name = displayName(currentUser || {});
-                        }
-                    }
-                    byId.set(id, groupRow);
-                });
-            }
 
             return Array.from(byId.values()).sort((a, b) => {
                 const diff = Number(b.sortTs || 0) - Number(a.sortTs || 0);
@@ -1451,7 +1411,8 @@
                 const unreadCount = Math.max(localUnread, dbUnread);
                 const lockedHiddenRow = !!(options.hidden && options.locked);
                 const name = String(lockedHiddenRow ? "Hidden Account" : (item.name || "User"));
-                const img = lockedHiddenRow ? "" : String(item.img || "");
+                const rawImg = lockedHiddenRow ? "" : String(item.img || "");
+                const img = lockedHiddenRow ? "" : (isGroup ? resolveGroupIconUrl(rawImg) : normalizeAssetUrl(rawImg));
                 const isGroup = !!item.isGroup;
                 const unreadLabel = unreadCount > 99 ? "99+" : String(unreadCount);
 

@@ -133,6 +133,30 @@
     return resolved || DEFAULT_GROUP_ICON;
   }
 
+
+  function handledCallKey(callId){
+    const clean = String(callId || "").trim();
+    return clean ? `nova_handled_call:${clean}` : "";
+  }
+
+  function hasHandledCall(callId){
+    const key = handledCallKey(callId);
+    if(!key) return false;
+    try{
+      const expiresAt = Number(sessionStorage.getItem(key) || 0);
+      if(expiresAt > Date.now()) return true;
+      if(expiresAt) sessionStorage.removeItem(key);
+    }catch(_){ }
+    return false;
+  }
+
+  function markHandledCall(callId, ttlMs){
+    const key = handledCallKey(callId);
+    if(!key) return;
+    const expiresAt = Date.now() + Math.max(60000, Number(ttlMs) || 120000);
+    try{ sessionStorage.setItem(key, String(expiresAt)); }catch(_){ }
+  }
+
   function isUuid(value){
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
   }
@@ -309,18 +333,10 @@
   function buildGroupMetaText(){
     const memberCount = normalizeMemberCount(groupInfo?.member_count || groupMembers.length);
     const memberLabel = groupMemberLabel(memberCount);
-    const creator = findGroupCreatorMember();
     const admin = findGroupAdminMember();
     const parts = [memberLabel];
-    if(creator){
-      parts.push(`Created by: ${getDisplayName(creator, "Creator")}`);
-    }
     if(admin){
-      const creatorId = String(creator?.user_id || "").trim();
-      const adminId = String(admin?.user_id || "").trim();
-      if(!creatorId || !adminId || creatorId !== adminId){
-        parts.push(`Admin: ${getDisplayName(admin, "Admin")}`);
-      }
+      parts.push(`Admin: ${getDisplayName(admin, "Admin")}`);
     }
     return parts.join(" | ");
   }
@@ -604,12 +620,22 @@
   function setAvatar(el, imageUrl, fallbackText){
     if(!el) return;
     const src = String(imageUrl || "").trim();
+    el.style.display = "flex";
+    el.style.visibility = "visible";
+    el.style.opacity = "1";
+    el.style.alignItems = "center";
+    el.style.justifyContent = "center";
+    el.style.overflow = "hidden";
     if(src){
       el.style.backgroundImage = `url('${src.replace(/'/g, "%27")}')`;
+      el.style.backgroundColor = "transparent";
+      el.style.color = "transparent";
       el.textContent = "";
       return;
     }
     el.style.backgroundImage = "";
+    el.style.backgroundColor = "rgba(255,255,255,0.22)";
+    el.style.color = "#fff";
     el.textContent = getInitial(fallbackText || "U");
   }
 
@@ -1048,7 +1074,7 @@
       meta.appendChild(nameEl);
       const badge = document.createElement("span");
       badge.className = owner ? "text-[10px] font-semibold px-2 py-[2px] rounded-full bg-orange-100 text-orange-700" : "text-[10px] font-semibold px-2 py-[2px] rounded-full bg-gray-100 text-gray-600";
-      badge.textContent = owner ? "Owner" : "Member";
+      badge.textContent = owner ? "Admin" : "Member";
       meta.appendChild(badge);
       line.appendChild(avatar);
       line.appendChild(meta);
@@ -1218,10 +1244,23 @@
     const photo = isGroupChat
       ? resolveGroupAvatar(groupInfo, groupMembers, DEFAULT_GROUP_ICON)
       : getProfilePhoto(peerProfile, receiverPicParam);
-    document.getElementById("userName").textContent = name;
-    document.getElementById("infoName").textContent = name;
-    setAvatar(document.getElementById("userAvatar"), photo, name);
-    setAvatar(document.getElementById("infoPic"), photo, name);
+    const userNameEl = document.getElementById("userName");
+    const userMetaEl = document.getElementById("userMeta");
+    const userAvatarEl = document.getElementById("userAvatar");
+    const infoNameEl = document.getElementById("infoName");
+    const infoPicEl = document.getElementById("infoPic");
+    userNameEl.textContent = name;
+    infoNameEl.textContent = name;
+    userNameEl.style.display = "block";
+    userNameEl.style.visibility = "visible";
+    userNameEl.style.opacity = "1";
+    if(userMetaEl){
+      userMetaEl.style.display = "block";
+      userMetaEl.style.visibility = "visible";
+      userMetaEl.style.opacity = "1";
+    }
+    setAvatar(userAvatarEl, photo, name);
+    setAvatar(infoPicEl, photo, name);
     if(isGroupChat){
       const label = [buildGroupMetaText(), groupAdminOnly ? "Only admins can send messages" : ""]
         .filter(Boolean)
@@ -2228,6 +2267,7 @@
       const current = activeCall;
       if(!current || current.callId !== row.callId || current.direction !== "outgoing") return;
       const mediaType = current.mediaType || row.mediaType || "audio";
+      markHandledCall(row.callId);
       sendCallSignal({
         type: "call-end",
         call_id: row.callId,
@@ -2244,8 +2284,10 @@
   function mapRemoteCallEndReason(signal){
     const type = String(signal?.type || "").trim().toLowerCase();
     const reason = String(signal?.reason || "").trim().toLowerCase();
-    if(type === "call-busy") return "User busy in call";
+    if(type === "call-busy" || reason === "busy") return "User busy in call";
     if(reason === "not_answered" || reason === "timeout") return "They not answered";
+    if(reason === "not_available" || reason === "unreachable") return "User not reachable";
+    if(reason === "media_permission_denied") return "Call unavailable";
     if(reason === "blocked") return "User blocked";
     if(type === "call-decline") return "Call declined";
     return "Call ended";
@@ -2274,7 +2316,7 @@
   function buildMissedCallText(mediaType){
     const mode = String(mediaType || "").trim().toLowerCase() === "video" ? "video" : "audio";
     const caller = getDisplayName(myUser, "User");
-    return `${caller} missed call in ${mode} call`;
+    return `Missed ${mode} call`;
   }
 
   async function sendMissedCallThreadMessage(callId, mediaType){
@@ -2310,6 +2352,7 @@
   }
 
   function showIncomingOffer(offer){
+    if(hasHandledCall(offer?.call_id)) return;
     pendingIncomingOffer = offer;
     incomingCallText.textContent = (offer.media_type === "video" ? "Video" : "Audio") + " call from " + getDisplayName(peerProfile, receiverNameParam);
     incomingCallBar.style.display = "flex";
@@ -2540,6 +2583,7 @@
   async function answerIncomingCall(){
     const offer = pendingIncomingOffer;
     if(!offer) return;
+    markHandledCall(offer.call_id);
     hideIncomingOffer();
     if(activeCall){
       await sendCallSignal({
@@ -2593,6 +2637,7 @@
   async function declineIncomingCall(reason){
     if(!pendingIncomingOffer){ hideIncomingOffer(); return; }
     const offer = pendingIncomingOffer;
+    markHandledCall(offer.call_id);
     hideIncomingOffer();
     await sendCallSignal({
       type: "call-decline",
@@ -2622,12 +2667,13 @@
 
   async function handleCallSignal(signal){
     if(!signal || signal.to_user_id !== myId) return;
+    if(hasHandledCall(signal.call_id) && signal.type === "call-offer") return;
     if(!rememberCallSignalKey(signal)) return;
     const isActivePeerSignal = signal.from_user_id === receiverId;
     if(!isActivePeerSignal){
       if(signal.type === "call-offer"){
         const accountBusy = await readUserOnCallStatus(myId);
-        const isReallyBusy = !!(activeCall || pendingIncomingOffer || accountBusy);
+        const isReallyBusy = !!(activeCall || pendingIncomingOffer || accountBusy || hasHandledCall(signal.call_id));
         await sendCallSignal({
           type: isReallyBusy ? "call-busy" : "call-decline",
           call_id: signal.call_id,
@@ -2636,10 +2682,12 @@
           media_type: signal.media_type,
           reason: isReallyBusy ? "busy" : "not_available"
         });
+        markHandledCall(signal.call_id);
       }
       return;
     }
     if(signal.type === "call-offer"){
+      if(hasHandledCall(signal.call_id)) return;
       if(isPeerBlocked){
         await sendCallSignal({
           type: "call-decline",
@@ -2649,6 +2697,7 @@
           media_type: signal.media_type,
           reason: "blocked"
         });
+        markHandledCall(signal.call_id);
         return;
       }
       if(pendingIncomingOffer && pendingIncomingOffer.call_id === signal.call_id){
@@ -2664,6 +2713,7 @@
           media_type: signal.media_type,
           reason: "busy"
         });
+        markHandledCall(signal.call_id);
         return;
       }
       showIncomingOffer(signal);
@@ -2702,11 +2752,20 @@
       return;
     }
     if(signal.type === "call-end" || signal.type === "call-decline" || signal.type === "call-busy"){
+      markHandledCall(signal.call_id);
       if(pendingIncomingOffer && pendingIncomingOffer.call_id === signal.call_id) hideIncomingOffer();
       if(activeCall && activeCall.callId === signal.call_id){
         const localCall = activeCall;
         const reasonCode = String(signal?.reason || "").trim().toLowerCase();
-        const shouldSendMissed = localCall.direction === "outgoing" && (reasonCode === "not_answered" || reasonCode === "timeout");
+        const shouldSendMissed = localCall.direction === "outgoing" && (
+          signal.type === "call-busy" ||
+          reasonCode === "busy" ||
+          reasonCode === "not_answered" ||
+          reasonCode === "timeout" ||
+          reasonCode === "not_available" ||
+          reasonCode === "unreachable" ||
+          reasonCode === "media_permission_denied"
+        );
         const reason = mapRemoteCallEndReason(signal);
         await endActiveCall(false, reason);
         if(shouldSendMissed){
