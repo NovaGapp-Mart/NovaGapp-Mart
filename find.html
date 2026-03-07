@@ -454,6 +454,15 @@ function buildApiBases(){
   return out;
 }
 
+function canUseDirectUsersTable(){
+  const raw = String(window.NOVA_USE_DIRECT_USERS_TABLE || window.NOVA_ENABLE_DIRECT_USERS_TABLE || "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
+async function fetchProfilesFromApi(){
+  return [];
+}
+
 async function trackAutomationStep(step, meta){
   if(!supa) return;
   try{
@@ -551,6 +560,9 @@ function buildUserSearchFilters(clean){
 }
 
 async function runUsersQuery(selectCols, clean, limit){
+  if(!supa || !canUseDirectUsersTable()){
+    return { data: [], error: null };
+  }
   const filters = buildUserSearchFilters(clean);
   let lastError = null;
   for(const filter of filters){
@@ -563,15 +575,20 @@ async function runUsersQuery(selectCols, clean, limit){
       return { data: Array.isArray(data) ? data : [], error: null };
     }
     lastError = error;
+    const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
+    const usersRelationMissing = text.includes("users") && (text.includes("schema cache") || text.includes("does not exist") || text.includes("not found") || text.includes("relation"));
+    if(usersRelationMissing){
+      return { data: [], error: null };
+    }
     if(!isMissingColumnError(error)){
-      return { data: [], error };
+      return { data: [], error: null };
     }
   }
-  return { data: [], error: lastError };
+  return { data: [], error: null };
 }
 
 async function fetchUsersFromApi(q){
-  if(!supa) return [];
+  if(!supa || !canUseDirectUsersTable()) return [];
   const query = String(q || "").trim();
   const clean = query.replace(/[%*,()]/g, " ").replace(/["']/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
   const merged = [];
@@ -632,7 +649,7 @@ async function fetchUsersFromApi(q){
 }
 
 async function fetchUsersFallback(q){
-  if(!supa) return [];
+  if(!supa || !canUseDirectUsersTable()) return [];
   const query = String(q || "").trim();
   const clean = query.replace(/[%*,()]/g, " ").replace(/["']/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
   const variants = [
