@@ -100,6 +100,7 @@
   let groupInfo = null;
   let groupMembers = [];
   let groupOwnerId = "";
+  let groupAdminOnly = false;
   let activeInfoTab = "media";
   let noticeTimer = null;
   const CALL_RING_TIMEOUT_MS = 30000;
@@ -120,6 +121,13 @@
     if(text.includes("column") && text.includes("does not exist")) return true;
     if(text.includes("unknown column")) return true;
     return false;
+  }
+
+  function maybeMissingResource(error, resource){
+    const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
+    if(!text) return false;
+    const name = String(resource || "").trim().toLowerCase();
+    return !!name && text.includes(name) && (text.includes("does not exist") || text.includes("not found") || text.includes("could not find the table") || text.includes("relation"));
   }
 
   function extractMissingColumnName(error){
@@ -182,9 +190,10 @@
     const candidates = [
       row.display_name,
       row.full_name,
-      row.username,
-      row.user_name,
       row.name,
+      row.user_name,
+      row.member_name,
+      row.username,
       meta.full_name,
       meta.name,
       meta.username,
@@ -199,7 +208,7 @@
 
   function getProfilePhoto(profile, fallback){
     const row = profile || {};
-    return String(row.photo || row.avatar_url || row.user_avatar || row.member_avatar || row?.user_metadata?.avatar_url || row?.user_metadata?.picture || fallback || "").trim();
+    return String(row.photo || row.avatar_url || row.profile_icon || row.user_icon || row.user_avatar || row.member_avatar || row?.user_metadata?.avatar_url || row?.user_metadata?.picture || fallback || "").trim();
   }
 
   function normalizeUserProfileRow(raw){
@@ -213,15 +222,16 @@
     };
   }
 
-    async function fetchUsersByIds(userIds){
+  async function fetchUsersByIds(userIds){
     const ids = Array.from(new Set(Array.from(userIds || []).map(id => String(id || "").trim()).filter(id => isUuid(id))));
     if(!ids.length) return [];
     const attempts = [
-      "user_id,id,username,full_name,display_name,photo,avatar_url,email",
-      "user_id,username,full_name,display_name,photo,avatar_url,email",
-      "id,username,full_name,display_name,photo,avatar_url,email",
-      "user_id,username,full_name,photo,email",
-      "id,username,full_name,photo,email"
+      "user_id,id,username,user_name,full_name,display_name,name,photo,avatar_url,profile_icon,user_icon,email",
+      "id,user_id,username,user_name,full_name,display_name,name,avatar_url,photo,profile_icon,user_icon,email",
+      "user_id,id,username,full_name,display_name,name,photo,avatar_url,email",
+      "id,user_id,username,full_name,display_name,name,avatar_url,photo,email",
+      "user_id,id,username,name,photo,avatar_url,email",
+      "id,user_id,username,name,avatar_url,photo,email"
     ];
     const idColumns = ["user_id", "id"];
     for(const fields of attempts){
@@ -266,6 +276,12 @@
     if(String(groupOwnerId || "").trim() === myId) return true;
     const currentMember = groupMembers.find(member => String(member?.user_id || "").trim() === myId) || null;
     return !!currentMember && isAdminMemberRow(currentMember);
+  }
+
+  function canCurrentUserSendGroupMessages(){
+    if(!isGroupChat) return true;
+    if(!groupAdminOnly) return true;
+    return canManageGroupMembers();
   }
 
   function closeGroupMemberActionMenus(){
@@ -533,34 +549,102 @@
     return false;
   }
 
-    async function fetchGroupMembers(groupId, ownerHint){
+  const GROUP_LOOKUP_ID_KEYS = ["id", "group_id", "group_uuid", "gid", "uuid"];
+
+  function normalizeGroupAdminOnly(row){
+    const value = row?.is_admin_only ?? row?.admin_only ?? row?.only_admin_can_send ?? row?.admins_only ?? false;
+    if(value === true || value === 1) return true;
+    const text = String(value || "").trim().toLowerCase();
+    return text === "true" || text === "1" || text === "yes" || text === "on";
+  }
+
+  async function fetchGroupRowById(groupId){
+    const cleanGroupId = String(groupId || receiverId || "").trim();
+    if(!cleanGroupId) return null;
+    for(const idKey of GROUP_LOOKUP_ID_KEYS){
+      try{
+        const { data, error } = await supa
+          .from("groups")
+          .select("*")
+          .eq(idKey, cleanGroupId)
+          .limit(1);
+        if(!error){
+          return Array.isArray(data) && data.length ? data[0] : null;
+        }
+        if(maybeMissingColumn(error) || maybeMissingResource(error, "groups")) continue;
+        return null;
+      }catch(_){
+        return null;
+      }
+    }
+    return null;
+  }
+
+  async function canCurrentUserAccessGroup(groupId, groupRow){
+    const cleanGroupId = String(groupId || receiverId || "").trim();
+    if(!cleanGroupId || !isUuid(myId)) return false;
+    const ownerId = String(resolveGroupOwnerId(groupRow) || "").trim();
+    if(ownerId && ownerId === myId) return true;
+
+    for(const groupKey of GROUP_MEMBER_GROUP_KEYS){
+      for(const userKey of GROUP_MEMBER_USER_KEYS){
+        try{
+          const { data, error } = await supa
+            .from("group_members")
+            .select("id")
+            .eq(groupKey, cleanGroupId)
+            .eq(userKey, myId)
+            .limit(1);
+          if(!error){
+            if(Array.isArray(data) && data.length) return true;
+            continue;
+          }
+          if(maybeMissingColumn(error) || maybeMissingResource(error, "group_members")) continue;
+          return false;
+        }catch(_){
+          return false;
+        }
+      }
+    }
+    return false;
+  }
+
+  async function fetchGroupMembers(groupId, ownerHint){
     const cleanGroupId = String(groupId || receiverId || "").trim();
     const ownerId = String(ownerHint || groupOwnerId || "").trim();
     if(!cleanGroupId) return [];
-    let members = [];
-    try{
-      const { data, error } = await supa
-        .from("group_members")
-        .select("*")
-        .limit(1200);
-      if(!error){
-        members = (data || [])
-          .filter(row => String(resolveMemberGroupId(row) || "").trim() === cleanGroupId)
-          .map((row, index) => {
-            const userId = String(resolveMemberUserId(row, index) || `member_${index}`).trim();
-            const admin = isMemberAdmin(row, ownerId, userId);
-            return {
-              user_id: userId,
-              display_name: resolveMemberName(row),
-              photo: resolveMemberAvatar(row),
-              role: parseRoleText(row),
-              is_admin: admin,
-              _source: row
-            };
-          })
-          .filter(row => String(row?.user_id || "").trim());
+    const members = [];
+    const seen = new Set();
+
+    for(const groupKey of GROUP_MEMBER_GROUP_KEYS){
+      try{
+        const { data, error } = await supa
+          .from("group_members")
+          .select("*")
+          .eq(groupKey, cleanGroupId)
+          .limit(1200);
+        if(error){
+          if(maybeMissingColumn(error) || maybeMissingResource(error, "group_members")) continue;
+          break;
+        }
+        (data || []).forEach((row, index) => {
+          const userId = String(resolveMemberUserId(row, index) || `member_${index}`).trim();
+          if(!userId || seen.has(userId)) return;
+          seen.add(userId);
+          const admin = isMemberAdmin(row, ownerId, userId);
+          members.push({
+            user_id: userId,
+            display_name: resolveMemberName(row),
+            photo: resolveMemberAvatar(row),
+            role: parseRoleText(row),
+            is_admin: admin,
+            _source: row
+          });
+        });
+      }catch(_){
+        break;
       }
-    }catch(_){ }
+    }
 
     if(members.length){
       return enrichGroupMembers(members, ownerId);
@@ -587,7 +671,7 @@
     const profiles = await fetchUsersByIds(ids);
     const profileById = new Map();
     profiles.forEach(profile => {
-      const uid = String(profile?.user_id || "").trim();
+      const uid = String(profile?.user_id || profile?.id || "").trim();
       if(uid) profileById.set(uid, profile);
     });
 
@@ -605,23 +689,26 @@
     });
   }
 
-    async function fetchGroupInfo(groupId){
+  async function fetchGroupInfo(groupId){
     const cleanGroupId = String(groupId || receiverId || "").trim();
-    let groupRow = null;
-    try{
-      const { data, error } = await supa
-        .from("groups")
-        .select("*")
-        .limit(800);
-      if(!error){
-        groupRow = (data || []).find(row => {
-          const id = readFirstValue(row, ["id", "group_id", "group_uuid", "gid"]);
-          return id && id === cleanGroupId;
-        }) || null;
-      }
-    }catch(_){ }
+    const groupRow = await fetchGroupRowById(cleanGroupId);
     groupOwnerId = resolveGroupOwnerId(groupRow);
-    const resolvedGroupId = String(readFirstValue(groupRow, ["id", "group_id", "group_uuid", "gid"]) || cleanGroupId).trim();
+    const resolvedGroupId = String(readFirstValue(groupRow, GROUP_LOOKUP_ID_KEYS) || cleanGroupId).trim();
+    const allowed = await canCurrentUserAccessGroup(resolvedGroupId, groupRow);
+    if(!allowed){
+      groupAdminOnly = false;
+      return {
+        id: resolvedGroupId,
+        name: String(groupRow?.name || groupRow?.group_name || receiverNameParam || "Group").trim() || "Group",
+        icon_url: String(groupRow?.icon_url || groupRow?.group_icon || receiverPicParam || "").trim(),
+        group_icon: String(groupRow?.group_icon || groupRow?.icon_url || receiverPicParam || "").trim(),
+        member_count: 0,
+        members: [],
+        allowed: false,
+        is_admin_only: false
+      };
+    }
+
     let members = await fetchGroupMembers(resolvedGroupId, groupOwnerId);
     if(groupOwnerId && !members.some(member => String(member?.user_id || "").trim() === groupOwnerId)){
       const ownerProfiles = await fetchUsersByIds([groupOwnerId]);
@@ -644,13 +731,16 @@
         groupOwnerId = String(adminMember.user_id || "").trim();
       }
     }
+    groupAdminOnly = normalizeGroupAdminOnly(groupRow);
     return {
       id: resolvedGroupId,
       name: String(groupRow?.name || groupRow?.group_name || receiverNameParam || "Group").trim() || "Group",
       icon_url: String(groupRow?.icon_url || groupRow?.group_icon || receiverPicParam || "").trim(),
       group_icon: String(groupRow?.group_icon || groupRow?.icon_url || receiverPicParam || "").trim(),
       member_count: normalizeMemberCount(members.length),
-      members
+      members,
+      allowed: true,
+      is_admin_only: groupAdminOnly
     };
   }
 
@@ -1313,15 +1403,27 @@
     setAvatar(document.getElementById("userAvatar"), photo, name);
     setAvatar(document.getElementById("infoPic"), photo, name);
     if(isGroupChat){
-      const label = buildGroupMetaText();
+      const label = [buildGroupMetaText(), groupAdminOnly ? "Only admins can send messages" : ""]
+        .filter(Boolean)
+        .join(" | ");
       if(userMeta) userMeta.textContent = label;
       if(infoMeta) infoMeta.textContent = label;
       renderGroupMembers();
+      applyGroupMessagingPermissions();
       return;
     }
     if(userMeta) userMeta.textContent = "";
     if(infoMeta) infoMeta.textContent = "Real-time verified account";
     renderGroupMembers();
+  }
+
+  function applyGroupMessagingPermissions(){
+    if(!isGroupChat) return;
+    const canSend = canCurrentUserSendGroupMessages();
+    mainInput.disabled = !canSend;
+    sendBtn.disabled = !canSend;
+    mainInput.placeholder = canSend ? "Type a message" : "Only admins can send messages";
+    sendBtn.classList.toggle("opacity-50", !canSend);
   }
 
   function applyBlockedUi(){
@@ -1604,17 +1706,22 @@
 
   async function fetchUserProfile(uid){
     const attempts = [
-      "user_id,username,full_name,display_name,photo,avatar_url",
-      "user_id,username,full_name,display_name,photo",
-      "user_id,username,full_name,photo",
-      "user_id,username,full_name"
+      "user_id,id,username,user_name,full_name,display_name,name,photo,avatar_url,profile_icon,user_icon,email",
+      "id,user_id,username,user_name,full_name,display_name,name,avatar_url,photo,profile_icon,user_icon,email",
+      "user_id,id,username,full_name,display_name,name,photo,avatar_url,email",
+      "id,user_id,username,full_name,display_name,name,avatar_url,photo,email",
+      "user_id,id,username,name,photo,avatar_url,email",
+      "id,user_id,username,name,avatar_url,photo,email"
     ];
+    const idColumns = ["user_id", "id"];
     for(const fields of attempts){
-      const { data, error } = await supa.from("users").select(fields).eq("user_id", uid).maybeSingle();
-      if(!error) return data || null;
-      if(!maybeMissingColumn(error)){
-        console.error("profile_fetch_failed", error);
-        break;
+      for(const idColumn of idColumns){
+        const { data, error } = await supa.from("users").select(fields).eq(idColumn, uid).maybeSingle();
+        if(!error) return data ? normalizeUserProfileRow(data) : null;
+        if(!maybeMissingColumn(error)){
+          console.error("profile_fetch_failed", error);
+          return null;
+        }
       }
     }
     return null;
@@ -1862,6 +1969,10 @@
   }
 
   async function sendMessage(){
+    if(isGroupChat && !canCurrentUserSendGroupMessages()){
+      showNotice("Only admins can send messages.");
+      return;
+    }
     const text = String(mainInput.value || "").trim();
     if(!text) return;
     mainInput.value = "";
@@ -3119,6 +3230,10 @@
     const files = Array.from(el?.files || []);
     if(!files.length) return;
     try{
+      if(isGroupChat && !canCurrentUserSendGroupMessages()){
+        showNotice("Only admins can send messages.");
+        return;
+      }
       if(!isGroupChat && isPeerBlocked){
         console.warn("attachment_blocked_user");
         return;
@@ -3223,12 +3338,20 @@
           icon_url: receiverPicParam,
           group_icon: receiverPicParam,
           member_count: 0,
-          members: []
+          members: [],
+          allowed: false,
+          is_admin_only: false
         };
+      }
+      if(groupInfo?.allowed === false){
+        alert("You can only open groups where you are a member.");
+        location.href = "chat.html";
+        return;
       }
       if(groupInfo?.id){
         receiverId = String(groupInfo.id || "").trim() || receiverId;
       }
+      groupAdminOnly = !!groupInfo?.is_admin_only;
       groupMembers = Array.isArray(groupInfo?.members) ? groupInfo.members : [];
       if(groupInfo){
         groupInfo.member_count = normalizeMemberCount(groupMembers.length);
@@ -3247,13 +3370,12 @@
               groupInfo.members = groupMembers.slice();
             }
             renderPeerHeader();
+            applyGroupMessagingPermissions();
           }
         }).catch(() => {});
       }
-      mainInput.disabled = false;
-      sendBtn.disabled = false;
-      mainInput.placeholder = "Type a message";
       blockedBanner.classList.remove("show");
+      applyGroupMessagingPermissions();
       audioCallBtn.disabled = true;
       videoCallBtn.disabled = true;
       audioCallBtn.classList.add("opacity-50");

@@ -586,6 +586,9 @@
             const candidates = [
                 source?.display_name,
                 source?.full_name,
+                source?.name,
+                source?.user_name,
+                source?.member_name,
                 source?.username,
                 meta?.full_name,
                 meta?.name,
@@ -600,7 +603,19 @@
         }
 
         function avatarUrl(user){
-            return String(user?.photo || user?.avatar_url || user?.user_metadata?.avatar_url || user?.user_metadata?.picture || "").trim();
+            return String(user?.photo || user?.avatar_url || user?.profile_icon || user?.user_icon || user?.member_avatar || user?.user_metadata?.avatar_url || user?.user_metadata?.picture || "").trim();
+        }
+
+        function normalizeUserProfileRow(raw){
+            const row = raw && typeof raw === "object" ? raw : {};
+            return {
+                ...row,
+                user_id: String(row?.user_id || row?.id || "").trim(),
+                username: String(row?.username || row?.user_name || "").trim(),
+                display_name: String(row?.display_name || row?.full_name || row?.name || row?.user_name || row?.username || "").trim(),
+                photo: String(row?.photo || row?.avatar_url || row?.profile_icon || row?.user_icon || row?.member_avatar || "").trim(),
+                email: String(row?.email || "").trim()
+            };
         }
 
         function sanitizeNameForQuery(value){
@@ -814,17 +829,22 @@
             return `open-chat.html?${qp.toString()}`;
         }
 
-                async function fetchUserById(uid){
+        async function fetchUserById(uid){
+            const idColumns = ["user_id", "id"];
             const attempts = [
-                "user_id,username,full_name,display_name,photo,avatar_url,email",
-                "user_id,username,full_name,display_name,photo,email",
-                "user_id,username,full_name,photo,email",
-                "user_id,username,full_name,email"
+                "user_id,id,username,user_name,full_name,display_name,name,photo,avatar_url,profile_icon,user_icon,email",
+                "id,user_id,username,user_name,full_name,display_name,name,avatar_url,photo,profile_icon,user_icon,email",
+                "user_id,id,username,full_name,display_name,name,photo,avatar_url,email",
+                "id,user_id,username,full_name,display_name,name,avatar_url,photo,email",
+                "user_id,id,username,name,photo,avatar_url,email",
+                "id,user_id,username,name,avatar_url,photo,email"
             ];
             for(const fields of attempts){
-                const { data, error } = await supa.from("users").select(fields).eq("user_id", uid).maybeSingle();
-                if(!error) return data || null;
-                if(!maybeMissingColumn(error)) break;
+                for(const idColumn of idColumns){
+                    const { data, error } = await supa.from("users").select(fields).eq(idColumn, uid).maybeSingle();
+                    if(!error) return data ? normalizeUserProfileRow(data) : null;
+                    if(!maybeMissingColumn(error)) return null;
+                }
             }
             return null;
         }
@@ -837,21 +857,28 @@
                 .filter(id => isUuid(id) && (includeCurrent || id !== currentUserId));
             if(!ids.length) return [];
             const attempts = [
-                "user_id,username,full_name,display_name,photo,avatar_url,email",
-                "user_id,username,full_name,display_name,photo,email",
-                "user_id,username,full_name,photo,email",
-                "user_id,username,full_name,email"
+                "user_id,id,username,user_name,full_name,display_name,name,photo,avatar_url,profile_icon,user_icon,email",
+                "id,user_id,username,user_name,full_name,display_name,name,avatar_url,photo,profile_icon,user_icon,email",
+                "user_id,id,username,full_name,display_name,name,photo,avatar_url,email",
+                "id,user_id,username,full_name,display_name,name,avatar_url,photo,email",
+                "user_id,id,username,name,photo,avatar_url,email",
+                "id,user_id,username,name,avatar_url,photo,email"
             ];
+            const idColumns = ["user_id", "id"];
             for(const fields of attempts){
-                const { data, error } = await supa
-                    .from("users")
-                    .select(fields)
-                    .in("user_id", ids)
-                    .limit(Math.max(200, ids.length + 10));
-                if(!error) return data || [];
-                if(!maybeMissingColumn(error)){
-                    console.error("users_fetch_failed", error);
-                    return [];
+                for(const idColumn of idColumns){
+                    const { data, error } = await supa
+                        .from("users")
+                        .select(fields)
+                        .in(idColumn, ids)
+                        .limit(Math.max(200, ids.length + 10));
+                    if(!error){
+                        return (data || []).map(normalizeUserProfileRow).filter(row => row.user_id);
+                    }
+                    if(!maybeMissingColumn(error)){
+                        console.error("users_fetch_failed", error);
+                        return [];
+                    }
                 }
             }
             return [];
@@ -970,7 +997,7 @@
             const userRows = await fetchUsersByIds(ids);
             const userById = new Map();
             (userRows || []).forEach(row => {
-                const id = String(row?.user_id || "").trim();
+                const id = String(row?.user_id || row?.id || "").trim();
                 if(!id) return;
                 userById.set(id, row);
             });
@@ -1025,7 +1052,11 @@
         }
 
         function extractGroupMemberUserId(row){
-            return readFirstPresentValue(row, ["user_id", "member_id", "user_uuid", "member_uuid", "participant_id", "member", "uid"]);
+            return readFirstPresentValue(row, ["user_id", "member_id", "user_uuid", "member_uuid", "participant_id", "member", "uid", "user", "userId", "member_user_id", "profile_id", "account_id"]);
+        }
+
+        function extractGroupMemberGroupId(row){
+            return readFirstPresentValue(row, ["group_id", "group_uuid", "gid", "groupId", "group", "chat_id", "room_id", "conversation_id"]);
         }
 
         function extractGroupId(row){
@@ -1219,107 +1250,179 @@
             }
         }
 
-        function hasAnyKnownOwnerField(row){
-            const source = row && typeof row === "object" ? row : {};
-            const keys = [
-                "created_by",
-                "owner_id",
-                "user_id",
-                "admin_id",
-                "createdBy",
-                "ownerId",
-                "user_uuid",
-                "owner_uuid",
-                "creator_id",
-                "admin_uuid",
-                "uid",
-                "created_by_id",
-                "created_by_user_id",
-                "creator_user_id",
-                "creator_uuid",
-                "created_by_uuid",
-                "group_admin_id"
-            ];
-            return keys.some(key => Object.prototype.hasOwnProperty.call(source, key));
+        const GROUP_OWNER_FIELDS = [
+            "created_by",
+            "owner_id",
+            "user_id",
+            "admin_id",
+            "createdBy",
+            "ownerId",
+            "user_uuid",
+            "owner_uuid",
+            "creator_id",
+            "admin_uuid",
+            "uid",
+            "created_by_id",
+            "created_by_user_id",
+            "creator_user_id",
+            "creator_uuid",
+            "created_by_uuid",
+            "group_admin_id"
+        ];
+        const GROUP_ID_FIELDS = ["id", "group_id", "group_uuid", "gid", "uuid"];
+        const GROUP_MEMBER_USER_FIELDS = ["user_id", "member_id", "user_uuid", "member_uuid", "participant_id", "member", "uid", "user", "userId", "member_user_id", "profile_id", "account_id"];
+
+        function normalizeGroupListRow(raw){
+            const row = raw && typeof raw === "object" ? raw : {};
+            return {
+                id: String(extractGroupId(row) || "").trim(),
+                name: String(row?.name || row?.group_name || "Group").trim() || "Group",
+                img: String(row?.group_icon || row?.icon_url || "").trim(),
+                owner_id: String(extractGroupOwnerId(row) || row?.owner_id || "").trim(),
+                owner_name: String(row?.owner_name || row?.creator_name || "").trim(),
+                isGroup: true,
+                sortTs: Number(row?.updated_at || row?.created_at || 0) || 0
+            };
+        }
+
+        function mergeGroupListRow(byId, raw){
+            const next = normalizeGroupListRow(raw);
+            if(!next.id) return;
+            const prev = byId.get(next.id) || {};
+            byId.set(next.id, {
+                id: next.id,
+                name: String(next.name || prev.name || "Group").trim() || "Group",
+                img: String(next.img || prev.img || "").trim(),
+                owner_id: String(next.owner_id || prev.owner_id || "").trim(),
+                owner_name: String(next.owner_name || prev.owner_name || "").trim(),
+                isGroup: true,
+                sortTs: Math.max(Number(prev.sortTs || 0), Number(next.sortTs || 0))
+            });
+        }
+
+        async function fetchGroupMembershipRowsForCurrentUser(){
+            const rows = [];
+            const seen = new Set();
+            for(const userField of GROUP_MEMBER_USER_FIELDS){
+                try{
+                    const { data, error } = await supa
+                        .from("group_members")
+                        .select("*")
+                        .eq(userField, currentUserId)
+                        .limit(2000);
+                    if(error){
+                        if(maybeMissingColumn(error) || maybeMissingResource(error, "group_members")) continue;
+                        console.error("group_members_fetch_failed", error);
+                        break;
+                    }
+                    (data || []).forEach(row => {
+                        const marker = String(row?.id || JSON.stringify(row || {}));
+                        if(seen.has(marker)) return;
+                        seen.add(marker);
+                        rows.push(row);
+                    });
+                }catch(err){
+                    console.error("group_members_fetch_exception", err);
+                    break;
+                }
+            }
+            return rows;
+        }
+
+        async function fetchOwnedGroupRowsForCurrentUser(){
+            const rows = [];
+            const seen = new Set();
+            for(const ownerField of GROUP_OWNER_FIELDS){
+                try{
+                    const { data, error } = await supa
+                        .from("groups")
+                        .select("*")
+                        .eq(ownerField, currentUserId)
+                        .limit(600);
+                    if(error){
+                        if(maybeMissingColumn(error) || maybeMissingResource(error, "groups")) continue;
+                        console.error("groups_fetch_failed", error);
+                        break;
+                    }
+                    (data || []).forEach(row => {
+                        const id = String(extractGroupId(row) || "").trim();
+                        if(!id || seen.has(id)) return;
+                        seen.add(id);
+                        rows.push(row);
+                    });
+                }catch(err){
+                    console.error("groups_fetch_exception", err);
+                    break;
+                }
+            }
+            return rows;
+        }
+
+        async function fetchGroupsByIds(groupIds){
+            const ids = Array.from(new Set(Array.from(groupIds || []).map(id => String(id || "").trim()).filter(Boolean)));
+            if(!ids.length) return [];
+            const rows = [];
+            const seen = new Set();
+            for(const idField of GROUP_ID_FIELDS){
+                try{
+                    const { data, error } = await supa
+                        .from("groups")
+                        .select("*")
+                        .in(idField, ids)
+                        .limit(Math.max(200, ids.length + 20));
+                    if(error){
+                        if(maybeMissingColumn(error) || maybeMissingResource(error, "groups")) continue;
+                        console.error("groups_fetch_failed", error);
+                        break;
+                    }
+                    (data || []).forEach(row => {
+                        const id = String(extractGroupId(row) || "").trim();
+                        if(!id || seen.has(id)) return;
+                        seen.add(id);
+                        rows.push(row);
+                    });
+                }catch(err){
+                    console.error("groups_fetch_exception", err);
+                    break;
+                }
+            }
+            return rows;
         }
 
         async function fetchMyGroups(){
-            const groupIds = new Set();
             const byId = new Map();
-            const addGroupRows = (rows) => {
-                (rows || []).forEach(g => {
-                    const id = String(g?.id || g?.group_id || g?.group_uuid || g?.gid || "").trim();
-                    if(!id) return;
-                    groupIds.add(id);
-                    byId.set(id, {
-                        id,
-                        name: String(g?.name || g?.group_name || byId.get(id)?.name || "Group").trim() || "Group",
-                        img: String(g?.group_icon || g?.icon_url || byId.get(id)?.img || "").trim(),
-                        owner_id: String(extractGroupOwnerId(g) || g?.owner_id || byId.get(id)?.owner_id || "").trim(),
-                        owner_name: String(g?.owner_name || g?.creator_name || byId.get(id)?.owner_name || "").trim(),
-                        isGroup: true,
-                        sortTs: Number(g?.updated_at || g?.created_at || byId.get(id)?.sortTs || 0) || 0
-                    });
-                });
-            };
-
-            manualGroups.forEach(group => {
-                addGroupRows([group]);
+            const candidateGroupIds = new Set();
+            const membershipRows = await fetchGroupMembershipRowsForCurrentUser();
+            membershipRows.forEach(row => {
+                const id = String(extractGroupMemberGroupId(row) || "").trim();
+                if(id) candidateGroupIds.add(id);
             });
 
-            try{
-                const { data: memberRows, error: memberError } = await supa
-                    .from("group_members")
-                    .select("*")
-                    .limit(2000);
-                if(memberError){
-                    if(!maybeMissingResource(memberError, "group_members")){
-                        console.error("group_members_fetch_failed", memberError);
-                    }
-                }else{
-                    (memberRows || []).forEach(row => {
-                        const id = String(row?.group_id || row?.group_uuid || row?.gid || "").trim();
-                        const memberUserId = extractGroupMemberUserId(row);
-                        if(id && memberUserId === currentUserId){
-                            groupIds.add(id);
-                        }
-                    });
-                }
-            }catch(err){
-                console.error("group_members_fetch_exception", err);
-            }
+            const ownedGroupRows = await fetchOwnedGroupRowsForCurrentUser();
+            ownedGroupRows.forEach(row => {
+                mergeGroupListRow(byId, row);
+                const id = String(extractGroupId(row) || "").trim();
+                if(id) candidateGroupIds.add(id);
+            });
 
-            let groupRows = [];
-            try{
-                const { data, error } = await supa
-                    .from("groups")
-                    .select("*")
-                    .limit(600);
-                if(error){
-                    if(!maybeMissingResource(error, "groups")){
-                        console.error("groups_fetch_failed", error);
-                    }
-                }else{
-                    groupRows = Array.isArray(data) ? data : [];
-                }
-            }catch(err){
-                console.error("groups_fetch_exception", err);
-            }
+            const groupRows = await fetchGroupsByIds(candidateGroupIds);
+            groupRows.forEach(row => {
+                mergeGroupListRow(byId, row);
+            });
 
-            if(groupRows.length){
-                let matchedCount = 0;
-                groupRows.forEach(row => {
-                    const id = String(row?.id || row?.group_id || row?.group_uuid || row?.gid || "").trim();
-                    if(!id) return;
-                    const ownerId = extractGroupOwnerId(row);
-                    const memberMatch = groupIds.has(id);
-                    const ownerMatch = ownerId && ownerId === currentUserId;
-                    if(memberMatch || ownerMatch){
-                        addGroupRows([row]);
-                        matchedCount += 1;
-                    }
+            candidateGroupIds.forEach(id => {
+                const manual = manualGroups.get(id) || {};
+                const prev = byId.get(id) || {};
+                byId.set(id, {
+                    id,
+                    name: String(prev.name || manual.name || "Group").trim() || "Group",
+                    img: String(prev.img || manual.img || "").trim(),
+                    owner_id: String(prev.owner_id || manual.owner_id || "").trim(),
+                    owner_name: String(prev.owner_name || manual.owner_name || "").trim(),
+                    isGroup: true,
+                    sortTs: Math.max(Number(prev.sortTs || 0), Number(manual.updated_at || manual.sortTs || 0) || 0)
                 });
-            }
+            });
 
             const ownerIds = Array.from(new Set(Array.from(byId.values())
                 .map(row => String(row?.owner_id || "").trim())
@@ -1328,7 +1431,7 @@
                 const ownerRows = await fetchUsersByIds(ownerIds, { includeCurrent: true });
                 const ownerById = new Map();
                 (ownerRows || []).forEach(row => {
-                    const id = String(row?.user_id || "").trim();
+                    const id = String(row?.user_id || row?.id || "").trim();
                     if(id) ownerById.set(id, row);
                 });
                 byId.forEach((groupRow, id) => {

@@ -341,7 +341,7 @@ function toTitleWords(text){
 }
 
 function safeDisplayName(user){
-  const direct = String(user?.display_name || user?.full_name || user?.username || "").trim();
+  const direct = String(user?.display_name || user?.full_name || user?.name || user?.user_name || user?.username || "").trim();
   if(direct && !isPlaceholderName(direct)){
     return toTitleWords(direct) || direct;
   }
@@ -377,9 +377,9 @@ function normalizeUserRow(raw){
   const row = raw && typeof raw === "object" ? raw : {};
   return {
     user_id: String(row.user_id || row.id || row.uid || "").trim(),
-    display_name: String(row.display_name || row.full_name || row.name || row.username || "").trim(),
-    username: String(row.username || "").trim(),
-    photo: String(row.photo || row.avatar_url || "").trim(),
+    display_name: String(row.display_name || row.full_name || row.name || row.user_name || row.username || "").trim(),
+    username: String(row.username || row.user_name || "").trim(),
+    photo: String(row.photo || row.avatar_url || row.profile_icon || row.user_icon || "").trim(),
     email: String(row.email || "").trim().toLowerCase(),
     verified: !!row.verified,
     trust_score: Math.max(0, Number(row.trust_score || 0)),
@@ -456,6 +456,7 @@ function buildApiBases(){
 
 function canUseDirectUsersTable(){
   const raw = String(window.NOVA_USE_DIRECT_USERS_TABLE || window.NOVA_ENABLE_DIRECT_USERS_TABLE || "").trim().toLowerCase();
+  if(!raw) return true;
   return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
 }
 
@@ -552,9 +553,10 @@ function buildUserSearchFilters(clean){
   const value = String(clean || "").replace(/[,%()]/g, " ").replace(/\s+/g, " ").trim();
   if(!value) return [""];
   return [
-    `username.ilike.%${value}%,full_name.ilike.%${value}%,display_name.ilike.%${value}%,email.ilike.%${value}%`,
-    `username.ilike.%${value}%,full_name.ilike.%${value}%,display_name.ilike.%${value}%`,
-    `username.ilike.%${value}%,full_name.ilike.%${value}%`,
+    `username.ilike.%${value}%,user_name.ilike.%${value}%,full_name.ilike.%${value}%,display_name.ilike.%${value}%,name.ilike.%${value}%,email.ilike.%${value}%`,
+    `username.ilike.%${value}%,user_name.ilike.%${value}%,full_name.ilike.%${value}%,display_name.ilike.%${value}%,name.ilike.%${value}%`,
+    `username.ilike.%${value}%,full_name.ilike.%${value}%,display_name.ilike.%${value}%,name.ilike.%${value}%`,
+    `username.ilike.%${value}%,name.ilike.%${value}%`,
     `username.ilike.%${value}%`
   ];
 }
@@ -603,12 +605,14 @@ async function fetchUsersFromApi(q){
   };
 
   const selectVariants = [
-    "id,username,avatar_url,full_name,email,display_name,photo,user_id",
-    "user_id,username,photo,full_name,email,display_name,avatar_url,id",
-    "id,username,avatar_url",
-    "user_id,username,photo",
-    "id,username,photo",
-    "user_id,username,avatar_url"
+    "user_id,id,username,user_name,full_name,display_name,name,photo,avatar_url,profile_icon,user_icon,email",
+    "id,user_id,username,user_name,full_name,display_name,name,avatar_url,photo,profile_icon,user_icon,email",
+    "user_id,id,username,full_name,display_name,name,photo,avatar_url,email",
+    "id,user_id,username,full_name,display_name,name,avatar_url,photo,email",
+    "user_id,id,username,name,photo,avatar_url,profile_icon,user_icon,email",
+    "id,user_id,username,name,avatar_url,photo,profile_icon,user_icon,email",
+    "user_id,id,username,photo,avatar_url",
+    "id,user_id,username,avatar_url,photo"
   ];
 
   for(const cols of selectVariants){
@@ -634,8 +638,10 @@ async function fetchUsersFromApi(q){
       const rows = (Array.isArray(data) ? data : []).filter(row => {
         const hay = [
           row?.username || "",
+          row?.user_name || "",
           row?.display_name || "",
           row?.full_name || "",
+          row?.name || "",
           row?.email || ""
         ].join(" ").toLowerCase();
         return hay.includes(clean.toLowerCase());
@@ -653,10 +659,10 @@ async function fetchUsersFallback(q){
   const query = String(q || "").trim();
   const clean = query.replace(/[%*,()]/g, " ").replace(/["']/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
   const variants = [
-    "id,username,avatar_url,full_name,email,display_name,photo,user_id",
-    "user_id,username,photo,full_name,email,display_name,avatar_url,id",
-    "id,username,avatar_url",
-    "user_id,username,photo"
+    "user_id,id,username,user_name,full_name,display_name,name,photo,avatar_url,profile_icon,user_icon,email",
+    "id,user_id,username,user_name,full_name,display_name,name,avatar_url,photo,profile_icon,user_icon,email",
+    "user_id,id,username,full_name,display_name,name,photo,avatar_url,email",
+    "id,user_id,username,name,avatar_url,photo,email"
   ];
   const merged = [];
   const seen = new Set();

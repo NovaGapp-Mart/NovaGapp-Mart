@@ -839,105 +839,100 @@
     return next;
   }
 
-  window.NOVA.toggleReaction = async function(targetType, targetId, reaction){
-    const user = await window.NOVA.requireUser();
-    const queueKey = [user.id, targetType, targetId].join("|");
+  function isCompatReelTarget(targetType){
+    return String(targetType || "").trim().toLowerCase() === "reel";
+  }
 
-    return queueReactionOperation(queueKey, async () => {
-      const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-      const keyFilter = (query) => query
-        .eq("user_id", user.id)
-        .eq("target_type", targetType)
-        .eq("target_id", targetId);
-
-      const removeExisting = async () => {
-        const { error } = await keyFilter(supa.from("reactions").delete());
-        if(error) throw error;
-      };
-
-      const readCurrentReaction = async () => {
-        const { data, error } = await keyFilter(
-          supa.from("reactions").select("reaction").limit(1).maybeSingle()
-        );
-        if(error) throw error;
-        return data?.reaction || null;
-      };
-
-      const insertRequestedReaction = async () => {
-        const { error } = await supa.from("reactions").upsert(
-          {
-            user_id: user.id,
-            target_type: targetType,
-            target_id: targetId,
-            reaction
-          },
-          {
-            onConflict: "user_id,target_type,target_id"
-          }
-        );
-        return error || null;
-      };
-
-      const previousReaction = await readCurrentReaction();
-
-      if(previousReaction === reaction){
-        await removeExisting();
-        const finalAfterDelete = await readCurrentReaction();
-        return {
-          active: !!finalAfterDelete,
-          reaction: finalAfterDelete,
-          previousReaction
-        };
-      }
-
-      if(previousReaction){
-        await removeExisting();
-      }
-
-      let writeError = await insertRequestedReaction();
-      if(writeError){
-        const isConflict = String(writeError.code || "") === "23505";
-        if(!isConflict) throw writeError;
-
-        const currentFromConflict = await readCurrentReaction();
-        if(currentFromConflict !== reaction){
-          await removeExisting();
-          writeError = await insertRequestedReaction();
-          if(writeError){
-            const retryConflict = String(writeError.code || "") === "23505";
-            if(!retryConflict) throw writeError;
-          }
+  async function toggleReelReactionCompat(userId, reelId, reaction){
+    const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    const readCurrentReaction = async () => {
+      const { data, error } = await supa
+        .from("reel_likes")
+        .select("reaction")
+        .eq("reel_id", reelId)
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle();
+      if(error) throw error;
+      return data?.reaction || null;
+    };
+    const removeExisting = async () => {
+      const { error } = await supa
+        .from("reel_likes")
+        .delete()
+        .eq("reel_id", reelId)
+        .eq("user_id", userId);
+      if(error) throw error;
+    };
+    const insertRequestedReaction = async () => {
+      const { error } = await supa.from("reel_likes").upsert(
+        {
+          reel_id: reelId,
+          user_id: userId,
+          reaction
+        },
+        {
+          onConflict: "reel_id,user_id"
         }
-      }
+      );
+      return error || null;
+    };
 
-      let finalReaction = null;
-      for(let attempt = 0; attempt < 3; attempt += 1){
-        finalReaction = await readCurrentReaction();
-        if(finalReaction) break;
-        await wait(120);
-      }
-
+    const previousReaction = await readCurrentReaction();
+    if(previousReaction === reaction){
+      await removeExisting();
+      const finalAfterDelete = await readCurrentReaction().catch(() => null);
       return {
-        active: !!finalReaction,
-        reaction: finalReaction,
+        active: !!finalAfterDelete,
+        reaction: finalAfterDelete,
         previousReaction
       };
-    });
-  };
+    }
 
-  window.NOVA.getReactionCounts = async function(targetType, targetId){
+    if(previousReaction){
+      await removeExisting();
+    }
+
+    let writeError = await insertRequestedReaction();
+    if(writeError){
+      const isConflict = String(writeError.code || "") === "23505";
+      if(!isConflict) throw writeError;
+      const currentFromConflict = await readCurrentReaction();
+      if(currentFromConflict !== reaction){
+        await removeExisting();
+        writeError = await insertRequestedReaction();
+        if(writeError){
+          const retryConflict = String(writeError.code || "") === "23505";
+          if(!retryConflict) throw writeError;
+        }
+      }
+    }
+
+    let finalReaction = null;
+    for(let attempt = 0; attempt < 3; attempt += 1){
+      finalReaction = await readCurrentReaction();
+      if(finalReaction) break;
+      await wait(120);
+    }
+
+    return {
+      active: !!finalReaction,
+      reaction: finalReaction,
+      previousReaction
+    };
+  }
+
+  async function getReelReactionCountsCompat(reelId){
     const likeQuery = supa
-      .from("reactions")
-      .select("id", { count: "exact", head: true })
-      .eq("target_type", targetType)
-      .eq("target_id", targetId)
+      .from("reel_likes")
+      .select("reel_id", { count: "exact", head: true })
+      .eq("reel_id", reelId)
       .eq("reaction", "like");
 
     const dislikeQuery = supa
-      .from("reactions")
-      .select("id", { count: "exact", head: true })
-      .eq("target_type", targetType)
-      .eq("target_id", targetId)
+      .from("reel_likes")
+      .select("reel_id", { count: "exact", head: true })
+      .eq("reel_id", reelId)
       .eq("reaction", "dislike");
 
     const [{ count: likes, error: likeError }, { count: dislikes, error: dislikeError }] = await Promise.all([
@@ -949,13 +944,165 @@
     }
 
     const { data, error } = await supa
-      .from("reactions")
+      .from("reel_likes")
       .select("reaction")
-      .eq("target_type", targetType)
-      .eq("target_id", targetId)
+      .eq("reel_id", reelId)
       .in("reaction", ["like", "dislike"])
       .limit(5000);
     if(error){
+      return { likes: 0, dislikes: 0 };
+    }
+
+    let likeCount = 0;
+    let dislikeCount = 0;
+    (data || []).forEach(row => {
+      if(row?.reaction === "like") likeCount += 1;
+      if(row?.reaction === "dislike") dislikeCount += 1;
+    });
+    return { likes: likeCount, dislikes: dislikeCount };
+  }
+
+  window.NOVA.toggleReaction = async function(targetType, targetId, reaction){
+    const safeType = String(targetType || "").trim().toLowerCase();
+    const safeId = String(targetId || "").trim();
+    const safeReaction = String(reaction || "").trim().toLowerCase() === "dislike" ? "dislike" : "like";
+    const user = await window.NOVA.requireUser();
+    const queueKey = [user.id, safeType, safeId].join("|");
+
+    return queueReactionOperation(queueKey, async () => {
+      const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+      const keyFilter = (query) => query
+        .eq("user_id", user.id)
+        .eq("target_type", safeType)
+        .eq("target_id", safeId);
+
+      const runGenericToggle = async () => {
+        const removeExisting = async () => {
+          const { error } = await keyFilter(supa.from("reactions").delete());
+          if(error) throw error;
+        };
+
+        const readCurrentReaction = async () => {
+          const { data, error } = await keyFilter(
+            supa.from("reactions").select("reaction").limit(1).maybeSingle()
+          );
+          if(error) throw error;
+          return data?.reaction || null;
+        };
+
+        const insertRequestedReaction = async () => {
+          const { error } = await supa.from("reactions").upsert(
+            {
+              user_id: user.id,
+              target_type: safeType,
+              target_id: safeId,
+              reaction: safeReaction
+            },
+            {
+              onConflict: "user_id,target_type,target_id"
+            }
+          );
+          return error || null;
+        };
+
+        const previousReaction = await readCurrentReaction();
+        if(previousReaction === safeReaction){
+          await removeExisting();
+          const finalAfterDelete = await readCurrentReaction();
+          return {
+            active: !!finalAfterDelete,
+            reaction: finalAfterDelete,
+            previousReaction
+          };
+        }
+
+        if(previousReaction){
+          await removeExisting();
+        }
+
+        let writeError = await insertRequestedReaction();
+        if(writeError){
+          const isConflict = String(writeError.code || "") === "23505";
+          if(!isConflict) throw writeError;
+
+          const currentFromConflict = await readCurrentReaction();
+          if(currentFromConflict !== safeReaction){
+            await removeExisting();
+            writeError = await insertRequestedReaction();
+            if(writeError){
+              const retryConflict = String(writeError.code || "") === "23505";
+              if(!retryConflict) throw writeError;
+            }
+          }
+        }
+
+        let finalReaction = null;
+        for(let attempt = 0; attempt < 3; attempt += 1){
+          finalReaction = await readCurrentReaction();
+          if(finalReaction) break;
+          await wait(120);
+        }
+
+        return {
+          active: !!finalReaction,
+          reaction: finalReaction,
+          previousReaction
+        };
+      };
+
+      if(isCompatReelTarget(safeType)){
+        try{
+          return await runGenericToggle();
+        }catch(err){
+          if(!isMissingRelation(err, "reactions")) throw err;
+        }
+        return await toggleReelReactionCompat(user.id, safeId, safeReaction);
+      }
+
+      return await runGenericToggle();
+    });
+  };
+
+  window.NOVA.getReactionCounts = async function(targetType, targetId){
+    const safeType = String(targetType || "").trim().toLowerCase();
+    const safeId = String(targetId || "").trim();
+
+    const likeQuery = supa
+      .from("reactions")
+      .select("id", { count: "exact", head: true })
+      .eq("target_type", safeType)
+      .eq("target_id", safeId)
+      .eq("reaction", "like");
+
+    const dislikeQuery = supa
+      .from("reactions")
+      .select("id", { count: "exact", head: true })
+      .eq("target_type", safeType)
+      .eq("target_id", safeId)
+      .eq("reaction", "dislike");
+
+    const [{ count: likes, error: likeError }, { count: dislikes, error: dislikeError }] = await Promise.all([
+      likeQuery,
+      dislikeQuery
+    ]);
+    if(!likeError && !dislikeError && likes !== null && dislikes !== null){
+      return { likes: likes || 0, dislikes: dislikes || 0 };
+    }
+    if(isCompatReelTarget(safeType) && (isMissingRelation(likeError, "reactions") || isMissingRelation(dislikeError, "reactions"))){
+      return await getReelReactionCountsCompat(safeId);
+    }
+
+    const { data, error } = await supa
+      .from("reactions")
+      .select("reaction")
+      .eq("target_type", safeType)
+      .eq("target_id", safeId)
+      .in("reaction", ["like", "dislike"])
+      .limit(5000);
+    if(error){
+      if(isCompatReelTarget(safeType) && isMissingRelation(error, "reactions")){
+        return await getReelReactionCountsCompat(safeId);
+      }
       return { likes: 0, dislikes: 0 };
     }
 
