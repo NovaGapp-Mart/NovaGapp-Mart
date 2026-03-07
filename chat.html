@@ -484,7 +484,7 @@
                 manualGroups.set(id, {
                     id,
                     name: resolveGroupDisplayName(row, "Group"),
-                    img: String(row?.img || "").trim(),
+                    img: resolveGroupIconUrl(row?.img || ""),
                     owner_id: String(row?.owner_id || "").trim(),
                     owner_name: String(row?.owner_name || "").trim(),
                     isGroup: true,
@@ -501,7 +501,7 @@
                 .map(row => ({
                     id: String(row?.id || "").trim(),
                     name: resolveGroupDisplayName(row, "Group"),
-                    img: String(row?.img || "").trim(),
+                    img: resolveGroupIconUrl(row?.img || ""),
                     owner_id: String(row?.owner_id || "").trim(),
                     owner_name: String(row?.owner_name || "").trim(),
                     updated_at: Number(row?.updated_at || Date.now()) || Date.now()
@@ -516,7 +516,7 @@
             manualGroups.set(id, {
                 id,
                 name: resolveGroupDisplayName(row, "Group"),
-                img: String(row?.img || "").trim(),
+                img: resolveGroupIconUrl(row?.img || ""),
                 owner_id: String(row?.owner_id || "").trim(),
                 owner_name: String(row?.owner_name || "").trim(),
                 isGroup: true,
@@ -603,17 +603,18 @@
         }
 
         function avatarUrl(user){
-            return String(user?.photo || user?.avatar_url || user?.profile_icon || user?.user_icon || user?.member_avatar || user?.user_metadata?.avatar_url || user?.user_metadata?.picture || "").trim();
+            return normalizeAssetUrl(user?.photo || user?.avatar_url || user?.profile_icon || user?.user_icon || user?.member_avatar || user?.user_metadata?.avatar_url || user?.user_metadata?.picture || "");
         }
 
         function normalizeUserProfileRow(raw){
             const row = raw && typeof raw === "object" ? raw : {};
+            const fullName = String(row?.full_name || row?.display_name || row?.name || row?.username || "").trim();
             return {
                 ...row,
                 user_id: String(row?.user_id || row?.id || "").trim(),
                 username: String(row?.username || row?.user_name || "").trim(),
-                display_name: String(row?.display_name || row?.full_name || row?.name || row?.user_name || row?.username || "").trim(),
-                photo: String(row?.photo || row?.avatar_url || row?.profile_icon || row?.user_icon || row?.member_avatar || "").trim(),
+                display_name: fullName,
+                photo: normalizeAssetUrl(row?.photo || row?.avatar_url || row?.profile_icon || row?.user_icon || row?.member_avatar || ""),
                 email: String(row?.email || "").trim()
             };
         }
@@ -766,6 +767,32 @@
             return missing && text.includes(String(resource || "").toLowerCase());
         }
 
+        const DEFAULT_GROUP_ICON = "Images/no-image.png";
+
+        function getConfiguredSupabaseUrl(){
+            return String(window.NOVA_PUBLIC_CONFIG?.supabaseUrl || window.__NOVA_PUBLIC_CONFIG__?.supabaseUrl || "").trim().replace(/\/+$/g, "");
+        }
+
+        function normalizeAssetUrl(value){
+            const raw = String(value || "").trim().replace(/\\/g, "/");
+            if(!raw) return "";
+            if(/^https?:\/\//i.test(raw) || /^data:/i.test(raw) || /^blob:/i.test(raw)) return raw;
+            const supabaseBase = getConfiguredSupabaseUrl();
+            if(/^\/?storage\/v1\//i.test(raw) && supabaseBase){
+                return `${supabaseBase}/${raw.replace(/^\/+/, "")}`;
+            }
+            try{
+                return new URL(raw.startsWith("/") ? raw : `/${raw.replace(/^\/+/, "")}`, location.origin).href;
+            }catch(_){
+                return raw;
+            }
+        }
+
+        function resolveGroupIconUrl(value){
+            const resolved = normalizeAssetUrl(value);
+            return resolved || DEFAULT_GROUP_ICON;
+        }
+
         function manualTargetStorageKey(){
             return `${MANUAL_TARGET_KEY_PREFIX}${currentUserId}`;
         }
@@ -830,23 +857,23 @@
         }
 
         async function fetchUserById(uid){
-            const idColumns = ["user_id", "id"];
-            const attempts = [
-                "user_id,id,username,user_name,full_name,display_name,name,photo,avatar_url,profile_icon,user_icon,email",
-                "id,user_id,username,user_name,full_name,display_name,name,avatar_url,photo,profile_icon,user_icon,email",
-                "user_id,id,username,full_name,display_name,name,photo,avatar_url,email",
-                "id,user_id,username,full_name,display_name,name,avatar_url,photo,email",
-                "user_id,id,username,name,photo,avatar_url,email",
-                "id,user_id,username,name,avatar_url,photo,email"
-            ];
-            for(const fields of attempts){
-                for(const idColumn of idColumns){
-                    const { data, error } = await supa.from("users").select(fields).eq(idColumn, uid).maybeSingle();
-                    if(!error) return data ? normalizeUserProfileRow(data) : null;
-                    if(!maybeMissingColumn(error)) return null;
+            const cleanUid = String(uid || "").trim();
+            if(!isUuid(cleanUid)) return null;
+            try{
+                const { data, error } = await supa
+                    .from("users")
+                    .select("user_id,username,full_name,photo,email")
+                    .eq("user_id", cleanUid)
+                    .maybeSingle();
+                if(error){
+                    console.error("user_fetch_failed", error);
+                    return null;
                 }
+                return data ? normalizeUserProfileRow(data) : null;
+            }catch(err){
+                console.error("user_fetch_exception", err);
+                return null;
             }
-            return null;
         }
 
         async function fetchUsersByIds(userIds, opts){
@@ -856,33 +883,23 @@
                 .map(id => String(id || "").trim())
                 .filter(id => isUuid(id) && (includeCurrent || id !== currentUserId));
             if(!ids.length) return [];
-            const attempts = [
-                "user_id,id,username,user_name,full_name,display_name,name,photo,avatar_url,profile_icon,user_icon,email",
-                "id,user_id,username,user_name,full_name,display_name,name,avatar_url,photo,profile_icon,user_icon,email",
-                "user_id,id,username,full_name,display_name,name,photo,avatar_url,email",
-                "id,user_id,username,full_name,display_name,name,avatar_url,photo,email",
-                "user_id,id,username,name,photo,avatar_url,email",
-                "id,user_id,username,name,avatar_url,photo,email"
-            ];
-            const idColumns = ["user_id", "id"];
-            for(const fields of attempts){
-                for(const idColumn of idColumns){
-                    const { data, error } = await supa
-                        .from("users")
-                        .select(fields)
-                        .in(idColumn, ids)
-                        .limit(Math.max(200, ids.length + 10));
-                    if(!error){
-                        return (data || []).map(normalizeUserProfileRow).filter(row => row.user_id);
-                    }
-                    if(!maybeMissingColumn(error)){
-                        console.error("users_fetch_failed", error);
-                        return [];
-                    }
+            try{
+                const { data, error } = await supa
+                    .from("users")
+                    .select("user_id,username,full_name,photo,email")
+                    .in("user_id", ids)
+                    .limit(Math.max(200, ids.length + 10));
+                if(error){
+                    console.error("users_fetch_failed", error);
+                    return [];
                 }
+                return (data || []).map(normalizeUserProfileRow).filter(row => row.user_id);
+            }catch(err){
+                console.error("users_fetch_exception", err);
+                return [];
             }
-            return [];
         }
+
         function putRecentContact(map, userId, createdAt){
             const id = String(userId || "").trim();
             if(!isUuid(id) || id === currentUserId) return;
@@ -1036,31 +1053,19 @@
         }
 
         function extractGroupOwnerId(row){
-            return readFirstPresentValue(row, [
-                "created_by",
-                "owner_id",
-                "user_id",
-                "admin_id",
-                "createdBy",
-                "ownerId",
-                "user_uuid",
-                "owner_uuid",
-                "creator_id",
-                "admin_uuid",
-                "uid"
-            ]);
+            return String(row?.owner_id || "").trim();
         }
 
         function extractGroupMemberUserId(row){
-            return readFirstPresentValue(row, ["user_id", "member_id", "user_uuid", "member_uuid", "participant_id", "member", "uid", "user", "userId", "member_user_id", "profile_id", "account_id"]);
+            return String(row?.user_id || "").trim();
         }
 
         function extractGroupMemberGroupId(row){
-            return readFirstPresentValue(row, ["group_id", "group_uuid", "gid", "groupId", "group", "chat_id", "room_id", "conversation_id"]);
+            return String(row?.group_id || "").trim();
         }
 
         function extractGroupId(row){
-            return readFirstPresentValue(row, ["id", "group_id", "group_uuid", "gid", "uuid"]);
+            return String(row?.id || "").trim();
         }
 
         function makeClientUuid(){
@@ -1123,154 +1128,49 @@
             const key = String(columnName || "").trim().toLowerCase();
             const cleanName = String(context?.cleanName || "").trim();
             const cleanIcon = String(context?.cleanIcon || "").trim();
-            const cleanSlogan = String(context?.cleanSlogan || "").trim();
             const ownerId = String(context?.ownerId || "").trim();
             const generatedId = String(context?.generatedId || "").trim();
             const nowIso = String(context?.nowIso || "").trim();
-            const adminOnly = !!context?.adminOnly;
-            if(!key) return "";
-            if(key === "name" || key === "group_name") return cleanName;
-            if(key === "icon_url" || key === "group_icon") return cleanIcon;
-            if(key === "slogan" || key === "description" || key === "about") return cleanSlogan || cleanName;
-            if(
-                key === "created_by" ||
-                key === "owner_id" ||
-                key === "user_id" ||
-                key === "admin_id" ||
-                key === "creator_id" ||
-                key === "user_uuid" ||
-                key === "owner_uuid" ||
-                key === "admin_uuid" ||
-                key === "uid" ||
-                key === "created_by_id" ||
-                key === "created_by_user_id" ||
-                key === "creator_user_id" ||
-                key === "creator_uuid" ||
-                key === "created_by_uuid" ||
-                key === "group_admin_id"
-            ){
-                return ownerId;
-            }
-            if(key === "id" || key === "group_id" || key === "group_uuid" || key === "gid" || key === "uuid") return generatedId;
+            if(key === "group_name" || key === "name") return cleanName;
+            if(key === "group_icon" || key === "icon_url") return cleanIcon;
+            if(key === "owner_id") return ownerId;
+            if(key === "id") return generatedId;
             if(key === "created_at" || key === "updated_at") return nowIso;
-            if(key === "is_admin_only" || key === "admin_only") return adminOnly;
             return "";
         }
 
         function normalizeGroupInsertCandidateFromError(candidate, error, context){
-            const source = candidate && typeof candidate === "object" ? candidate : {};
-            const next = { ...source };
-            const code = String(error?.code || "").trim().toLowerCase();
-            const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
-
-            if(code === "42501" || text.includes("row-level security")){
-                return { retry: false, candidate: null };
-            }
-
-            if(code === "23502" || text.includes("null value in column")){
-                const column = extractNullColumnName(error);
-                if(!column) return { retry: false, candidate: null };
-                const fallback = buildGroupColumnFallback(column, context);
-                if(fallback === "") return { retry: false, candidate: null };
-                if(String(next?.[column] || "") === String(fallback || "")) return { retry: false, candidate: null };
-                next[column] = fallback;
-                return { retry: true, candidate: next };
-            }
-
-            if(code === "22001" || text.includes("too long for type")){
-                const column = extractOverlongColumnName(error);
-                if(!column) return { retry: false, candidate: null };
-                const value = next?.[column];
-                if(typeof value !== "string" || value.length <= 240) return { retry: false, candidate: null };
-                next[column] = value.slice(0, 240);
-                return { retry: true, candidate: next };
-            }
-
-            if(code === "22p02" || text.includes("invalid input syntax")){
-                const column = extractInvalidInputColumnName(error);
-                if(!column) return { retry: false, candidate: null };
-                const key = String(column || "").trim().toLowerCase();
-                if(key === "is_admin_only" || key === "admin_only"){
-                    next[column] = !!context?.adminOnly;
-                    return { retry: true, candidate: next };
-                }
-                if(key === "id" || key === "group_id" || key === "group_uuid" || key === "gid" || key === "uuid"){
-                    const fallbackId = String(context?.generatedId || "").trim();
-                    if(isUuid(fallbackId) && String(next?.[column] || "").trim() !== fallbackId){
-                        next[column] = fallbackId;
-                        return { retry: true, candidate: next };
-                    }
-                }
-                delete next[column];
-                return { retry: Object.keys(next).length > 0, candidate: Object.keys(next).length > 0 ? next : null };
-            }
-
-            if(text.includes("check constraint") && (Object.prototype.hasOwnProperty.call(next, "icon_url") || Object.prototype.hasOwnProperty.call(next, "group_icon"))){
-                delete next.icon_url;
-                delete next.group_icon;
-                if(Object.keys(next).length > 0){
-                    return { retry: true, candidate: next };
-                }
-            }
-
             return { retry: false, candidate: null };
         }
 
         async function resolveInsertedGroupRow(hint){
             const expectedName = String(hint?.expectedName || "").trim().toLowerCase();
             const preferredId = String(hint?.preferredId || "").trim();
-            const startedAt = Number(hint?.startedAt || 0) || 0;
             try{
                 const { data, error } = await supa
                     .from("groups")
-                    .select("*")
-                    .limit(1200);
+                    .select("id,group_name,group_icon,owner_id")
+                    .eq("owner_id", currentUserId)
+                    .limit(200);
                 if(error) return null;
                 const rows = Array.isArray(data) ? data : [];
                 if(preferredId){
-                    const exact = rows.find(row => extractGroupId(row) === preferredId);
+                    const exact = rows.find(row => String(row?.id || "").trim() === preferredId);
                     if(exact) return exact;
                 }
-                const matches = rows
-                    .filter(row => {
-                        const id = extractGroupId(row);
-                        if(!id) return false;
-                        const ownerId = extractGroupOwnerId(row);
-                        if(ownerId && ownerId !== currentUserId) return false;
-                        const rowName = String(row?.name || row?.group_name || "").trim().toLowerCase();
-                        if(expectedName && rowName !== expectedName) return false;
-                        const ts = parseRowTimestampMs(row);
-                        if(startedAt && ts && ts < (startedAt - (5 * 60 * 1000))) return false;
-                        return true;
-                    })
-                    .sort((a, b) => parseRowTimestampMs(b) - parseRowTimestampMs(a));
-                return matches[0] || null;
+                if(expectedName){
+                    const byName = rows.find(row => String(row?.group_name || "").trim().toLowerCase() === expectedName);
+                    if(byName) return byName;
+                }
+                return rows.length ? rows[rows.length - 1] : null;
             }catch(_){
                 return null;
             }
         }
 
-        const GROUP_OWNER_FIELDS = [
-            "created_by",
-            "owner_id",
-            "user_id",
-            "admin_id",
-            "createdBy",
-            "ownerId",
-            "user_uuid",
-            "owner_uuid",
-            "creator_id",
-            "admin_uuid",
-            "uid",
-            "created_by_id",
-            "created_by_user_id",
-            "creator_user_id",
-            "creator_uuid",
-            "created_by_uuid",
-            "group_admin_id"
-        ];
-        const GROUP_ID_FIELDS = ["id", "group_id", "group_uuid", "gid", "uuid"];
-        const GROUP_MEMBER_USER_FIELDS = ["user_id", "member_id", "user_uuid", "member_uuid", "participant_id", "member", "uid", "user", "userId", "member_user_id", "profile_id", "account_id"];
+        const GROUP_OWNER_FIELDS = ["owner_id"];
+        const GROUP_ID_FIELDS = ["id"];
+        const GROUP_MEMBER_USER_FIELDS = ["user_id"];
 
         function isPlaceholderGroupName(value){
             const text = String(value || "").trim().toLowerCase();
@@ -1279,7 +1179,7 @@
 
         function resolveGroupDisplayName(raw, fallback){
             const row = raw && typeof raw === "object" ? raw : {};
-            const candidates = [row?.group_name, row?.name, row?.title, row?.group_title, fallback];
+            const candidates = [row?.group_name, row?.name, fallback];
             for(const candidate of candidates){
                 const clean = String(candidate || "").trim();
                 if(clean && !isPlaceholderGroupName(clean)) return clean;
@@ -1296,9 +1196,9 @@
             return {
                 id: String(extractGroupId(row) || "").trim(),
                 name: resolveGroupDisplayName(row, "Group"),
-                img: String(row?.group_icon || row?.icon_url || row?.owner_avatar || row?.owner_photo || row?.photo || "").trim(),
+                img: resolveGroupIconUrl(row?.group_icon || row?.icon_url || ""),
                 owner_id: String(extractGroupOwnerId(row) || row?.owner_id || "").trim(),
-                owner_name: String(row?.owner_name || row?.creator_name || row?.created_by_name || "").trim(),
+                owner_name: String(row?.owner_name || "").trim(),
                 isGroup: true,
                 sortTs: Number(row?.updated_at || row?.created_at || 0) || 0
             };
@@ -1320,92 +1220,65 @@
         }
 
         async function fetchGroupMembershipRowsForCurrentUser(){
-            const rows = [];
-            const seen = new Set();
-            for(const userField of GROUP_MEMBER_USER_FIELDS){
-                try{
-                    const { data, error } = await supa
-                        .from("group_members")
-                        .select("*")
-                        .eq(userField, currentUserId)
-                        .limit(2000);
-                    if(error){
-                        if(maybeMissingColumn(error) || maybeMissingResource(error, "group_members")) continue;
+            try{
+                const { data, error } = await supa
+                    .from("group_members")
+                    .select("group_id,user_id")
+                    .eq("user_id", currentUserId)
+                    .limit(2000);
+                if(error){
+                    if(!maybeMissingResource(error, "group_members")){
                         console.error("group_members_fetch_failed", error);
-                        break;
                     }
-                    (data || []).forEach(row => {
-                        const marker = String(row?.id || JSON.stringify(row || {}));
-                        if(seen.has(marker)) return;
-                        seen.add(marker);
-                        rows.push(row);
-                    });
-                }catch(err){
-                    console.error("group_members_fetch_exception", err);
-                    break;
+                    return [];
                 }
+                return Array.isArray(data) ? data : [];
+            }catch(err){
+                console.error("group_members_fetch_exception", err);
+                return [];
             }
-            return rows;
         }
 
         async function fetchOwnedGroupRowsForCurrentUser(){
-            const rows = [];
-            const seen = new Set();
-            for(const ownerField of GROUP_OWNER_FIELDS){
-                try{
-                    const { data, error } = await supa
-                        .from("groups")
-                        .select("*")
-                        .eq(ownerField, currentUserId)
-                        .limit(600);
-                    if(error){
-                        if(maybeMissingColumn(error) || maybeMissingResource(error, "groups")) continue;
+            try{
+                const { data, error } = await supa
+                    .from("groups")
+                    .select("id,group_name,group_icon,owner_id")
+                    .eq("owner_id", currentUserId)
+                    .limit(600);
+                if(error){
+                    if(!maybeMissingResource(error, "groups")){
                         console.error("groups_fetch_failed", error);
-                        break;
                     }
-                    (data || []).forEach(row => {
-                        const id = String(extractGroupId(row) || "").trim();
-                        if(!id || seen.has(id)) return;
-                        seen.add(id);
-                        rows.push(row);
-                    });
-                }catch(err){
-                    console.error("groups_fetch_exception", err);
-                    break;
+                    return [];
                 }
+                return Array.isArray(data) ? data : [];
+            }catch(err){
+                console.error("groups_fetch_exception", err);
+                return [];
             }
-            return rows;
         }
 
         async function fetchGroupsByIds(groupIds){
             const ids = Array.from(new Set(Array.from(groupIds || []).map(id => String(id || "").trim()).filter(Boolean)));
             if(!ids.length) return [];
-            const rows = [];
-            const seen = new Set();
-            for(const idField of GROUP_ID_FIELDS){
-                try{
-                    const { data, error } = await supa
-                        .from("groups")
-                        .select("*")
-                        .in(idField, ids)
-                        .limit(Math.max(200, ids.length + 20));
-                    if(error){
-                        if(maybeMissingColumn(error) || maybeMissingResource(error, "groups")) continue;
+            try{
+                const { data, error } = await supa
+                    .from("groups")
+                    .select("id,group_name,group_icon,owner_id")
+                    .in("id", ids)
+                    .limit(Math.max(200, ids.length + 20));
+                if(error){
+                    if(!maybeMissingResource(error, "groups")){
                         console.error("groups_fetch_failed", error);
-                        break;
                     }
-                    (data || []).forEach(row => {
-                        const id = String(extractGroupId(row) || "").trim();
-                        if(!id || seen.has(id)) return;
-                        seen.add(id);
-                        rows.push(row);
-                    });
-                }catch(err){
-                    console.error("groups_fetch_exception", err);
-                    break;
+                    return [];
                 }
+                return Array.isArray(data) ? data : [];
+            }catch(err){
+                console.error("groups_fetch_exception", err);
+                return [];
             }
-            return rows;
         }
 
         async function fetchMyGroups(){
@@ -1458,19 +1331,12 @@
                     const ownerProfile = ownerById.get(ownerId) || null;
                     if(ownerProfile){
                         const resolvedName = displayName(ownerProfile);
-                        const resolvedPhoto = avatarUrl(ownerProfile);
                         if(!groupRow.owner_name || /^(user|owner)$/i.test(String(groupRow.owner_name || "").trim())){
                             groupRow.owner_name = resolvedName;
-                        }
-                        if(!groupRow.img && resolvedPhoto){
-                            groupRow.img = resolvedPhoto;
                         }
                     }else if(ownerId && ownerId === currentUserId){
                         if(!groupRow.owner_name || /^(user|owner)$/i.test(String(groupRow.owner_name || "").trim())){
                             groupRow.owner_name = displayName(currentUser || {});
-                        }
-                        if(!groupRow.img){
-                            groupRow.img = avatarUrl(currentUser || {});
                         }
                     }
                     byId.set(id, groupRow);
@@ -1843,302 +1709,89 @@
 
         async function insertGroupWithFallback(payload){
             const row = payload && typeof payload === "object" ? payload : {};
-            const cleanName = String(row.name || row.group_name || "").trim();
-            const cleanIcon = String(row.icon_url || row.group_icon || "").trim();
-            const cleanSlogan = String(row.slogan || "").trim();
-            const adminOnly = !!row.is_admin_only;
-            const ownerId = isUuid(currentUserId) ? String(currentUserId || "").trim() : "";
-            const startedAt = Date.now();
-            const generatedId = makeClientUuid();
-            const nowIso = new Date(startedAt).toISOString();
-            const retryContext = { cleanName, cleanIcon, cleanSlogan, adminOnly, ownerId, generatedId, nowIso };
-            if(!cleanName){
-                return { ok: false, error: new Error("group_name_required"), groupId: "" };
-            }
+            const cleanName = String(row.group_name || row.name || "").trim();
+            const cleanIcon = String(row.group_icon || row.icon_url || "").trim();
+            const ownerId = isUuid(currentUserId) ? String(currentUserId || "").trim() : String(row.owner_id || "").trim();
+            if(!cleanName) return { ok:false, error:new Error("group_name_required"), groupId:"" };
+            if(!ownerId) return { ok:false, error:new Error("group_owner_required"), groupId:"" };
 
-            const payloadBases = [
-                { name: cleanName, group_name: cleanName, slogan: cleanSlogan, icon_url: cleanIcon, group_icon: cleanIcon, is_admin_only: adminOnly },
-                { name: cleanName, group_name: cleanName, icon_url: cleanIcon, group_icon: cleanIcon },
-                { name: cleanName, group_name: cleanName, slogan: cleanSlogan, is_admin_only: adminOnly },
-                { name: cleanName, group_name: cleanName, slogan: cleanSlogan },
-                { name: cleanName, group_name: cleanName },
-                { group_name: cleanName, icon_url: cleanIcon, group_icon: cleanIcon },
-                { group_name: cleanName },
-                { name: cleanName }
-            ];
-            const ownerHints = ownerId
-                ? [
-                    {},
-                    { created_by: ownerId },
-                    { owner_id: ownerId },
-                    { user_id: ownerId },
-                    { admin_id: ownerId }
-                ]
-                : [{}];
-            const idHints = [{}, { id: generatedId }, { group_id: generatedId }, { group_uuid: generatedId }];
-            const timeHints = [{}, { created_at: nowIso }, { created_at: nowIso, updated_at: nowIso }];
-
-            const blockedColumns = new Set();
-            const candidates = [];
-            const seen = new Set();
-            const pushCandidate = (candidate) => {
-                const compact = Object.fromEntries(
-                    Object.entries(candidate || {}).filter(([key, value]) => {
-                        const cleanKey = String(key || "").trim().toLowerCase();
-                        if(!cleanKey || blockedColumns.has(cleanKey)) return false;
-                        return value !== "" && value !== null && value !== undefined;
+            let insertError = null;
+            try{
+                const inserted = await supa
+                    .from("groups")
+                    .insert({
+                        group_name: cleanName,
+                        group_icon: cleanIcon || null,
+                        owner_id: ownerId
                     })
-                );
-                const hasName = Object.prototype.hasOwnProperty.call(compact, "name") || Object.prototype.hasOwnProperty.call(compact, "group_name");
-                if(!hasName) return;
-                if(!Object.keys(compact).length) return;
-                const key = JSON.stringify(Object.keys(compact).sort().map(name => [name, compact[name]]));
-                if(seen.has(key)) return;
-                seen.add(key);
-                candidates.push(compact);
-            };
-
-            payloadBases.forEach(base => {
-                ownerHints.forEach(owner => {
-                    idHints.forEach(idRow => {
-                        timeHints.forEach(timeRow => {
-                            pushCandidate({ ...base, ...owner, ...idRow, is_admin_only: adminOnly, ...timeRow });
-                        });
-                    });
-                });
-            });
-
-            let lastError = null;
-            const maxAttempts = 220;
-            for(let i = 0; i < candidates.length && i < maxAttempts; i += 1){
-                const candidate = candidates[i];
-                if(!candidate || !Object.keys(candidate).length) continue;
-                if(Object.keys(candidate).some(key => blockedColumns.has(String(key || "").trim().toLowerCase()))) continue;
-                let insertedRow = null;
-                let error = null;
-                try{
-                    const inserted = await supa
+                    .select("id,group_name,group_icon,owner_id")
+                    .maybeSingle();
+                if(!inserted?.error){
+                    const groupId = String(inserted?.data?.id || "").trim();
+                    if(groupId){
+                        return { ok:true, data: inserted.data, groupId };
+                    }
+                }else{
+                    insertError = inserted.error;
+                    const txt = `${inserted.error?.message || ""} ${inserted.error?.details || ""}`.toLowerCase();
+                    if(!(txt.includes("permission") && txt.includes("select"))){
+                        return { ok:false, error:inserted.error, groupId:"" };
+                    }
+                    const fallbackInsert = await supa
                         .from("groups")
-                        .insert(candidate)
-                        .select("*")
-                        .maybeSingle();
-                    error = inserted?.error || null;
-                    insertedRow = inserted?.data && typeof inserted.data === "object" ? inserted.data : null;
-                    if(error){
-                        const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
-                        const selectDenied = text.includes("permission") && text.includes("select");
-                        if(selectDenied){
-                            const fallbackInsert = await supa
-                                .from("groups")
-                                .insert(candidate);
-                            error = fallbackInsert?.error || null;
-                            insertedRow = null;
-                        }
-                    }
-                }catch(err){
-                    error = err;
-                }
-                if(!error){
-                    const insertedId = extractGroupId(insertedRow);
-                    if(insertedId){
-                        return {
-                            ok: true,
-                            data: insertedRow || candidate,
-                            groupId: insertedId
-                        };
-                    }
-                    const preferredCandidateId = String(extractGroupId(candidate) || generatedId || "").trim();
-                    const resolved = await resolveInsertedGroupRow({
-                        expectedName: cleanName,
-                        preferredId: preferredCandidateId,
-                        startedAt
-                    });
-                    const resolvedId = extractGroupId(resolved);
-                    if(resolvedId){
-                        return {
-                            ok: true,
-                            data: resolved || insertedRow || candidate,
-                            groupId: resolvedId
-                        };
-                    }
-                    const candidateId = extractGroupId(candidate);
-                    if(candidateId){
-                        return {
-                            ok: true,
-                            data: insertedRow || candidate,
-                            groupId: candidateId
-                        };
-                    }
-                    return { ok: false, error: new Error("group_id_resolve_failed"), groupId: "" };
-                }
-                lastError = error;
-                if(String(error?.code || "").trim() === "23505"){
-                    const duplicateId = String(extractGroupId(candidate) || generatedId || "").trim();
-                    const resolvedDuplicate = await resolveInsertedGroupRow({
-                        expectedName: cleanName,
-                        preferredId: duplicateId,
-                        startedAt
-                    });
-                    const resolvedDuplicateId = extractGroupId(resolvedDuplicate);
-                    if(resolvedDuplicateId){
-                        return { ok: true, data: resolvedDuplicate || candidate, groupId: resolvedDuplicateId };
-                    }
-                    if(duplicateId){
-                        return { ok: true, data: candidate, groupId: duplicateId };
+                        .insert({
+                            group_name: cleanName,
+                            group_icon: cleanIcon || null,
+                            owner_id: ownerId
+                        });
+                    if(fallbackInsert?.error){
+                        return { ok:false, error:fallbackInsert.error, groupId:"" };
                     }
                 }
-                if(maybeMissingColumn(error)){
-                    const missingColumn = extractMissingColumnName(error);
-                    if(missingColumn){
-                        const cleanMissing = String(missingColumn || "").trim().toLowerCase();
-                        if(cleanMissing){
-                            blockedColumns.add(cleanMissing);
-                        }
-                        if(Object.prototype.hasOwnProperty.call(candidate, missingColumn)){
-                            const stripped = { ...candidate };
-                            delete stripped[missingColumn];
-                            pushCandidate(stripped);
-                        }
-                    }
-                    continue;
-                }
-                const normalized = normalizeGroupInsertCandidateFromError(candidate, error, retryContext);
-                if(normalized?.retry && normalized?.candidate){
-                    pushCandidate(normalized.candidate);
-                    continue;
-                }
-                break;
+            }catch(err){
+                insertError = err;
             }
 
-            const resolved = await resolveInsertedGroupRow({
-                expectedName: cleanName,
-                preferredId: generatedId,
-                startedAt
-            });
-            const resolvedId = extractGroupId(resolved);
+            const resolved = await resolveInsertedGroupRow({ expectedName: cleanName, preferredId: "" });
+            const resolvedId = String(resolved?.id || "").trim();
             if(resolvedId){
-                return {
-                    ok: true,
-                    data: resolved,
-                    groupId: resolvedId
-                };
+                return { ok:true, data: resolved, groupId: resolvedId };
             }
-
-            return { ok: false, error: lastError || new Error("group_insert_failed"), groupId: "" };
+            return { ok:false, error: insertError || new Error("group_insert_failed"), groupId:"" };
         }
         async function insertGroupMemberCompat(groupId, member){
             const cleanGroupId = String(groupId || "").trim();
-            const cleanUserId = String(member?.user_id || member?.id || member?.member_id || member?.user_uuid || member?.uid || "").trim();
+            const cleanUserId = String(member?.user_id || member?.id || "").trim();
             if(!cleanGroupId || !cleanUserId) return false;
-            const name = String(member?.user_name || member?.name || "Member").trim() || "Member";
-            const avatar = String(member?.user_avatar || member?.avatar_url || "").trim();
-            const role = String(member?.role || "member").trim() || "member";
-            const isAdmin = role.toLowerCase() === "admin";
-            const nowIso = new Date().toISOString();
-
-            const groupKeyRows = [
-                { group_id: cleanGroupId },
-                { group_uuid: cleanGroupId },
-                { gid: cleanGroupId },
-                { chat_id: cleanGroupId },
-                { room_id: cleanGroupId },
-                { conversation_id: cleanGroupId },
-                { group: cleanGroupId },
-                { groupId: cleanGroupId }
-            ];
-            const memberKeyRows = [
-                { user_id: cleanUserId, user_name: name, user_avatar: avatar, role, is_admin: isAdmin },
-                { user_id: cleanUserId, user_name: name, user_avatar: avatar, member_role: role, is_admin: isAdmin },
-                { user_id: cleanUserId, user_name: name, user_avatar: avatar, role_name: role, admin: isAdmin },
-                { user_id: cleanUserId, user_name: name, user_avatar: avatar, role },
-                { user_id: cleanUserId, name, avatar_url: avatar, role, is_admin: isAdmin },
-                { user_id: cleanUserId, name, avatar_url: avatar, role },
-                { user_id: cleanUserId, role, joined_at: nowIso, created_at: nowIso },
-                { user_id: cleanUserId },
-                { member_id: cleanUserId, member_name: name, member_avatar: avatar, role, is_admin: isAdmin },
-                { member_id: cleanUserId, member_name: name, member_avatar: avatar, member_role: role, is_admin: isAdmin },
-                { member_id: cleanUserId, member_name: name, member_avatar: avatar, role },
-                { member_id: cleanUserId, name, avatar_url: avatar, role, is_admin: isAdmin },
-                { member_id: cleanUserId, name, avatar_url: avatar, role },
-                { member_id: cleanUserId, role, joined_at: nowIso, created_at: nowIso },
-                { member_id: cleanUserId },
-                { user_uuid: cleanUserId, user_name: name, user_avatar: avatar, role, is_admin: isAdmin },
-                { user_uuid: cleanUserId, name, avatar_url: avatar, role, is_admin: isAdmin },
-                { user_uuid: cleanUserId, role, joined_at: nowIso, created_at: nowIso },
-                { user_uuid: cleanUserId },
-                { member_uuid: cleanUserId, member_name: name, member_avatar: avatar, role, is_admin: isAdmin },
-                { member_uuid: cleanUserId, role, joined_at: nowIso, created_at: nowIso },
-                { member_uuid: cleanUserId },
-                { uid: cleanUserId, role, is_admin: isAdmin },
-                { uid: cleanUserId },
-                { user: cleanUserId, role, is_admin: isAdmin },
-                { user: cleanUserId },
-                { userId: cleanUserId, role, is_admin: isAdmin },
-                { userId: cleanUserId },
-                { member: cleanUserId, role, is_admin: isAdmin },
-                { member: cleanUserId },
-                { member_user_id: cleanUserId, role, is_admin: isAdmin },
-                { member_user_id: cleanUserId },
-                { profile_id: cleanUserId, role, is_admin: isAdmin },
-                { profile_id: cleanUserId },
-                { account_id: cleanUserId, role, is_admin: isAdmin },
-                { account_id: cleanUserId }
-            ];
-
-            const candidates = [];
-            const seen = new Set();
-            const pushCandidate = (row) => {
-                const compact = Object.fromEntries(Object.entries(row || {}).filter(([, value]) => value !== "" && value !== null && value !== undefined));
-                if(!Object.keys(compact).length) return;
-                const key = JSON.stringify(Object.keys(compact).sort().map(name => [name, compact[name]]));
-                if(seen.has(key)) return;
-                seen.add(key);
-                candidates.push(compact);
-            };
 
             const verifyMembership = async () => {
-                const groupKeys = ["group_id", "group_uuid", "gid", "chat_id", "room_id", "conversation_id", "group", "groupId"];
-                const userKeys = ["user_id", "member_id", "user_uuid", "member_uuid", "uid", "user", "userId", "member", "member_user_id", "profile_id", "account_id"];
-                for(const groupKey of groupKeys){
-                    for(const userKey of userKeys){
-                        try{
-                            const { data, error } = await supa
-                                .from("group_members")
-                                .select("*")
-                                .eq(groupKey, cleanGroupId)
-                                .eq(userKey, cleanUserId)
-                                .limit(1);
-                            if(!error){
-                                if(Array.isArray(data) && data.length) return true;
-                                continue;
-                            }
-                            if(maybeMissingColumn(error)) continue;
-                            if(maybeMissingResource(error, "group_members")) return false;
-                        }catch(_){ }
-                    }
-                }
-                return false;
-            };
-
-            groupKeyRows.forEach(groupKey => {
-                memberKeyRows.forEach(memberKey => {
-                    pushCandidate({ ...groupKey, ...memberKey });
-                });
-            });
-
-            for(const candidate of candidates){
-                const { error } = await supa.from("group_members").insert(candidate);
-                if(!error) return true;
-                if(!maybeMissingColumn(error)){
-                    const txt = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
-                    const duplicate = txt.includes("duplicate") || String(error?.code || "") === "23505";
-                    if(duplicate) return true;
-                    const exists = await verifyMembership();
-                    if(exists) return true;
+                try{
+                    const { data, error } = await supa
+                        .from("group_members")
+                        .select("group_id,user_id")
+                        .eq("group_id", cleanGroupId)
+                        .eq("user_id", cleanUserId)
+                        .limit(1);
+                    if(error) return false;
+                    return Array.isArray(data) && data.length > 0;
+                }catch(_){
                     return false;
                 }
+            };
+
+            try{
+                const { error } = await supa.from("group_members").insert({
+                    group_id: cleanGroupId,
+                    user_id: cleanUserId
+                });
+                if(!error) return true;
+                const errText = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+                const duplicate = errText.includes("duplicate") || String(error?.code || "") === "23505";
+                if(duplicate) return true;
+                return await verifyMembership();
+            }catch(_){
+                return await verifyMembership();
             }
-            return verifyMembership();
         }
 
         async function insertGroupSystemMessage(groupId, text){
@@ -2178,12 +1831,9 @@
             }
 
             const basePayload = {
-                name: gName,
                 group_name: gName,
-                slogan: gSlogan,
-                is_admin_only: isAdminOnly,
-                icon_url: selectedImgData,
-                group_icon: selectedImgData
+                group_icon: selectedImgData,
+                owner_id: currentUserId
             };
             const groupCreateStartedAt = Date.now();
             const groupRes = await insertGroupWithFallback(basePayload);
@@ -2193,7 +1843,7 @@
                 alert(detail ? ("Error creating group: " + detail) : "Error creating group on backend");
                 return;
             }
-            let groupId = String(groupRes?.groupId || groupRes?.data?.id || groupRes?.data?.group_id || groupRes?.data?.group_uuid || groupRes?.data?.gid || "").trim();
+            let groupId = String(groupRes?.groupId || groupRes?.data?.id || "").trim();
             if(!groupId){
                 const resolved = await resolveInsertedGroupRow({
                     expectedName: gName,
@@ -2207,7 +1857,7 @@
                 return;
             }
 
-            const createdGroupIcon = String(groupRes?.data?.group_icon || groupRes?.data?.icon_url || selectedImgData || "").trim();
+            const createdGroupIcon = resolveGroupIconUrl(groupRes?.data?.group_icon || selectedImgData || "");
             const ownerProfile = await fetchUserById(currentUserId).catch(() => null);
             const ownerSource = ownerProfile || currentUser || {};
             const ownerName = displayName(ownerSource) || "You";
@@ -2243,7 +1893,7 @@
             rememberManualGroup({
                 id: groupId,
                 name: gName,
-                img: createdGroupIcon || ownerPhoto,
+                img: createdGroupIcon,
                 owner_id: currentUserId,
                 owner_name: ownerName
             });

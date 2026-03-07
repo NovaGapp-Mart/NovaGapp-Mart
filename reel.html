@@ -218,7 +218,7 @@ body{background:#000;color:#fff;height:100dvh;overflow:hidden}
 .share-backdrop,
 .shop-backdrop{
   position:fixed;inset:0;background:rgba(0,0,0,0.45);
-  display:none;z-index:9990;
+  display:none;z-index:99998 !important;pointer-events:auto !important;
 }
 .comments-backdrop.show,
 .share-backdrop.show,
@@ -230,7 +230,7 @@ body{background:#000;color:#fff;height:100dvh;overflow:hidden}
   width:min(100%, 680px);
   background:#fff;color:#111;border-radius:16px 16px 0 0;
   max-height:min(82vh, calc(100dvh - 12px));display:flex;flex-direction:column;
-  z-index:9991;transition:0.25s;box-shadow:0 -18px 40px rgba(0,0,0,0.22);
+  z-index:99999 !important;pointer-events:auto !important;transition:0.25s;box-shadow:0 -18px 40px rgba(0,0,0,0.22);
 }
 .comments-panel.show,
 .share-sheet.show,
@@ -244,7 +244,7 @@ body{background:#000;color:#fff;height:100dvh;overflow:hidden}
   padding:4px 10px;font-size:12px;cursor:pointer
 }
 .comments-list{
-  padding:12px 14px 18px;overflow-y:auto;flex:1;overscroll-behavior:contain
+  padding:12px 14px 18px;overflow-y:auto;flex:1;overscroll-behavior:contain;pointer-events:auto !important
 }
 .comment-row{
   display:flex;gap:10px;padding:8px 0
@@ -291,7 +291,7 @@ body{background:#000;color:#fff;height:100dvh;overflow:hidden}
   margin-left:40px;border-left:2px solid #f1f1f1;padding-left:10px
 }
 .comment-input{
-  position:sticky;bottom:0;z-index:9999;pointer-events:auto;isolation:isolate;
+  position:sticky;bottom:0;z-index:99999 !important;pointer-events:auto !important;isolation:isolate;
   padding:10px 14px calc(10px + env(safe-area-inset-bottom, 0px));border-top:1px solid #eee;display:flex;flex-direction:column;gap:8px;
   background:#fff;box-shadow:0 -8px 24px rgba(0,0,0,.12)
 }
@@ -303,15 +303,15 @@ body{background:#000;color:#fff;height:100dvh;overflow:hidden}
   border:none;background:transparent;color:#666;font-weight:700;cursor:pointer
 }
 .comment-input-row{
-  display:flex;gap:8px;position:relative;z-index:9999
+  display:flex;gap:8px;position:relative;z-index:99999 !important;pointer-events:auto !important
 }
 .comment-input input{
   flex:1;padding:10px;border:1px solid #ddd;border-radius:18px;font-size:13px;
-  position:relative;z-index:9999;pointer-events:auto;touch-action:manipulation;background:#fff
+  position:relative;z-index:99999 !important;pointer-events:auto !important;touch-action:manipulation;background:#fff
 }
 .comment-input button{
   border:none;background:#ff6a00;color:#fff;border-radius:18px;
-  padding:8px 14px;font-size:12px;cursor:pointer;position:relative;z-index:9999
+  padding:8px 14px;font-size:12px;cursor:pointer;position:relative;z-index:99999 !important;pointer-events:auto !important
 }
 .comment-empty{color:#666;font-size:12px}
 

@@ -515,6 +515,44 @@
     return util.safe(value).replace(/\/+$/g, "");
   }
 
+  function getConfiguredSupabaseUrl(){
+    return normalizeBase(window.NOVA_PUBLIC_CONFIG?.supabaseUrl || window.__NOVA_PUBLIC_CONFIG__?.supabaseUrl || "");
+  }
+
+  function encodeAssetPathParts(value){
+    return util.safe(value)
+      .split("/")
+      .map(part => encodeURIComponent(util.safe(part)))
+      .filter(Boolean)
+      .join("/");
+  }
+
+  function buildSupabaseAssetPublicUrl(kind, objectPath){
+    const cleanPath = util.safe(objectPath).replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    if(!cleanPath) return "";
+    const encodedPath = encodeAssetPathParts(cleanPath);
+    if(!encodedPath) return "";
+    const bucket = kind === "thumb" ? "thumbnails" : "long_videos";
+    const base = getConfiguredSupabaseUrl();
+    if(!base) return "";
+    return `${base}/storage/v1/object/public/${encodeURIComponent(bucket)}/${encodedPath}`;
+  }
+
+  function normalizeProfileImageUrl(value){
+    const raw = util.safe(value).replace(/\\/g, "/");
+    if(!raw) return "";
+    if(/^https?:\/\//i.test(raw) || raw.startsWith("data:") || raw.startsWith("blob:")) return raw;
+    const supabaseBase = getConfiguredSupabaseUrl();
+    if(/^\/?storage\/v1\//i.test(raw) && supabaseBase){
+      return `${supabaseBase}/${raw.replace(/^\/+/, "")}`;
+    }
+    try{
+      return new URL(raw.startsWith("/") ? raw : `/${raw.replace(/^\/+/, "")}`, location.origin).href;
+    }catch(_){
+      return raw;
+    }
+  }
+
   function stripAssetQueryAndHash(value){
     return util.safe(value).split("#")[0].split("?")[0];
   }
@@ -685,6 +723,10 @@
     if(!raw) return "";
     if(kind === "thumb" && isFallbackThumbnailUrl(raw)) return "";
     if(raw.startsWith("data:")) return raw;
+    const supabaseBase = getConfiguredSupabaseUrl();
+    if(/^\/?storage\/v1\//i.test(raw) && supabaseBase){
+      return `${supabaseBase}/${raw.replace(/^\/+/, "")}`;
+    }
 
     const uploadsMatch = raw.match(/(?:^|\/)uploads\/(videos|video-thumbs)\/([^/?#]+)/i);
     if(uploadsMatch){
@@ -700,6 +742,8 @@
       if((kind === "video" && isVideoAssetBucket(bucket)) || (kind === "thumb" && isThumbAssetBucket(bucket))){
         const proxied = buildSupabaseAssetProxyUrl(kind, supabaseRef.objectPath || supabaseRef.fileName);
         if(proxied) return proxied;
+        const publicUrl = buildSupabaseAssetPublicUrl(kind, supabaseRef.objectPath || supabaseRef.fileName);
+        if(publicUrl) return publicUrl;
       }
     }
 
@@ -713,13 +757,27 @@
         if((kind === "video" && isVideoAssetBucket(relativeRef.bucket)) || (kind === "thumb" && isThumbAssetBucket(relativeRef.bucket))){
           const proxied = buildSupabaseAssetProxyUrl(kind, relativeRef.objectPath);
           if(proxied) return proxied;
+          const publicUrl = buildSupabaseAssetPublicUrl(kind, relativeRef.objectPath);
+          if(publicUrl) return publicUrl;
         }
       }
       if(relativeRef.source === "bare" && relativeRef.objectPath && (relativeRef.hasNestedPath || looksLikeMediaFileName(relativeRef.fileName, kind))){
-        const proxied = relativeRef.hasNestedPath
-          ? buildSupabaseAssetProxyUrl(kind, relativeRef.objectPath)
-          : buildAssetProxyUrl(kind, relativeRef.fileName);
-        if(proxied) return proxied;
+        if(relativeRef.hasNestedPath){
+          const proxied = buildSupabaseAssetProxyUrl(kind, relativeRef.objectPath);
+          if(proxied) return proxied;
+          const publicUrl = buildSupabaseAssetPublicUrl(kind, relativeRef.objectPath);
+          if(publicUrl) return publicUrl;
+        }
+        if(relativeRef.fileName){
+          const proxied = buildAssetProxyUrl(kind, relativeRef.fileName);
+          if(proxied) return proxied;
+        }
+        if(!relativeRef.hasNestedPath){
+          const proxied = buildSupabaseAssetProxyUrl(kind, relativeRef.objectPath);
+          if(proxied) return proxied;
+          const publicUrl = buildSupabaseAssetPublicUrl(kind, relativeRef.objectPath);
+          if(publicUrl) return publicUrl;
+        }
       }
     }
 
@@ -769,6 +827,7 @@
       const bucket = supabaseRef.bucket;
       if((kind === "video" && isVideoAssetBucket(bucket)) || (kind === "thumb" && isThumbAssetBucket(bucket))){
         push(buildSupabaseAssetProxyUrl(kind, supabaseRef.objectPath || supabaseRef.fileName));
+        push(buildSupabaseAssetPublicUrl(kind, supabaseRef.objectPath || supabaseRef.fileName));
       }
     }
 
@@ -780,17 +839,20 @@
       if(relativeRef.source === "bucket" && relativeRef.objectPath){
         if((kind === "video" && isVideoAssetBucket(relativeRef.bucket)) || (kind === "thumb" && isThumbAssetBucket(relativeRef.bucket))){
           push(buildSupabaseAssetProxyUrl(kind, relativeRef.objectPath));
+          push(buildSupabaseAssetPublicUrl(kind, relativeRef.objectPath));
         }
       }
       if(relativeRef.source === "bare" && relativeRef.objectPath && (relativeRef.hasNestedPath || looksLikeMediaFileName(relativeRef.fileName, kind))){
         if(relativeRef.hasNestedPath){
           push(buildSupabaseAssetProxyUrl(kind, relativeRef.objectPath));
+          push(buildSupabaseAssetPublicUrl(kind, relativeRef.objectPath));
         }
         if(relativeRef.fileName){
           push(buildAssetProxyUrl(kind, relativeRef.fileName));
         }
         if(!relativeRef.hasNestedPath){
           push(buildSupabaseAssetProxyUrl(kind, relativeRef.objectPath));
+          push(buildSupabaseAssetPublicUrl(kind, relativeRef.objectPath));
         }
       }
     }
@@ -910,20 +972,23 @@
     }
     const sourceCandidates = buildVideoSourceCandidates(item.video_url_raw || item.video_url);
     if(!sourceCandidates.length){
-      setImageSourceWithFallback(image, [BLANK_THUMBNAIL]);
-      if(typeof onResolved === "function") onResolved(BLANK_THUMBNAIL);
+      setImageSourceWithFallback(image, [FALLBACK_THUMBNAIL]);
+      if(typeof onResolved === "function") onResolved(FALLBACK_THUMBNAIL);
       return;
     }
     setImageSourceWithFallback(image, [BLANK_THUMBNAIL]);
     capturePosterFrame(sourceCandidates[0]).then(frame => {
-      const resolved = util.safe(frame) || BLANK_THUMBNAIL;
+      const resolved = util.safe(frame) || FALLBACK_THUMBNAIL;
       if(frame){
         image.onerror = null;
         image.src = frame;
+      }else{
+        setImageSourceWithFallback(image, [FALLBACK_THUMBNAIL]);
       }
       if(typeof onResolved === "function") onResolved(resolved);
     }).catch(() => {
-      if(typeof onResolved === "function") onResolved(BLANK_THUMBNAIL);
+      setImageSourceWithFallback(image, [FALLBACK_THUMBNAIL]);
+      if(typeof onResolved === "function") onResolved(FALLBACK_THUMBNAIL);
     });
   }
 
@@ -1370,7 +1435,7 @@
           state.channels.set(id, {
             id,
             name:util.safe(row.full_name) || util.safe(row.username) || "User",
-            avatar:util.safe(row.photo),
+            avatar:normalizeProfileImageUrl(row.photo || row.avatar_url || ""),
             subscribers:Math.max(0, util.num(row.channel_subscribers_count))
           });
         });
@@ -3150,6 +3215,10 @@
     const raw = util.safe(value).replace(/\\/g, "/");
     if(!raw) return "";
     if(/^https?:\/\//i.test(raw) || raw.startsWith("data:") || raw.startsWith("blob:")) return raw;
+    const supabaseBase = getConfiguredSupabaseUrl();
+    if(/^\/?storage\/v1\//i.test(raw) && supabaseBase){
+      return `${supabaseBase}/${raw.replace(/^\/+/, "")}`;
+    }
     try{
       return new URL(raw, location.origin).href;
     }catch(_){
