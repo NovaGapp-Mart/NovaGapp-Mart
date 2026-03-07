@@ -332,6 +332,42 @@
     return parts.join(" | ");
   }
 
+  function isPlaceholderGroupName(value){
+    const text = String(value || "").trim().toLowerCase();
+    return !text || text === "group" || text === "novagroup" || text === "new group" || text === "chat group" || text === "untitled group";
+  }
+
+  function resolveGroupName(groupRow, fallbackName){
+    const row = groupRow && typeof groupRow === "object" ? groupRow : {};
+    const candidates = [row.group_name, row.name, row.title, row.group_title, fallbackName];
+    for(const candidate of candidates){
+      const clean = String(candidate || "").trim();
+      if(clean && !isPlaceholderGroupName(clean)) return clean;
+    }
+    for(const candidate of candidates){
+      const clean = String(candidate || "").trim();
+      if(clean) return clean;
+    }
+    return "Group";
+  }
+
+  function resolveGroupAvatar(groupRow, members, fallbackImage){
+    const row = groupRow && typeof groupRow === "object" ? groupRow : {};
+    const direct = String(row.group_icon || row.icon_url || "").trim();
+    if(direct) return direct;
+    const ownerId = String(resolveGroupOwnerId(row) || groupOwnerId || "").trim();
+    const memberList = Array.isArray(members) ? members : [];
+    const ownerMember = memberList.find(member => String(member?.user_id || "").trim() === ownerId)
+      || memberList.find(member => {
+        const role = parseRoleText(member);
+        return role === "owner" || role === "creator";
+      })
+      || memberList.find(member => isAdminMemberRow(member))
+      || null;
+    const ownerPhoto = String(ownerMember?.photo || ownerMember?.avatar_url || ownerMember?.user_avatar || ownerMember?.member_avatar || "").trim();
+    return ownerPhoto || String(fallbackImage || "").trim();
+  }
+
   function readFirstValue(row, keys){
     const source = row && typeof row === "object" ? row : {};
     const list = Array.isArray(keys) ? keys : [];
@@ -697,11 +733,13 @@
     const allowed = await canCurrentUserAccessGroup(resolvedGroupId, groupRow);
     if(!allowed){
       groupAdminOnly = false;
+      const resolvedName = resolveGroupName(groupRow, receiverNameParam || "Group");
+      const resolvedAvatar = resolveGroupAvatar(groupRow, [], receiverPicParam);
       return {
         id: resolvedGroupId,
-        name: String(groupRow?.name || groupRow?.group_name || receiverNameParam || "Group").trim() || "Group",
-        icon_url: String(groupRow?.icon_url || groupRow?.group_icon || receiverPicParam || "").trim(),
-        group_icon: String(groupRow?.group_icon || groupRow?.icon_url || receiverPicParam || "").trim(),
+        name: resolvedName,
+        icon_url: resolvedAvatar,
+        group_icon: resolvedAvatar,
         member_count: 0,
         members: [],
         allowed: false,
@@ -732,11 +770,13 @@
       }
     }
     groupAdminOnly = normalizeGroupAdminOnly(groupRow);
+    const resolvedName = resolveGroupName(groupRow, receiverNameParam || "Group");
+    const resolvedAvatar = resolveGroupAvatar(groupRow, members, receiverPicParam);
     return {
       id: resolvedGroupId,
-      name: String(groupRow?.name || groupRow?.group_name || receiverNameParam || "Group").trim() || "Group",
-      icon_url: String(groupRow?.icon_url || groupRow?.group_icon || receiverPicParam || "").trim(),
-      group_icon: String(groupRow?.group_icon || groupRow?.icon_url || receiverPicParam || "").trim(),
+      name: resolvedName,
+      icon_url: resolvedAvatar,
+      group_icon: resolvedAvatar,
       member_count: normalizeMemberCount(members.length),
       members,
       allowed: true,
@@ -1393,10 +1433,10 @@
 
   function renderPeerHeader(){
     const name = isGroupChat
-      ? String(groupInfo?.name || receiverNameParam || "Group").trim() || "Group"
+      ? resolveGroupName(groupInfo, receiverNameParam || "Group")
       : getDisplayName(peerProfile, receiverNameParam || "User");
     const photo = isGroupChat
-      ? String(groupInfo?.group_icon || groupInfo?.icon_url || receiverPicParam || "").trim()
+      ? resolveGroupAvatar(groupInfo, groupMembers, receiverPicParam)
       : getProfilePhoto(peerProfile, receiverPicParam);
     document.getElementById("userName").textContent = name;
     document.getElementById("infoName").textContent = name;
@@ -3160,10 +3200,10 @@
   function openProfile(){
     closeHeaderMenu();
     const name = isGroupChat
-      ? String(groupInfo?.name || receiverNameParam || "Group").trim() || "Group"
+      ? resolveGroupName(groupInfo, receiverNameParam || "Group")
       : getDisplayName(peerProfile, receiverNameParam || "User");
     const photo = isGroupChat
-      ? String(groupInfo?.group_icon || groupInfo?.icon_url || receiverPicParam || "").trim()
+      ? resolveGroupAvatar(groupInfo, groupMembers, receiverPicParam)
       : getProfilePhoto(peerProfile, receiverPicParam);
     setAvatar(document.getElementById("infoPic"), photo, name);
     document.getElementById("infoName").textContent = name;
@@ -3357,8 +3397,8 @@
         groupInfo.member_count = normalizeMemberCount(groupMembers.length);
       }
       peerProfile = {
-        display_name: groupInfo?.name || receiverNameParam || "Group",
-        photo: groupInfo?.group_icon || groupInfo?.icon_url || receiverPicParam
+        display_name: resolveGroupName(groupInfo, receiverNameParam || "Group"),
+        photo: resolveGroupAvatar(groupInfo, groupMembers, receiverPicParam)
       };
       renderPeerHeader();
       if(!groupMembers.length && receiverId){

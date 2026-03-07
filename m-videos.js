@@ -14,6 +14,7 @@
   const VIDEO_MIME_TYPES = new Set(["video/mp4","video/webm","video/quicktime","video/x-matroska","video/ogg","video/mpeg"]);
   const THUMB_MIME_TYPES = new Set(["image/jpeg","image/png","image/webp"]);
   const FALLBACK_THUMBNAIL = "Images/no-image.png";
+  const BLANK_THUMBNAIL = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
   const PREVIEW_FRAME_SEEK_SECONDS = 0.1;
   const posterFrameCache = new Map();
   const DEFAULT_REMOTE_API_BASE = "https://novagapp-mart.onrender.com";
@@ -514,6 +515,48 @@
     return util.safe(value).replace(/\/+$/g, "");
   }
 
+  function stripAssetQueryAndHash(value){
+    return util.safe(value).split("#")[0].split("?")[0];
+  }
+
+  function isVideoAssetBucket(value){
+    const bucket = util.safe(value).toLowerCase();
+    if(!bucket) return false;
+    return bucket === "long_videos" || bucket === "videos" || (bucket.includes("video") && !bucket.includes("thumb"));
+  }
+
+  function isThumbAssetBucket(value){
+    const bucket = util.safe(value).toLowerCase();
+    if(!bucket) return false;
+    return bucket === "thumbnails" || bucket === "video-thumbs" || bucket.includes("thumb");
+  }
+
+  function looksLikeMediaFileName(value, kind){
+    const clean = stripAssetQueryAndHash(value).toLowerCase();
+    if(!clean) return false;
+    if(kind === "thumb"){
+      return /\.(avif|bmp|gif|jpe?g|png|webp)$/i.test(clean);
+    }
+    return /\.(avi|m4v|mkv|mov|mp4|mpeg|mpg|ogv|ogg|webm)$/i.test(clean);
+  }
+
+  function isFallbackThumbnailUrl(value){
+    const clean = stripAssetQueryAndHash(String(value || "").replace(/\\/g, "/")).toLowerCase();
+    if(!clean) return false;
+    return clean === FALLBACK_THUMBNAIL.toLowerCase()
+      || clean.endsWith("/images/no-image.png")
+      || clean.endsWith("images/no-image.png");
+  }
+
+  function appendMediaTimeFragment(source, seconds){
+    const cleanSource = util.safe(source);
+    const at = Math.max(0, util.num(seconds));
+    if(!cleanSource || at <= 0) return cleanSource;
+    const base = cleanSource.split("#")[0];
+    const stamp = Number.isInteger(at) ? String(at) : at.toFixed(1).replace(/\.0$/,"");
+    return `${base}#t=${stamp}`;
+  }
+
   function decodePathPart(value){
     const raw = util.safe(value);
     if(!raw) return "";
@@ -527,7 +570,7 @@
   function extractAssetFileName(value){
     const raw = util.safe(value).replace(/\\/g, "/");
     if(!raw) return "";
-    const base = raw.split("?")[0].split("#")[0];
+    const base = stripAssetQueryAndHash(raw);
     const piece = base.slice(base.lastIndexOf("/") + 1);
     return decodePathPart(piece);
   }
@@ -588,9 +631,59 @@
     };
   }
 
+  function parseRelativeAssetReference(value){
+    const raw = util.safe(value).replace(/\\/g, "/");
+    if(!raw || /^https?:\/\//i.test(raw) || raw.startsWith("data:") || raw.startsWith("blob:")) return null;
+    const clean = stripAssetQueryAndHash(raw).replace(/^\/+|\/+$/g, "");
+    if(!clean) return null;
+    const parts = clean.split("/").map(decodePathPart).filter(Boolean);
+    if(!parts.length) return null;
+
+    if(parts[0].toLowerCase() === "uploads" && parts.length >= 3){
+      const folder = util.safe(parts[1]).toLowerCase();
+      const inferredKind = folder === "video-thumbs" ? "thumb" : (folder === "videos" ? "video" : "");
+      if(inferredKind){
+        const objectParts = parts.slice(2);
+        return {
+          source:"uploads",
+          kind:inferredKind,
+          bucket:"",
+          objectPath:objectParts.join("/"),
+          fileName:objectParts[objectParts.length - 1] || "",
+          hasNestedPath:objectParts.length > 1
+        };
+      }
+    }
+
+    for(let i = 0; i < parts.length; i += 1){
+      const bucket = util.safe(parts[i]).toLowerCase();
+      if(!isVideoAssetBucket(bucket) && !isThumbAssetBucket(bucket)) continue;
+      const objectParts = parts.slice(i + 1);
+      if(!objectParts.length) continue;
+      return {
+        source:"bucket",
+        kind:isThumbAssetBucket(bucket) ? "thumb" : "video",
+        bucket,
+        objectPath:objectParts.join("/"),
+        fileName:objectParts[objectParts.length - 1] || "",
+        hasNestedPath:objectParts.length > 1
+      };
+    }
+
+    return {
+      source:"bare",
+      kind:"",
+      bucket:"",
+      objectPath:parts.join("/"),
+      fileName:parts[parts.length - 1] || "",
+      hasNestedPath:parts.length > 1
+    };
+  }
+
   function normalizeAssetUrl(value, kind){
     const raw = util.safe(value).replace(/\\/g, "/");
     if(!raw) return "";
+    if(kind === "thumb" && isFallbackThumbnailUrl(raw)) return "";
     if(raw.startsWith("data:")) return raw;
 
     const uploadsMatch = raw.match(/(?:^|\/)uploads\/(videos|video-thumbs)\/([^/?#]+)/i);
@@ -604,10 +697,28 @@
     const supabaseRef = parseSupabaseObjectReference(raw);
     if(supabaseRef && supabaseRef.fileName){
       const bucket = supabaseRef.bucket;
-      const looksVideoBucket = bucket === "long_videos" || bucket === "videos" || bucket.includes("video");
-      const looksThumbBucket = bucket === "thumbnails" || bucket === "video-thumbs" || bucket.includes("thumb");
-      if((kind === "video" && looksVideoBucket) || (kind === "thumb" && looksThumbBucket)){
+      if((kind === "video" && isVideoAssetBucket(bucket)) || (kind === "thumb" && isThumbAssetBucket(bucket))){
         const proxied = buildSupabaseAssetProxyUrl(kind, supabaseRef.objectPath || supabaseRef.fileName);
+        if(proxied) return proxied;
+      }
+    }
+
+    const relativeRef = parseRelativeAssetReference(raw);
+    if(relativeRef){
+      if(relativeRef.source === "uploads" && relativeRef.kind === kind){
+        const proxied = buildAssetProxyUrl(kind, relativeRef.fileName);
+        if(proxied) return proxied;
+      }
+      if(relativeRef.source === "bucket" && relativeRef.objectPath){
+        if((kind === "video" && isVideoAssetBucket(relativeRef.bucket)) || (kind === "thumb" && isThumbAssetBucket(relativeRef.bucket))){
+          const proxied = buildSupabaseAssetProxyUrl(kind, relativeRef.objectPath);
+          if(proxied) return proxied;
+        }
+      }
+      if(relativeRef.source === "bare" && relativeRef.objectPath && (relativeRef.hasNestedPath || looksLikeMediaFileName(relativeRef.fileName, kind))){
+        const proxied = relativeRef.hasNestedPath
+          ? buildSupabaseAssetProxyUrl(kind, relativeRef.objectPath)
+          : buildAssetProxyUrl(kind, relativeRef.fileName);
         if(proxied) return proxied;
       }
     }
@@ -635,40 +746,70 @@
     return parsed.href;
   }
 
-  function buildAssetCandidates(value, kind){
+  function buildAssetCandidates(value, kind, options){
     const list = [];
     const raw = util.safe(value).replace(/\\/g, "/");
+    const settings = options && typeof options === "object" ? options : {};
     const push = (entry) => {
       const item = util.safe(entry);
       if(!item || list.includes(item)) return;
       list.push(item);
     };
+    if(!raw){
+      if(kind === "thumb" && settings.includeFallback === true) push(FALLBACK_THUMBNAIL);
+      return list;
+    }
+    if(kind === "thumb" && isFallbackThumbnailUrl(raw)){
+      if(settings.includeFallback === true) push(FALLBACK_THUMBNAIL);
+      return list;
+    }
+
+    const supabaseRef = parseSupabaseObjectReference(raw);
+    if(supabaseRef && supabaseRef.fileName){
+      const bucket = supabaseRef.bucket;
+      if((kind === "video" && isVideoAssetBucket(bucket)) || (kind === "thumb" && isThumbAssetBucket(bucket))){
+        push(buildSupabaseAssetProxyUrl(kind, supabaseRef.objectPath || supabaseRef.fileName));
+      }
+    }
+
+    const relativeRef = parseRelativeAssetReference(raw);
+    if(relativeRef){
+      if(relativeRef.source === "uploads" && relativeRef.kind === kind && relativeRef.fileName){
+        push(buildAssetProxyUrl(kind, relativeRef.fileName));
+      }
+      if(relativeRef.source === "bucket" && relativeRef.objectPath){
+        if((kind === "video" && isVideoAssetBucket(relativeRef.bucket)) || (kind === "thumb" && isThumbAssetBucket(relativeRef.bucket))){
+          push(buildSupabaseAssetProxyUrl(kind, relativeRef.objectPath));
+        }
+      }
+      if(relativeRef.source === "bare" && relativeRef.objectPath && (relativeRef.hasNestedPath || looksLikeMediaFileName(relativeRef.fileName, kind))){
+        if(relativeRef.hasNestedPath){
+          push(buildSupabaseAssetProxyUrl(kind, relativeRef.objectPath));
+        }
+        if(relativeRef.fileName){
+          push(buildAssetProxyUrl(kind, relativeRef.fileName));
+        }
+        if(!relativeRef.hasNestedPath){
+          push(buildSupabaseAssetProxyUrl(kind, relativeRef.objectPath));
+        }
+      }
+    }
+
+    push(normalizeAssetUrl(raw, kind));
 
     const absoluteRaw = toAbsoluteAssetUrl(raw);
     if(/^https?:\/\//i.test(absoluteRaw) || absoluteRaw.startsWith("/") || absoluteRaw.startsWith("data:") || absoluteRaw.startsWith("blob:")){
       push(absoluteRaw);
     }
 
-    const supabaseRef = parseSupabaseObjectReference(raw);
-    if(supabaseRef && supabaseRef.fileName){
-      const bucket = supabaseRef.bucket;
-      const looksVideoBucket = bucket === "long_videos" || bucket === "videos" || bucket.includes("video");
-      const looksThumbBucket = bucket === "thumbnails" || bucket === "video-thumbs" || bucket.includes("thumb");
-      if((kind === "video" && looksVideoBucket) || (kind === "thumb" && looksThumbBucket)){
-        push(buildSupabaseAssetProxyUrl(kind, supabaseRef.objectPath || supabaseRef.fileName));
-      }
-    }
-
-    push(normalizeAssetUrl(raw, kind));
-
-    if(kind === "thumb"){
+    if(kind === "thumb" && settings.includeFallback === true){
       push(FALLBACK_THUMBNAIL);
     }
 
     return list;
   }
 
-    function setImageSourceWithFallback(image, candidates){
+  function setImageSourceWithFallback(image, candidates){
     if(!image) return;
     const queue = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
     if(!queue.length){
@@ -749,7 +890,7 @@
       video.addEventListener("loadeddata", seekAndDraw, { once:true });
       video.addEventListener("seeked", draw, { once:true });
       video.addEventListener("error", () => finish(""), { once:true });
-      video.src = cleanSource;
+      video.src = appendMediaTimeFragment(cleanSource, PREVIEW_FRAME_SEEK_SECONDS);
       try{ video.load(); }catch(_){ }
     }).catch(() => "");
     posterFrameCache.set(cleanSource, task);
@@ -759,29 +900,30 @@
   function setPosterPreviewImage(image, videoRow, onResolved){
     if(!image) return;
     const item = videoRow || {};
-    const thumbCandidates = buildAssetCandidates(item.thumbnail_url_raw || item.thumbnail_url, "thumb").filter(candidate => candidate && candidate !== FALLBACK_THUMBNAIL);
+    const thumbCandidates = buildAssetCandidates(item.thumbnail_url_raw || item.thumbnail_url, "thumb", { includeFallback:false })
+      .filter(candidate => candidate && !isFallbackThumbnailUrl(candidate));
     if(thumbCandidates.length){
-      const queue = thumbCandidates.concat(FALLBACK_THUMBNAIL);
+      const queue = thumbCandidates.slice();
       setImageSourceWithFallback(image, queue);
       if(typeof onResolved === "function") onResolved(queue[0]);
       return;
     }
     const sourceCandidates = buildVideoSourceCandidates(item.video_url_raw || item.video_url);
     if(!sourceCandidates.length){
-      setImageSourceWithFallback(image, [FALLBACK_THUMBNAIL]);
-      if(typeof onResolved === "function") onResolved(FALLBACK_THUMBNAIL);
+      setImageSourceWithFallback(image, [BLANK_THUMBNAIL]);
+      if(typeof onResolved === "function") onResolved(BLANK_THUMBNAIL);
       return;
     }
-    setImageSourceWithFallback(image, [FALLBACK_THUMBNAIL]);
+    setImageSourceWithFallback(image, [BLANK_THUMBNAIL]);
     capturePosterFrame(sourceCandidates[0]).then(frame => {
-      const resolved = util.safe(frame) || FALLBACK_THUMBNAIL;
+      const resolved = util.safe(frame) || BLANK_THUMBNAIL;
       if(frame){
         image.onerror = null;
         image.src = frame;
       }
       if(typeof onResolved === "function") onResolved(resolved);
     }).catch(() => {
-      if(typeof onResolved === "function") onResolved(FALLBACK_THUMBNAIL);
+      if(typeof onResolved === "function") onResolved(BLANK_THUMBNAIL);
     });
   }
 
@@ -875,7 +1017,8 @@
   function normalizeVideo(row){
     const tagsRaw = Array.isArray(row?.tags) ? row.tags.join(", ") : util.safe(row?.tags);
     const rawVideoUrl = util.safe(row?.video_url_raw || row?.video_url);
-    const rawThumbUrl = util.safe(row?.thumbnail_url_raw || row?.thumbnail_url);
+    const rawThumbCandidate = util.safe(row?.thumbnail_url_raw || row?.thumbnail_url);
+    const rawThumbUrl = isFallbackThumbnailUrl(rawThumbCandidate) ? "" : rawThumbCandidate;
     return {
       id:util.safe(row?.id),
       user_id:util.safe(row?.user_id),
@@ -1592,7 +1735,7 @@
       return;
     }
     const channel = getChannel(item.user_id);
-        const thumbSrc = FALLBACK_THUMBNAIL;
+        const thumbSrc = BLANK_THUMBNAIL;
     const card = document.createElement("article");
     card.className = "mv-card";
     card.dataset.videoId = item.id;
@@ -1857,7 +2000,8 @@
     await api.fetchProfiles([video.user_id]);
     const channel = getChannel(video.user_id);
 
-        const thumbCandidates = buildAssetCandidates(video.thumbnail_url_raw || video.thumbnail_url, "thumb").filter(candidate => candidate && candidate !== FALLBACK_THUMBNAIL);
+        const thumbCandidates = buildAssetCandidates(video.thumbnail_url_raw || video.thumbnail_url, "thumb", { includeFallback:false })
+          .filter(candidate => candidate && !isFallbackThumbnailUrl(candidate));
     const posterUrl = thumbCandidates[0] || "";
     const sourceCandidates = buildVideoSourceCandidates(video.video_url_raw || video.video_url);
     const initialSource = sourceCandidates[0] || "";
@@ -2715,8 +2859,7 @@
       await api.fetchProfiles(list.map(item => item.user_id));
       list.forEach(item => {
         const channel = getChannel(item.user_id);
-        const thumbCandidates = buildAssetCandidates(item.thumbnail_url_raw || item.thumbnail_url, "thumb");
-        const thumbSrc = thumbCandidates[0] || FALLBACK_THUMBNAIL;
+        const thumbSrc = BLANK_THUMBNAIL;
         const button = document.createElement("button");
         button.type = "button";
         button.className = "mv-rec-item";
@@ -2724,7 +2867,7 @@
           '<div class="mv-rec-thumb"><img src="' + util.esc(thumbSrc) + '" alt="' + util.esc(item.title) + '"></div>' +
           '<div class="mv-rec-body"><p class="mv-rec-title">' + util.esc(item.title) + '</p><p class="mv-rec-sub">' + util.esc(channel.name + " . " + util.compact(item.views) + " views") + '</p></div>';
         const image = button.querySelector(".mv-rec-thumb img");
-        setImageSourceWithFallback(image, thumbCandidates);
+        setPosterPreviewImage(image, item);
         button.addEventListener("click", () => openVideo(item.id, true, true));
         dom.recommendList.appendChild(button);
       });
@@ -3498,8 +3641,10 @@
           const video = item.video;
           const channel = getChannel(video.user_id);
           button.innerHTML =
-            '<div class="mv-suggest-thumb"><img src="' + util.esc(video.thumbnail_url || FALLBACK_THUMBNAIL) + '" alt="' + util.esc(video.title) + '"></div>' +
+            '<div class="mv-suggest-thumb"><img src="' + util.esc(BLANK_THUMBNAIL) + '" alt="' + util.esc(video.title) + '"></div>' +
             '<div class="mv-suggest-meta"><p class="mv-suggest-title">' + util.esc(video.title) + '</p><p class="mv-suggest-sub">' + util.esc(channel.name) + '</p></div>';
+          const image = button.querySelector(".mv-suggest-thumb img");
+          setPosterPreviewImage(image, video);
           button.addEventListener("click", () => {
             dom.suggestBox.classList.add("mv-hidden");
             openVideo(video.id, true, true);

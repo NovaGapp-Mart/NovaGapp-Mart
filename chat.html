@@ -483,7 +483,7 @@
                 if(!id) return;
                 manualGroups.set(id, {
                     id,
-                    name: String(row?.name || "Group").trim() || "Group",
+                    name: resolveGroupDisplayName(row, "Group"),
                     img: String(row?.img || "").trim(),
                     owner_id: String(row?.owner_id || "").trim(),
                     owner_name: String(row?.owner_name || "").trim(),
@@ -500,7 +500,7 @@
                 .slice(0, MANUAL_GROUP_MAX)
                 .map(row => ({
                     id: String(row?.id || "").trim(),
-                    name: String(row?.name || "Group").trim() || "Group",
+                    name: resolveGroupDisplayName(row, "Group"),
                     img: String(row?.img || "").trim(),
                     owner_id: String(row?.owner_id || "").trim(),
                     owner_name: String(row?.owner_name || "").trim(),
@@ -515,7 +515,7 @@
             if(!id) return;
             manualGroups.set(id, {
                 id,
-                name: String(row?.name || "Group").trim() || "Group",
+                name: resolveGroupDisplayName(row, "Group"),
                 img: String(row?.img || "").trim(),
                 owner_id: String(row?.owner_id || "").trim(),
                 owner_name: String(row?.owner_name || "").trim(),
@@ -1272,14 +1272,33 @@
         const GROUP_ID_FIELDS = ["id", "group_id", "group_uuid", "gid", "uuid"];
         const GROUP_MEMBER_USER_FIELDS = ["user_id", "member_id", "user_uuid", "member_uuid", "participant_id", "member", "uid", "user", "userId", "member_user_id", "profile_id", "account_id"];
 
+        function isPlaceholderGroupName(value){
+            const text = String(value || "").trim().toLowerCase();
+            return !text || text === "group" || text === "novagroup" || text === "new group" || text === "chat group" || text === "untitled group";
+        }
+
+        function resolveGroupDisplayName(raw, fallback){
+            const row = raw && typeof raw === "object" ? raw : {};
+            const candidates = [row?.group_name, row?.name, row?.title, row?.group_title, fallback];
+            for(const candidate of candidates){
+                const clean = String(candidate || "").trim();
+                if(clean && !isPlaceholderGroupName(clean)) return clean;
+            }
+            for(const candidate of candidates){
+                const clean = String(candidate || "").trim();
+                if(clean) return clean;
+            }
+            return "Group";
+        }
+
         function normalizeGroupListRow(raw){
             const row = raw && typeof raw === "object" ? raw : {};
             return {
                 id: String(extractGroupId(row) || "").trim(),
-                name: String(row?.name || row?.group_name || "Group").trim() || "Group",
-                img: String(row?.group_icon || row?.icon_url || "").trim(),
+                name: resolveGroupDisplayName(row, "Group"),
+                img: String(row?.group_icon || row?.icon_url || row?.owner_avatar || row?.owner_photo || row?.photo || "").trim(),
                 owner_id: String(extractGroupOwnerId(row) || row?.owner_id || "").trim(),
-                owner_name: String(row?.owner_name || row?.creator_name || "").trim(),
+                owner_name: String(row?.owner_name || row?.creator_name || row?.created_by_name || "").trim(),
                 isGroup: true,
                 sortTs: Number(row?.updated_at || row?.created_at || 0) || 0
             };
@@ -1291,7 +1310,7 @@
             const prev = byId.get(next.id) || {};
             byId.set(next.id, {
                 id: next.id,
-                name: String(next.name || prev.name || "Group").trim() || "Group",
+                name: resolveGroupDisplayName({ group_name: next.name, name: prev.name }, "Group"),
                 img: String(next.img || prev.img || "").trim(),
                 owner_id: String(next.owner_id || prev.owner_id || "").trim(),
                 owner_name: String(next.owner_name || prev.owner_name || "").trim(),
@@ -1415,7 +1434,7 @@
                 const prev = byId.get(id) || {};
                 byId.set(id, {
                     id,
-                    name: String(prev.name || manual.name || "Group").trim() || "Group",
+                    name: resolveGroupDisplayName({ group_name: manual.name, name: prev.name }, "Group"),
                     img: String(prev.img || manual.img || "").trim(),
                     owner_id: String(prev.owner_id || manual.owner_id || "").trim(),
                     owner_name: String(prev.owner_name || manual.owner_name || "").trim(),
@@ -1439,11 +1458,20 @@
                     const ownerProfile = ownerById.get(ownerId) || null;
                     if(ownerProfile){
                         const resolvedName = displayName(ownerProfile);
+                        const resolvedPhoto = avatarUrl(ownerProfile);
                         if(!groupRow.owner_name || /^(user|owner)$/i.test(String(groupRow.owner_name || "").trim())){
                             groupRow.owner_name = resolvedName;
                         }
-                    }else if(ownerId && ownerId === currentUserId && (!groupRow.owner_name || /^(user|owner)$/i.test(String(groupRow.owner_name || "").trim()))){
-                        groupRow.owner_name = displayName(currentUser || {});
+                        if(!groupRow.img && resolvedPhoto){
+                            groupRow.img = resolvedPhoto;
+                        }
+                    }else if(ownerId && ownerId === currentUserId){
+                        if(!groupRow.owner_name || /^(user|owner)$/i.test(String(groupRow.owner_name || "").trim())){
+                            groupRow.owner_name = displayName(currentUser || {});
+                        }
+                        if(!groupRow.img){
+                            groupRow.img = avatarUrl(currentUser || {});
+                        }
                     }
                     byId.set(id, groupRow);
                 });
@@ -2215,7 +2243,7 @@
             rememberManualGroup({
                 id: groupId,
                 name: gName,
-                img: createdGroupIcon,
+                img: createdGroupIcon || ownerPhoto,
                 owner_id: currentUserId,
                 owner_name: ownerName
             });
