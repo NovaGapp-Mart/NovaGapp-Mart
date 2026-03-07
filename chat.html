@@ -1151,7 +1151,7 @@
             try{
                 const { data, error } = await supa
                     .from("groups")
-                    .select("id,group_name,group_icon,owner_id")
+                    .select("*")
                     .eq("owner_id", currentUserId)
                     .limit(200);
                 if(error) return null;
@@ -1252,7 +1252,7 @@
                 try{
                     const { data, error } = await supa
                         .from("groups")
-                        .select("id,group_name,group_icon")
+                        .select("*")
                         .eq("id", id)
                         .limit(1);
                     if(error){
@@ -1412,8 +1412,8 @@
                 const lockedHiddenRow = !!(options.hidden && options.locked);
                 const name = String(lockedHiddenRow ? "Hidden Account" : (item.name || "User"));
                 const rawImg = lockedHiddenRow ? "" : String(item.img || "");
-                const img = lockedHiddenRow ? "" : (isGroup ? resolveGroupIconUrl(rawImg) : normalizeAssetUrl(rawImg));
                 const isGroup = !!item.isGroup;
+                const img = lockedHiddenRow ? "" : (isGroup ? resolveGroupIconUrl(rawImg) : normalizeAssetUrl(rawImg));
                 const unreadLabel = unreadCount > 99 ? "99+" : String(unreadCount);
 
                 const fallbackLetter = (name[0] || "U").toUpperCase();
@@ -1676,41 +1676,71 @@
             if(!cleanName) return { ok:false, error:new Error("group_name_required"), groupId:"" };
             if(!ownerId) return { ok:false, error:new Error("group_owner_required"), groupId:"" };
 
+            const insertCandidates = [];
+            const pushCandidate = (candidate) => {
+                const src = candidate && typeof candidate === "object" ? candidate : {};
+                const normalized = {};
+                Object.keys(src).forEach(key => {
+                    if(src[key] !== undefined) normalized[key] = src[key];
+                });
+                const signature = JSON.stringify(normalized);
+                if(!signature) return;
+                if(insertCandidates.some(item => item.signature === signature)) return;
+                insertCandidates.push({ signature, value: normalized });
+            };
+
+            if(cleanIcon){
+                pushCandidate({ group_name: cleanName, icon_url: cleanIcon, owner_id: ownerId });
+                pushCandidate({ group_name: cleanName, group_icon: cleanIcon, owner_id: ownerId });
+            }
+            pushCandidate({ group_name: cleanName, owner_id: ownerId });
+
             let insertError = null;
-            try{
-                const inserted = await supa
-                    .from("groups")
-                    .insert({
-                        group_name: cleanName,
-                        group_icon: cleanIcon || null,
-                        owner_id: ownerId
-                    })
-                    .select("id,group_name,group_icon,owner_id")
-                    .maybeSingle();
-                if(!inserted?.error){
-                    const groupId = String(inserted?.data?.id || "").trim();
-                    if(groupId){
-                        return { ok:true, data: inserted.data, groupId };
-                    }
-                }else{
-                    insertError = inserted.error;
-                    const txt = `${inserted.error?.message || ""} ${inserted.error?.details || ""}`.toLowerCase();
-                    if(!(txt.includes("permission") && txt.includes("select"))){
-                        return { ok:false, error:inserted.error, groupId:"" };
-                    }
-                    const fallbackInsert = await supa
+            for(const entry of insertCandidates){
+                try{
+                    const inserted = await supa
                         .from("groups")
-                        .insert({
-                            group_name: cleanName,
-                            group_icon: cleanIcon || null,
-                            owner_id: ownerId
-                        });
-                    if(fallbackInsert?.error){
-                        return { ok:false, error:fallbackInsert.error, groupId:"" };
+                        .insert(entry.value)
+                        .select("*")
+                        .maybeSingle();
+                    if(!inserted?.error){
+                        const groupId = String(inserted?.data?.id || "").trim();
+                        if(groupId){
+                            return { ok:true, data: inserted.data, groupId };
+                        }
+                        const resolvedAfterInsert = await resolveInsertedGroupRow({ expectedName: cleanName, preferredId: "" });
+                        const resolvedIdAfterInsert = String(resolvedAfterInsert?.id || "").trim();
+                        if(resolvedIdAfterInsert){
+                            return { ok:true, data: resolvedAfterInsert, groupId: resolvedIdAfterInsert };
+                        }
+                        return { ok:true, data: inserted.data || entry.value, groupId:"" };
+                    }
+                    insertError = inserted.error;
+                    const txt = `${inserted.error?.message || ""} ${inserted.error?.details || ""} ${inserted.error?.hint || ""}`.toLowerCase();
+                    if(maybeMissingColumn(inserted.error)){
+                        continue;
+                    }
+                    if(txt.includes("permission") && txt.includes("select")){
+                        const fallbackInsert = await supa.from("groups").insert(entry.value);
+                        if(!fallbackInsert?.error){
+                            const resolvedAfterInsert = await resolveInsertedGroupRow({ expectedName: cleanName, preferredId: "" });
+                            const resolvedIdAfterInsert = String(resolvedAfterInsert?.id || "").trim();
+                            if(resolvedIdAfterInsert){
+                                return { ok:true, data: resolvedAfterInsert, groupId: resolvedIdAfterInsert };
+                            }
+                            return { ok:true, data: entry.value, groupId:"" };
+                        }
+                        insertError = fallbackInsert.error;
+                        if(maybeMissingColumn(fallbackInsert.error)){
+                            continue;
+                        }
+                    }
+                }catch(err){
+                    insertError = err;
+                    if(maybeMissingColumn(err)){
+                        continue;
                     }
                 }
-            }catch(err){
-                insertError = err;
             }
 
             const resolved = await resolveInsertedGroupRow({ expectedName: cleanName, preferredId: "" });
@@ -1818,7 +1848,7 @@
                 return;
             }
 
-            const createdGroupIcon = resolveGroupIconUrl(groupRes?.data?.group_icon || selectedImgData || "");
+            const createdGroupIcon = resolveGroupIconUrl(groupRes?.data?.group_icon || groupRes?.data?.icon_url || selectedImgData || "");
             const ownerProfile = await fetchUserById(currentUserId).catch(() => null);
             const ownerSource = ownerProfile || currentUser || {};
             const ownerName = displayName(ownerSource) || "You";

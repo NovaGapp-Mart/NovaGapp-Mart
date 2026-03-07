@@ -469,7 +469,7 @@
     try{
       const { data, error } = await supa
         .from("groups")
-        .select("id,group_name,group_icon,owner_id")
+        .select("*")
         .eq("id", cleanGroupId)
         .limit(1);
       if(error){
