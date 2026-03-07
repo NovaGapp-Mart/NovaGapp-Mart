@@ -346,9 +346,22 @@
     return !text || text === "group" || text === "novagroup" || text === "new group" || text === "chat group" || text === "untitled group";
   }
 
+  const GROUP_NAME_FIELDS = ["name", "group_name", "title"];
+  const GROUP_ICON_FIELDS = ["group_icon", "icon_url", "image_url", "image", "photo", "avatar_url", "img"];
+
+  function readGroupField(row, keys){
+    const source = row && typeof row === "object" ? row : {};
+    const list = Array.isArray(keys) ? keys : [];
+    for(const key of list){
+      const value = String(source?.[key] || "").trim();
+      if(value) return value;
+    }
+    return "";
+  }
+
   function resolveGroupName(groupRow, fallbackName){
     const row = groupRow && typeof groupRow === "object" ? groupRow : {};
-    const candidates = [row.group_name, row.name, fallbackName];
+    const candidates = [readGroupField(row, GROUP_NAME_FIELDS), fallbackName];
     for(const candidate of candidates){
       const clean = String(candidate || "").trim();
       if(clean && !isPlaceholderGroupName(clean)) return clean;
@@ -362,7 +375,7 @@
 
   function resolveGroupAvatar(groupRow, members, fallbackImage){
     const row = groupRow && typeof groupRow === "object" ? groupRow : {};
-    return resolveGroupIconUrl(row.group_icon || row.icon_url || fallbackImage || "");
+    return resolveGroupIconUrl(readGroupField(row, GROUP_ICON_FIELDS) || fallbackImage || "");
   }
 
   function readFirstValue(row, keys){
@@ -1084,7 +1097,7 @@
         const actionBtn = document.createElement("button");
         actionBtn.type = "button";
         actionBtn.className = "w-8 h-8 rounded-full text-lg text-gray-500 hover:bg-gray-200";
-        actionBtn.textContent = "...";
+        actionBtn.textContent = "\u22EE";
         const menu = document.createElement("div");
         menu.className = "group-member-menu hidden absolute right-0 top-9 min-w-[160px] rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden z-20";
         const btn = document.createElement("button");
@@ -2499,13 +2512,35 @@
       }else if(event.track){
         if(!call.remoteStream.getTracks().find(t => t.id === event.track.id)) call.remoteStream.addTrack(event.track);
       }
+      if(activeCall && activeCall.callId === call.callId){
+        clearOutgoingOfferTimer();
+        stopRingTone();
+        setCallStatus("Connected");
+      }
+    };
+    pc.oniceconnectionstatechange = () => {
+      if(!activeCall || activeCall.callId !== call.callId) return;
+      const state = String(pc.iceConnectionState || "").toLowerCase();
+      if(state === "connected" || state === "completed"){
+        clearOutgoingOfferTimer();
+        stopRingTone();
+        setCallStatus("Connected");
+        return;
+      }
+      if(state === "checking"){
+        setCallStatus("Connecting...");
+        return;
+      }
+      if(state === "failed" || state === "closed"){
+        endActiveCall(false, "Call ended").catch(() => {});
+      }
     };
     pc.onconnectionstatechange = () => {
       if(!activeCall || activeCall.callId !== call.callId) return;
       const state = String(pc.connectionState || "").toLowerCase();
-      if(state === "connected"){ setCallStatus("Connected"); return; }
+      if(state === "connected"){ clearOutgoingOfferTimer(); stopRingTone(); setCallStatus("Connected"); return; }
       if(state === "connecting"){ setCallStatus("Connecting..."); return; }
-      if(state === "failed" || state === "disconnected" || state === "closed"){
+      if(state === "failed" || state === "closed"){
         endActiveCall(false, "Call ended").catch(() => {});
       }
     };

@@ -1047,10 +1047,26 @@ app.post("/api/call/signal", async (req, res) => {
 
     const duplicate = callSignalStore.find((row) => {
       if(signal.signal_id && row.id === signal.signal_id) return true;
-      const sameParticipants = row.to_user_id === signal.to_user_id && row.from_user_id === signal.from_user_id;
-      const sameCall = row.call_id === signal.call_id && row.type === signal.type && row.reason === signal.reason;
       const createdMs = Date.parse(String(row.created_at || ""));
-      return sameParticipants && sameCall && Number.isFinite(createdMs) && createdMs >= (nowMs - 6000);
+      if(!(Number.isFinite(createdMs) && createdMs >= (nowMs - 6000))) return false;
+      const sameParticipants = row.to_user_id === signal.to_user_id && row.from_user_id === signal.from_user_id;
+      const sameCallType = row.call_id === signal.call_id && row.type === signal.type && row.reason === signal.reason;
+      if(!(sameParticipants && sameCallType)) return false;
+      if(signal.type === "ice"){
+        const prevCandidate = row && row.candidate && typeof row.candidate === "object" ? row.candidate : {};
+        const nextCandidate = signal && signal.candidate && typeof signal.candidate === "object" ? signal.candidate : {};
+        return String(prevCandidate.candidate || "") === String(nextCandidate.candidate || "")
+          && String(prevCandidate.sdpMid || "") === String(nextCandidate.sdpMid || "")
+          && Number(prevCandidate.sdpMLineIndex ?? -1) == Number(nextCandidate.sdpMLineIndex ?? -1)
+          && String(prevCandidate.usernameFragment || "") === String(nextCandidate.usernameFragment || "");
+      }
+      if(signal.type === "call-offer" || signal.type === "call-answer"){
+        const prevSdp = row && row.sdp && typeof row.sdp === "object" ? row.sdp : {};
+        const nextSdp = signal && signal.sdp && typeof signal.sdp === "object" ? signal.sdp : {};
+        return String(prevSdp.type || "") === String(nextSdp.type || "")
+          && String(prevSdp.sdp || "") === String(nextSdp.sdp || "");
+      }
+      return true;
     });
     if(duplicate){
       return res.json({

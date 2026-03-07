@@ -486,7 +486,7 @@
                 manualGroups.set(id, {
                     id,
                     name: resolveGroupDisplayName(row, "Group"),
-                    img: resolveGroupIconUrl(row?.img || ""),
+                    img: resolveGroupIconUrl(row?.img || row?.group_icon || row?.icon_url || ""),
                     owner_id: String(row?.owner_id || "").trim(),
                     owner_name: String(row?.owner_name || "").trim(),
                     isGroup: true,
@@ -503,7 +503,7 @@
                 .map(row => ({
                     id: String(row?.id || "").trim(),
                     name: resolveGroupDisplayName(row, "Group"),
-                    img: resolveGroupIconUrl(row?.img || ""),
+                    img: resolveGroupIconUrl(row?.img || row?.group_icon || row?.icon_url || ""),
                     owner_id: String(row?.owner_id || "").trim(),
                     owner_name: String(row?.owner_name || "").trim(),
                     updated_at: Number(row?.updated_at || Date.now()) || Date.now()
@@ -518,7 +518,7 @@
             manualGroups.set(id, {
                 id,
                 name: resolveGroupDisplayName(row, "Group"),
-                img: resolveGroupIconUrl(row?.img || ""),
+                img: resolveGroupIconUrl(row?.img || row?.group_icon || row?.icon_url || ""),
                 owner_id: String(row?.owner_id || "").trim(),
                 owner_name: String(row?.owner_name || "").trim(),
                 isGroup: true,
@@ -1156,12 +1156,13 @@
                     .limit(200);
                 if(error) return null;
                 const rows = Array.isArray(data) ? data : [];
+                rows.forEach(rememberObservedGroupFields);
                 if(preferredId){
-                    const exact = rows.find(row => String(row?.id || "").trim() === preferredId);
+                    const exact = rows.find(row => String(extractGroupId(row) || row?.id || "").trim() === preferredId);
                     if(exact) return exact;
                 }
                 if(expectedName){
-                    const byName = rows.find(row => String(row?.group_name || "").trim().toLowerCase() === expectedName);
+                    const byName = rows.find(row => String(readGroupField(row, GROUP_NAME_FIELDS) || "").trim().toLowerCase() === expectedName);
                     if(byName) return byName;
                 }
                 return rows.length ? rows[rows.length - 1] : null;
@@ -1173,6 +1174,29 @@
         const GROUP_OWNER_FIELDS = ["owner_id"];
         const GROUP_ID_FIELDS = ["id"];
         const GROUP_MEMBER_USER_FIELDS = ["user_id"];
+        const GROUP_NAME_FIELDS = ["name", "group_name"];
+        const GROUP_ICON_FIELDS = ["group_icon", "icon_url", "image_url", "image", "photo", "avatar_url", "img"];
+        const observedGroupFields = new Set(["id", "owner_id"]);
+
+        function rememberObservedGroupFields(row){
+            const source = row && typeof row === "object" ? row : null;
+            if(!source) return;
+            Object.keys(source).forEach(key => {
+                const clean = String(key || "").trim();
+                if(clean) observedGroupFields.add(clean);
+            });
+        }
+
+        function readGroupField(row, fields){
+            const source = row && typeof row === "object" ? row : {};
+            const list = Array.isArray(fields) ? fields : [];
+            for(const field of list){
+                const value = source?.[field];
+                const clean = typeof value === "string" ? value.trim() : String(value || "").trim();
+                if(clean) return clean;
+            }
+            return "";
+        }
 
         function isPlaceholderGroupName(value){
             const text = String(value || "").trim().toLowerCase();
@@ -1181,7 +1205,8 @@
 
         function resolveGroupDisplayName(raw, fallback){
             const row = raw && typeof raw === "object" ? raw : {};
-            const candidates = [row?.group_name, row?.name, fallback];
+            const primary = readGroupField(row, GROUP_NAME_FIELDS);
+            const candidates = [primary, fallback];
             for(const candidate of candidates){
                 const clean = String(candidate || "").trim();
                 if(clean && !isPlaceholderGroupName(clean)) return clean;
@@ -1193,12 +1218,17 @@
             return "Group";
         }
 
+        function resolveGroupIconValue(raw){
+            const row = raw && typeof raw === "object" ? raw : {};
+            return readGroupField(row, GROUP_ICON_FIELDS);
+        }
+
         function normalizeGroupListRow(raw){
             const row = raw && typeof raw === "object" ? raw : {};
             return {
                 id: String(extractGroupId(row) || "").trim(),
                 name: resolveGroupDisplayName(row, "Group"),
-                img: resolveGroupIconUrl(row?.group_icon || row?.icon_url || ""),
+                img: resolveGroupIconUrl(resolveGroupIconValue(row)),
                 owner_id: String(extractGroupOwnerId(row) || row?.owner_id || "").trim(),
                 owner_name: String(row?.owner_name || "").trim(),
                 isGroup: true,
@@ -1262,6 +1292,7 @@
                         continue;
                     }
                     if(Array.isArray(data) && data.length){
+                        rememberObservedGroupFields(data[0]);
                         rows.push(data[0]);
                     }
                 }catch(err){
@@ -1670,30 +1701,44 @@
 
         async function insertGroupWithFallback(payload){
             const row = payload && typeof payload === "object" ? payload : {};
-            const cleanName = String(row.group_name || row.name || "").trim();
-            const cleanIcon = String(row.group_icon || row.icon_url || "").trim();
+            const cleanName = String(row.name || row.group_name || "").trim();
+            const cleanIcon = String(row.icon_url || row.group_icon || "").trim();
             const ownerId = isUuid(currentUserId) ? String(currentUserId || "").trim() : String(row.owner_id || "").trim();
             if(!cleanName) return { ok:false, error:new Error("group_name_required"), groupId:"" };
             if(!ownerId) return { ok:false, error:new Error("group_owner_required"), groupId:"" };
 
+            const preferName = observedGroupFields.has("name") || !observedGroupFields.has("group_name");
+            const preferIconUrl = observedGroupFields.has("icon_url") || !observedGroupFields.has("group_icon");
             const insertCandidates = [];
             const pushCandidate = (candidate) => {
                 const src = candidate && typeof candidate === "object" ? candidate : {};
                 const normalized = {};
                 Object.keys(src).forEach(key => {
-                    if(src[key] !== undefined) normalized[key] = src[key];
+                    if(src[key] !== undefined && src[key] !== null && src[key] !== "") normalized[key] = src[key];
                 });
                 const signature = JSON.stringify(normalized);
-                if(!signature) return;
-                if(insertCandidates.some(item => item.signature === signature)) return;
+                if(!signature || insertCandidates.some(item => item.signature === signature)) return;
                 insertCandidates.push({ signature, value: normalized });
             };
 
-            if(cleanIcon){
-                pushCandidate({ group_name: cleanName, icon_url: cleanIcon, owner_id: ownerId });
-                pushCandidate({ group_name: cleanName, group_icon: cleanIcon, owner_id: ownerId });
-            }
-            pushCandidate({ group_name: cleanName, owner_id: ownerId });
+            const addNameFields = (target, includeBoth) => {
+                if(includeBoth || preferName) target.name = cleanName;
+                if(includeBoth || !preferName) target.group_name = cleanName;
+                return target;
+            };
+            const addIconFields = (target, mode) => {
+                if(!cleanIcon) return target;
+                if(mode === "icon_url" || mode === "both") target.icon_url = cleanIcon;
+                if(mode === "group_icon" || mode === "both") target.group_icon = cleanIcon;
+                return target;
+            };
+
+            pushCandidate(addIconFields(addNameFields({ owner_id: ownerId }, false), preferIconUrl ? "icon_url" : "group_icon"));
+            pushCandidate(addIconFields(addNameFields({ owner_id: ownerId }, false), preferIconUrl ? "group_icon" : "icon_url"));
+            pushCandidate(addNameFields({ owner_id: ownerId }, false));
+            pushCandidate(addIconFields(addNameFields({ owner_id: ownerId }, true), preferIconUrl ? "icon_url" : "group_icon"));
+            pushCandidate(addIconFields(addNameFields({ owner_id: ownerId }, true), "both"));
+            pushCandidate(addNameFields({ owner_id: ownerId }, true));
 
             let insertError = null;
             for(const entry of insertCandidates){
@@ -1704,12 +1749,13 @@
                         .select("*")
                         .maybeSingle();
                     if(!inserted?.error){
+                        rememberObservedGroupFields(inserted?.data || entry.value);
                         const groupId = String(inserted?.data?.id || "").trim();
                         if(groupId){
                             return { ok:true, data: inserted.data, groupId };
                         }
                         const resolvedAfterInsert = await resolveInsertedGroupRow({ expectedName: cleanName, preferredId: "" });
-                        const resolvedIdAfterInsert = String(resolvedAfterInsert?.id || "").trim();
+                        const resolvedIdAfterInsert = String(extractGroupId(resolvedAfterInsert) || resolvedAfterInsert?.id || "").trim();
                         if(resolvedIdAfterInsert){
                             return { ok:true, data: resolvedAfterInsert, groupId: resolvedIdAfterInsert };
                         }
@@ -1717,14 +1763,22 @@
                     }
                     insertError = inserted.error;
                     const txt = `${inserted.error?.message || ""} ${inserted.error?.details || ""} ${inserted.error?.hint || ""}`.toLowerCase();
+                    const missingColumnName = extractMissingColumnName(inserted.error);
                     if(maybeMissingColumn(inserted.error)){
+                        if(missingColumnName) observedGroupFields.delete(missingColumnName);
+                        continue;
+                    }
+                    const nullColumn = extractNullColumnName(inserted.error);
+                    if(nullColumn === "name"){
+                        observedGroupFields.add("name");
                         continue;
                     }
                     if(txt.includes("permission") && txt.includes("select")){
                         const fallbackInsert = await supa.from("groups").insert(entry.value);
                         if(!fallbackInsert?.error){
+                            rememberObservedGroupFields(entry.value);
                             const resolvedAfterInsert = await resolveInsertedGroupRow({ expectedName: cleanName, preferredId: "" });
-                            const resolvedIdAfterInsert = String(resolvedAfterInsert?.id || "").trim();
+                            const resolvedIdAfterInsert = String(extractGroupId(resolvedAfterInsert) || resolvedAfterInsert?.id || "").trim();
                             if(resolvedIdAfterInsert){
                                 return { ok:true, data: resolvedAfterInsert, groupId: resolvedIdAfterInsert };
                             }
@@ -1732,19 +1786,23 @@
                         }
                         insertError = fallbackInsert.error;
                         if(maybeMissingColumn(fallbackInsert.error)){
+                            const fallbackMissing = extractMissingColumnName(fallbackInsert.error);
+                            if(fallbackMissing) observedGroupFields.delete(fallbackMissing);
                             continue;
                         }
                     }
                 }catch(err){
                     insertError = err;
                     if(maybeMissingColumn(err)){
+                        const missingColumnName = extractMissingColumnName(err);
+                        if(missingColumnName) observedGroupFields.delete(missingColumnName);
                         continue;
                     }
                 }
             }
 
             const resolved = await resolveInsertedGroupRow({ expectedName: cleanName, preferredId: "" });
-            const resolvedId = String(resolved?.id || "").trim();
+            const resolvedId = String(extractGroupId(resolved) || resolved?.id || "").trim();
             if(resolvedId){
                 return { ok:true, data: resolved, groupId: resolvedId };
             }
@@ -1822,7 +1880,9 @@
             }
 
             const basePayload = {
+                name: gName,
                 group_name: gName,
+                icon_url: selectedImgData,
                 group_icon: selectedImgData,
                 owner_id: currentUserId
             };
@@ -1848,7 +1908,7 @@
                 return;
             }
 
-            const createdGroupIcon = resolveGroupIconUrl(groupRes?.data?.group_icon || groupRes?.data?.icon_url || selectedImgData || "");
+            const createdGroupIcon = resolveGroupIconUrl(resolveGroupIconValue(groupRes?.data || {}) || selectedImgData || "");
             const ownerProfile = await fetchUserById(currentUserId).catch(() => null);
             const ownerSource = ownerProfile || currentUser || {};
             const ownerName = displayName(ownerSource) || "You";
