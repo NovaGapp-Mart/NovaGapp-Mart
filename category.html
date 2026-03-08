@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html>
 <head>
   <title>Category - NOVAGAPP</title>
@@ -6,14 +6,14 @@
 
   <link rel="stylesheet" href="style.css">
 
-  <!-- SUPABASE SDK -->
+  <!-- 🔥 SUPABASE SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="public-config.js"></script>
   <script>
     window.supa = window.supa || window.novaCreateSupabaseClient();
   </script>
 
-  <!-- GLOBAL -->
+  <!-- 🔥 GLOBAL -->
   <script src="global.js"></script>
 
   <style>
@@ -83,7 +83,7 @@ if(!cat){
 
 const supa = window.supa;
 
-/* LOAD PRODUCTS FROM SUPABASE */
+/* 🔥 LOAD PRODUCTS FROM SUPABASE */
 (async function(){
   if(!cat) return;
   box.innerHTML = "Loading...";
@@ -101,7 +101,7 @@ const supa = window.supa;
   }
 
   if(!data || data.length === 0){
-    box.innerHTML="<p style='padding:20px'>Products not available in this category yet.</p>";
+    box.innerHTML="<p style='padding:20px'>Products coming soon 🚀</p>";
     return;
   }
 
@@ -140,7 +140,7 @@ const supa = window.supa;
       <h4>${translateProductName(p.name)}</h4>
       <div class="seller-name">by ${sellerName}</div>
       ${lowStockHtml}
-      ${showSellerBadge ? `<div class="seller-badge">&#11088; Seller</div>` : ""}
+      ${showSellerBadge ? `<div class="seller-badge">⭐ Seller</div>` : ""}
 
       ${
         p.mrp && p.mrp > p.price
@@ -301,8 +301,6 @@ function go(page){ location.href = page; }
 
 </body>
 </html>
-
-
 
 
 
