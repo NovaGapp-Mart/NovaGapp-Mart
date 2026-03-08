@@ -265,8 +265,9 @@ const CALL_SIGNAL_DEFAULT_TTL_SEC = 120;
 const CALL_SIGNAL_MIN_TTL_SEC = 15;
 const CALL_SIGNAL_MAX_TTL_SEC = 180;
 const PUSH_TOKEN_PER_USER_LIMIT = 30;
+const PREMIUM_SEAT_DEFAULT_LIMIT = 5;
+const PREMIUM_SEAT_MAX_LIMIT = 25;
 const callSignalStore = [];
-const pushTokenStore = new Map();
 
 function clampInt(value, min, max, fallback){
   const next = Math.floor(Number(value));
@@ -546,6 +547,11 @@ function isMissingColumnMessage(message){
   return text.includes("column") && text.includes("does not exist");
 }
 
+function isMissingRelationMessage(message){
+  const text = String(message || "").toLowerCase();
+  return text.includes("relation") && text.includes("does not exist");
+}
+
 async function appSupabaseFetch(pathname, options){
   if(!isAppSupabaseConfigured()){
     throw new Error("supabase_service_unavailable");
@@ -728,6 +734,236 @@ function buildSubscriptionView(row){
       ? "Payment verified and subscription auto activated."
       : "No active paid subscription."
   };
+}
+
+function isRecoverableSubscriptionLookupError(error){
+  if(!error) return false;
+  const message = String(error?.message || "");
+  return (
+    isMissingColumnMessage(message) ||
+    isMissingRelationMessage(message) ||
+    Number(error?.status) === 404
+  );
+}
+
+async function fetchSubscriptionStateRow(userId){
+  const cleanUserId = sanitizeUserId(userId);
+  if(!cleanUserId) return null;
+  const attempts = [
+    {
+      table: "subscription_state",
+      query: {
+        select: "*",
+        user_id: `eq.${cleanUserId}`,
+        limit: "1"
+      }
+    },
+    {
+      table: "subscription",
+      query: {
+        select: "*",
+        user_id: `eq.${cleanUserId}`,
+        order: "created_at.desc",
+        limit: "1"
+      }
+    }
+  ];
+  for(const attempt of attempts){
+    try{
+      const rows = await appSupabaseRest("GET", attempt.table, attempt.query);
+      if(Array.isArray(rows) && rows[0]){
+        return rows[0];
+      }
+    }catch(err){
+      if(!isRecoverableSubscriptionLookupError(err)){
+        throw err;
+      }
+    }
+  }
+  return null;
+}
+
+function normalizeJsonObject(value){
+  if(!value || typeof value !== "object" || Array.isArray(value)){
+    return {};
+  }
+  return value;
+}
+
+function sanitizeOptionalEmail(value){
+  return compactText(value, 180).toLowerCase();
+}
+
+function normalizePremiumSeatMember(raw, fallbackUserId){
+  const source = normalizeJsonObject(raw);
+  const userId = sanitizeUserId(source.user_id || source.userId || fallbackUserId);
+  if(!userId){
+    return null;
+  }
+  return {
+    user_id: userId,
+    email: sanitizeOptionalEmail(source.email || source.invitee_email || ""),
+    joined_at: compactText(source.joined_at || source.joinedAt, 80) || new Date().toISOString(),
+    role: String(source.role || "").trim().toLowerCase() === "owner" ? "owner" : "member"
+  };
+}
+
+function normalizePremiumSeatInvite(raw){
+  const source = normalizeJsonObject(raw);
+  const token = compactText(source.token, 220);
+  if(!token){
+    return null;
+  }
+  const redeemedByUserId = sanitizeUserId(source.redeemed_by_user_id || source.redeemedByUserId);
+  return {
+    token,
+    invitee_email: sanitizeOptionalEmail(source.invitee_email || source.email || ""),
+    created_at: compactText(source.created_at || source.createdAt, 80) || new Date().toISOString(),
+    redeemed_by_user_id: redeemedByUserId,
+    redeemed_at: compactText(source.redeemed_at || source.redeemedAt, 80),
+    is_active: source.is_active === false ? false : !redeemedByUserId
+  };
+}
+
+function buildPremiumSeatToken(ownerUserId){
+  const cleanOwnerId = sanitizeUserId(ownerUserId);
+  if(!cleanOwnerId){
+    return "";
+  }
+  return `seat_${cleanOwnerId}_${crypto.randomBytes(8).toString("hex")}`;
+}
+
+function extractPremiumSeatOwnerIdFromToken(token){
+  const clean = compactText(token, 220);
+  const match = clean.match(/^seat_([A-Za-z0-9_-]{1,120})_[a-f0-9]{16}$/);
+  return match && match[1] ? sanitizeUserId(match[1]) : "";
+}
+
+function buildPremiumSeatSnapshot(ownerRow){
+  const source = ownerRow && typeof ownerRow === "object" ? ownerRow : {};
+  const ownerUserId = sanitizeUserId(source.user_id);
+  const metadata = normalizeJsonObject(source.metadata);
+  const seatMeta = normalizeJsonObject(metadata.premium_seat);
+  const seatLimit = clampInt(seatMeta.seat_limit, 1, PREMIUM_SEAT_MAX_LIMIT, PREMIUM_SEAT_DEFAULT_LIMIT);
+  const members = [];
+  const seenMembers = new Set();
+  const pushMember = (memberLike, fallbackUserId, roleOverride) => {
+    const member = normalizePremiumSeatMember(memberLike, fallbackUserId);
+    if(!member || !member.user_id || seenMembers.has(member.user_id)){
+      return;
+    }
+    if(roleOverride){
+      member.role = roleOverride;
+    }
+    seenMembers.add(member.user_id);
+    members.push(member);
+  };
+  if(ownerUserId){
+    pushMember({
+      user_id: ownerUserId,
+      email: sanitizeOptionalEmail(metadata.owner_email || ""),
+      joined_at: source.started_at || source.updated_at || source.created_at || new Date().toISOString(),
+      role: "owner"
+    }, ownerUserId, "owner");
+  }
+  const rawMembers = Array.isArray(seatMeta.members) ? seatMeta.members : [];
+  rawMembers.forEach(member => pushMember(member, ""));
+  return {
+    owner_user_id: ownerUserId,
+    seat_limit: seatLimit,
+    members,
+    invites: (Array.isArray(seatMeta.invites) ? seatMeta.invites : [])
+      .map(normalizePremiumSeatInvite)
+      .filter(Boolean)
+  };
+}
+
+function buildSubscriptionUpsertPayload(existingRow, userId, patch){
+  const cleanUserId = sanitizeUserId(userId);
+  const baseRow = existingRow && typeof existingRow === "object" ? existingRow : {};
+  const fallbackView = buildSubscriptionView({
+    user_id: cleanUserId,
+    plan: baseRow.plan || "free",
+    status: baseRow.status || "free",
+    expires_at: baseRow.expires_at || null
+  });
+  const payload = {
+    user_id: cleanUserId,
+    plan: normalizeBackendPlan(
+      patch?.plan !== undefined
+        ? patch.plan
+        : (baseRow.plan || fallbackView.plan || "free")
+    ),
+    status: compactText(
+      patch?.status !== undefined
+        ? patch.status
+        : (baseRow.status || fallbackView.status || "free"),
+      40
+    ) || "free",
+    started_at: patch?.started_at !== undefined ? patch.started_at : (baseRow.started_at || null),
+    expires_at: patch?.expires_at !== undefined ? patch.expires_at : (baseRow.expires_at || null),
+    source: compactText(
+      patch?.source !== undefined ? patch.source : baseRow.source,
+      80
+    ),
+    payment_id: compactText(
+      patch?.payment_id !== undefined ? patch.payment_id : baseRow.payment_id,
+      120
+    ),
+    order_id: compactText(
+      patch?.order_id !== undefined ? patch.order_id : baseRow.order_id,
+      120
+    ),
+    amount_paise: Math.round(safeNumber(
+      patch?.amount_paise !== undefined ? patch.amount_paise : baseRow.amount_paise
+    )),
+    currency: String(
+      patch?.currency !== undefined ? patch.currency : (baseRow.currency || "INR")
+    ).trim().toUpperCase() || "INR",
+    metadata: normalizeJsonObject(
+      patch?.metadata !== undefined ? patch.metadata : baseRow.metadata
+    ),
+    updated_at: patch?.updated_at || new Date().toISOString()
+  };
+  if(baseRow.created_at){
+    payload.created_at = baseRow.created_at;
+  }
+  if(patch?.item_purchased !== undefined){
+    payload.item_purchased = compactText(patch.item_purchased, 220);
+  }
+  if(patch?.paid_at !== undefined){
+    payload.paid_at = patch.paid_at || null;
+  }
+  return payload;
+}
+
+async function upsertSubscriptionStateRow(existingRow, userId, patch){
+  const bodyRow = buildSubscriptionUpsertPayload(existingRow, userId, patch);
+  try{
+    const rows = await appSupabaseRest("POST", "subscription_state", {
+      on_conflict: "user_id",
+      select: "*"
+    }, {
+      body: [bodyRow],
+      prefer: "resolution=merge-duplicates,return=representation"
+    });
+    return Array.isArray(rows) && rows[0] ? rows[0] : bodyRow;
+  }catch(err){
+    if(!isMissingColumnMessage(err?.message)){
+      throw err;
+    }
+    const fallbackRow = { ...bodyRow };
+    delete fallbackRow.item_purchased;
+    delete fallbackRow.paid_at;
+    const rows = await appSupabaseRest("POST", "subscription_state", {
+      on_conflict: "user_id",
+      select: "*"
+    }, {
+      body: [fallbackRow],
+      prefer: "resolution=merge-duplicates,return=representation"
+    });
+    return Array.isArray(rows) && rows[0] ? rows[0] : fallbackRow;
+  }
 }
 
 function buildOrderItemPurchased(orderLike){
@@ -3095,10 +3331,35 @@ app.post("/api/payment/razorpay/verify", async (req, res) => {
         }
       }
 
+      const isPersistedPayment = (row) => {
+        const normalizedStatus = String(row?.payment_status || "").trim().toLowerCase();
+        return Boolean(row) &&
+          String(row?.payment_id || "").trim() === paymentId &&
+          (normalizedStatus === "paid" || Boolean(row?.paid));
+      };
+
       if(!orderPayment){
         orderPayment = await fetchSingleOrderById(appOrderId);
       }
-    }
+      if(!isPersistedPayment(orderPayment)){
+        const repaired = await patchOrderRecordWithFallback(appOrderId, primaryPatch, fallbackPatch);
+        if(repaired?.order){
+          orderPayment = repaired.order;
+        }
+        if(!persistenceWarning && repaired?.warning){
+          persistenceWarning = repaired.warning;
+        }
+      }
+      if(!isPersistedPayment(orderPayment)){
+        orderPayment = await fetchSingleOrderById(appOrderId);
+      }
+      if(!isPersistedPayment(orderPayment)){
+        return res.status(500).json({
+          ok:false,
+          error:"order_payment_persistence_failed",
+          message:"Payment verified but order status could not be saved."
+        });
+      }    }
 
     return res.json({
       ok: true,
@@ -3361,19 +3622,351 @@ app.get("/api/subscription/status", async (req, res) => {
       return res.status(400).json({ ok:false, error:"user_id_required" });
     }
 
-    const rows = await appSupabaseRest("GET", "subscription_state", {
-      select: "*",
-      user_id: `eq.${userId}`,
-      limit: "1"
-    });
-    const row = Array.isArray(rows) && rows[0]
-      ? rows[0]
-      : { user_id:userId, plan:"free", status:"free" };
+    const fallbackRow = { user_id:userId, plan:"free", status:"free" };
+    if(!isAppSupabaseConfigured()){
+      return res.json({
+        ok:true,
+        subscription: buildSubscriptionView(fallbackRow),
+        lookup_warning: "supabase_service_unavailable"
+      });
+    }
 
-    return res.json({ ok:true, subscription: buildSubscriptionView(row) });
+    let row = null;
+    let lookupWarning = "";
+    try{
+      row = await fetchSubscriptionStateRow(userId);
+    }catch(err){
+      lookupWarning = String(err?.message || "subscription_lookup_failed");
+      console.error("subscription_status_lookup_warning:", err?.stack || err);
+    }
+
+    return res.json({
+      ok:true,
+      subscription: buildSubscriptionView(row || fallbackRow),
+      lookup_warning: lookupWarning || undefined
+    });
   }catch(err){
     console.error("subscription_status_error:", err?.stack || err);
-    return res.status(500).json({ ok:false, error:"subscription_status_failed", message:String(err?.message || "Unable to load subscription.") });
+    const fallbackUserId = sanitizeUserId(req.query?.user_id || req.query?.userId);
+    return res.json({
+      ok:true,
+      subscription: buildSubscriptionView({ user_id:fallbackUserId, plan:"free", status:"free" }),
+      lookup_warning: String(err?.message || "subscription_status_fallback")
+    });
+  }
+});
+
+app.options("/api/premium/seats", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.sendStatus(204);
+});
+
+app.options("/api/premium/invite/create", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.sendStatus(204);
+});
+
+app.options("/api/premium/invite/redeem", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.sendStatus(204);
+});
+
+app.get("/api/premium/seats", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  try{
+    const requestedUserId = sanitizeUserId(req.query?.user_id || req.query?.userId);
+    if(!requestedUserId){
+      return res.status(400).json({ ok:false, error:"user_id_required" });
+    }
+
+    const accessToken = readBearerToken(req);
+    if(accessToken){
+      try{
+        const user = await resolveSupabaseUser(accessToken);
+        const authUserId = sanitizeUserId(user?.id);
+        if(!authUserId){
+          return res.status(401).json({ ok:false, error:"auth_invalid" });
+        }
+        if(authUserId !== requestedUserId){
+          return res.status(403).json({ ok:false, error:"premium_user_mismatch" });
+        }
+      }catch(err){
+        console.error("premium_seats_auth_error:", err?.stack || err);
+        return res.status(401).json({ ok:false, error:"auth_invalid" });
+      }
+    }
+
+    const viewerRow = await fetchSubscriptionStateRow(requestedUserId);
+    const viewerView = buildSubscriptionView(viewerRow || { user_id:requestedUserId, plan:"free", status:"free" });
+    const viewerMetadata = normalizeJsonObject(viewerRow?.metadata);
+    const membership = normalizeJsonObject(viewerMetadata.premium_seat_membership);
+
+    let ownerUserId = sanitizeUserId(membership.owner_user_id) || requestedUserId;
+    let ownerRow = ownerUserId === requestedUserId ? viewerRow : await fetchSubscriptionStateRow(ownerUserId);
+    const ownerView = buildSubscriptionView(ownerRow || { user_id:ownerUserId, plan:"free", status:"free" });
+    if(ownerView.plan !== "4000" && viewerView.plan === "4000"){
+      ownerUserId = requestedUserId;
+      ownerRow = viewerRow;
+    }
+    if(!ownerUserId){
+      ownerUserId = requestedUserId;
+    }
+
+    const seatSnapshot = buildPremiumSeatSnapshot(ownerRow || {
+      user_id: ownerUserId,
+      metadata: {}
+    });
+    const members = Array.isArray(seatSnapshot.members) ? seatSnapshot.members.slice() : [];
+    if(!members.length && ownerUserId){
+      const ownerMember = normalizePremiumSeatMember({
+        user_id: ownerUserId,
+        role: "owner"
+      }, ownerUserId);
+      if(ownerMember) members.push(ownerMember);
+    }
+
+    return res.json({
+      ok:true,
+      owner_user_id: ownerUserId,
+      seat: {
+        seat_limit: seatSnapshot.seat_limit || PREMIUM_SEAT_DEFAULT_LIMIT,
+        members
+      },
+      subscription: viewerView
+    });
+  }catch(err){
+    console.error("premium_seats_error:", err?.stack || err);
+    return res.status(500).json({
+      ok:false,
+      error:"premium_seats_failed",
+      message:String(err?.message || "Unable to load premium seat data.")
+    });
+  }
+});
+
+app.post("/api/premium/invite/create", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const auth = await requireSupabaseUser(req, res);
+  if(!auth) return;
+
+  try{
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const ownerUserId = sanitizeUserId(body.owner_user_id || body.ownerUserId);
+    if(ownerUserId && ownerUserId !== auth.userId){
+      return res.status(403).json({ ok:false, error:"premium_user_mismatch" });
+    }
+
+    const ownerRow = await fetchSubscriptionStateRow(auth.userId);
+    const ownerView = buildSubscriptionView(ownerRow || { user_id:auth.userId, plan:"free", status:"free" });
+    if(ownerView.plan !== "4000"){
+      return res.status(403).json({ ok:false, error:"business_plan_required" });
+    }
+
+    const nowIso = new Date().toISOString();
+    const inviteeEmail = sanitizeOptionalEmail(body.invitee_email || body.inviteeEmail || "");
+    const seatSnapshot = buildPremiumSeatSnapshot(ownerRow || {
+      user_id: auth.userId,
+      plan: "4000",
+      status: "active",
+      metadata: {}
+    });
+    if(Array.isArray(seatSnapshot.members) && seatSnapshot.members.length >= seatSnapshot.seat_limit){
+      return res.status(409).json({ ok:false, error:"seat_limit_reached" });
+    }
+
+    const invite = {
+      token: buildPremiumSeatToken(auth.userId),
+      invitee_email: inviteeEmail,
+      created_at: nowIso,
+      redeemed_by_user_id: "",
+      redeemed_at: "",
+      is_active: true
+    };
+    const ownerMetadata = normalizeJsonObject(ownerRow?.metadata);
+    const nextSeat = {
+      owner_user_id: auth.userId,
+      seat_limit: seatSnapshot.seat_limit || PREMIUM_SEAT_DEFAULT_LIMIT,
+      members: Array.isArray(seatSnapshot.members) ? seatSnapshot.members : [],
+      invites: seatSnapshot.invites
+        .filter(entry => entry?.token && !entry?.redeemed_by_user_id)
+        .concat([invite]),
+      updated_at: nowIso
+    };
+    const nextMetadata = {
+      ...ownerMetadata,
+      owner_email: sanitizeOptionalEmail(auth.user?.email || ownerMetadata.owner_email || ""),
+      premium_seat: nextSeat
+    };
+    const savedRow = await upsertSubscriptionStateRow(ownerRow || {
+      user_id: auth.userId,
+      plan: ownerView.plan,
+      status: ownerView.status
+    }, auth.userId, {
+      plan: ownerView.plan,
+      status: ownerView.status,
+      source: ownerRow?.source || "subscription_checkout",
+      metadata: nextMetadata,
+      updated_at: nowIso
+    });
+    const savedSeat = buildPremiumSeatSnapshot(savedRow);
+
+    return res.json({
+      ok:true,
+      owner_user_id: auth.userId,
+      invite,
+      seat: {
+        seat_limit: savedSeat.seat_limit || PREMIUM_SEAT_DEFAULT_LIMIT,
+        members: savedSeat.members
+      }
+    });
+  }catch(err){
+    console.error("premium_invite_create_error:", err?.stack || err);
+    return res.status(400).json({
+      ok:false,
+      error:"premium_invite_create_failed",
+      message:String(err?.message || "Unable to create premium invite.")
+    });
+  }
+});
+
+app.post("/api/premium/invite/redeem", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const auth = await requireSupabaseUser(req, res);
+  if(!auth) return;
+
+  try{
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const requestedUserId = sanitizeUserId(body.user_id || body.userId);
+    if(requestedUserId && requestedUserId !== auth.userId){
+      return res.status(403).json({ ok:false, error:"premium_user_mismatch" });
+    }
+
+    const token = compactText(body.token, 220);
+    if(!token){
+      return res.status(400).json({ ok:false, error:"invite_token_required" });
+    }
+    const ownerUserId = extractPremiumSeatOwnerIdFromToken(token);
+    if(!ownerUserId){
+      return res.status(400).json({ ok:false, error:"invalid_invite_token" });
+    }
+    if(ownerUserId === auth.userId){
+      return res.status(400).json({ ok:false, error:"owner_cannot_redeem_invite" });
+    }
+
+    const ownerRow = await fetchSubscriptionStateRow(ownerUserId);
+    if(!ownerRow){
+      return res.status(404).json({ ok:false, error:"invite_owner_not_found" });
+    }
+    const ownerView = buildSubscriptionView(ownerRow);
+    if(ownerView.plan !== "4000"){
+      return res.status(409).json({ ok:false, error:"owner_plan_inactive" });
+    }
+
+    const seatSnapshot = buildPremiumSeatSnapshot(ownerRow);
+    const inviteIndex = seatSnapshot.invites.findIndex(entry => entry?.token === token);
+    if(inviteIndex < 0){
+      return res.status(404).json({ ok:false, error:"invite_not_found" });
+    }
+    const invite = seatSnapshot.invites[inviteIndex];
+    const inviteEmail = sanitizeOptionalEmail(invite?.invitee_email || "");
+    const memberEmail = sanitizeOptionalEmail(body.email || auth.user?.email || "");
+    if(inviteEmail && memberEmail && inviteEmail !== memberEmail){
+      return res.status(403).json({ ok:false, error:"invite_email_mismatch" });
+    }
+    if(invite?.redeemed_by_user_id && invite.redeemed_by_user_id !== auth.userId){
+      return res.status(409).json({ ok:false, error:"invite_already_redeemed" });
+    }
+
+    const nowIso = new Date().toISOString();
+    const members = Array.isArray(seatSnapshot.members) ? seatSnapshot.members.slice() : [];
+    const existingMember = members.find(entry => sanitizeUserId(entry?.user_id) === auth.userId);
+    if(!existingMember && members.length >= seatSnapshot.seat_limit){
+      return res.status(409).json({ ok:false, error:"seat_limit_reached" });
+    }
+    if(!existingMember){
+      const nextMember = normalizePremiumSeatMember({
+        user_id: auth.userId,
+        email: memberEmail,
+        joined_at: nowIso,
+        role: "member"
+      }, auth.userId);
+      if(nextMember) members.push(nextMember);
+    }
+
+    const invites = seatSnapshot.invites.slice();
+    invites[inviteIndex] = {
+      ...invite,
+      redeemed_by_user_id: auth.userId,
+      redeemed_at: nowIso,
+      is_active: false
+    };
+
+    const ownerMetadata = normalizeJsonObject(ownerRow?.metadata);
+    const nextOwnerMetadata = {
+      ...ownerMetadata,
+      premium_seat: {
+        owner_user_id: ownerUserId,
+        seat_limit: seatSnapshot.seat_limit || PREMIUM_SEAT_DEFAULT_LIMIT,
+        members,
+        invites,
+        updated_at: nowIso
+      }
+    };
+    const savedOwnerRow = await upsertSubscriptionStateRow(ownerRow, ownerUserId, {
+      plan: ownerView.plan,
+      status: ownerView.status,
+      source: ownerRow?.source || "subscription_checkout",
+      metadata: nextOwnerMetadata,
+      updated_at: nowIso
+    });
+
+    const memberRow = await fetchSubscriptionStateRow(auth.userId);
+    const memberView = buildSubscriptionView(memberRow || { user_id:auth.userId, plan:"free", status:"free" });
+    const memberMetadata = normalizeJsonObject(memberRow?.metadata);
+    const membership = {
+      owner_user_id: ownerUserId,
+      token,
+      joined_at: nowIso,
+      email: memberEmail
+    };
+    await upsertSubscriptionStateRow(memberRow || {
+      user_id: auth.userId,
+      plan: memberView.plan,
+      status: memberView.status
+    }, auth.userId, {
+      plan: memberView.plan,
+      status: memberView.status,
+      source: memberRow?.source || "premium_invite",
+      metadata: {
+        ...memberMetadata,
+        premium_seat_membership: membership
+      },
+      updated_at: nowIso
+    });
+
+    const savedSeat = buildPremiumSeatSnapshot(savedOwnerRow);
+    return res.json({
+      ok:true,
+      owner_user_id: ownerUserId,
+      seat: {
+        seat_limit: savedSeat.seat_limit || PREMIUM_SEAT_DEFAULT_LIMIT,
+        members: savedSeat.members
+      },
+      membership
+    });
+  }catch(err){
+    console.error("premium_invite_redeem_error:", err?.stack || err);
+    return res.status(400).json({
+      ok:false,
+      error:"premium_invite_redeem_failed",
+      message:String(err?.message || "Unable to redeem premium invite.")
+    });
   }
 });
 
@@ -4768,13 +5361,13 @@ app.get("/api/verification/status", (req, res) => {
 function startServer(){
   try{
     const server = app.listen(PORT, () => {
-      console.log("Server running on http://localhost:3000");
+      console.log(`Server running on port ${PORT}`);
     });
 
     server.on("error", (err) => {
       console.error("Server startup error:", err?.stack || err);
       if(err && err.code === "EADDRINUSE"){
-        console.error("Port 3000 is already in use.");
+        console.error(`Port ${PORT} is already in use.`);
       }
       process.exit(1);
     });

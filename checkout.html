@@ -693,12 +693,22 @@ function renderCart(){
 renderCart();
 document.addEventListener("ratesUpdated", renderCart);
 
+function isUnsafeAutomationLoopback(raw){
+  const value = String(raw || "").trim();
+  return /^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?$/i.test(value) && String(location.port || "") !== "3000";
+}
+
+function shouldUseRelativeAutomationApi(){
+  return /^https?:\/\//i.test(location.origin || "") && !isUnsafeAutomationLoopback(location.origin);
+}
+
 function buildAutomationApiBases(){
-  const out = [""];
+  const out = shouldUseRelativeAutomationApi() ? [""] : [];
   const push = (raw) => {
     const val = String(raw || "").trim().replace(/\/+$/g, "");
     if(!val) return;
     if(!/^https?:\/\//i.test(val)) return;
+    if(isUnsafeAutomationLoopback(val)) return;
     if(!out.includes(val)) out.push(val);
   };
   push(window.CONTEST_API_BASE || window.API_BASE || "");
@@ -706,7 +716,7 @@ function buildAutomationApiBases(){
     push(localStorage.getItem("contest_api_base"));
     push(localStorage.getItem("api_base"));
   }catch(_){ }
-  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+  if(shouldUseRelativeAutomationApi()) push(location.origin);
   push("https://novagapp-mart.onrender.com");
   return out;
 }

@@ -322,12 +322,22 @@ function getPlanLabel(planCode){
   return "FREE";
 }
 
+function isUnsafeAutomationLoopback(raw){
+  const value = String(raw || "").trim();
+  return /^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?$/i.test(value) && String(location.port || "") !== "3000";
+}
+
+function shouldUseRelativeAutomationApi(){
+  return /^https?:\/\//i.test(location.origin || "") && !isUnsafeAutomationLoopback(location.origin);
+}
+
 function buildApiBases(){
   const out = [];
   const push = (raw) => {
     const value = String(raw || "").trim().replace(/\/+$/g, "");
     if(!value) return;
     if(!/^https?:\/\//i.test(value)) return;
+    if(isUnsafeAutomationLoopback(value)) return;
     if(!out.includes(value)) out.push(value);
   };
   try{
@@ -338,9 +348,15 @@ function buildApiBases(){
     push(sessionStorage.getItem("contest_api_base"));
     push(sessionStorage.getItem("api_base"));
   }catch(_){ }
-  if(/^https?:\/\//i.test(location.origin || "")) push(location.origin);
+  if(shouldUseRelativeAutomationApi()) push(location.origin);
   push("https://novagapp-mart.onrender.com");
   return out;
+}
+
+function automationApiUrl(path){
+  const cleanPath = String(path || "").trim();
+  const preferredBase = buildApiBases()[0] || "https://novagapp-mart.onrender.com";
+  return `${shouldUseRelativeAutomationApi() ? "" : preferredBase}${cleanPath}`;
 }
 
 async function getAutomationAccessToken(){
@@ -357,7 +373,7 @@ async function callAutomationApi(path, options){
   const method = req.method || "GET";
   const body = req.body;
   const accessToken = await getAutomationAccessToken();
-  const candidates = [""].concat(buildApiBases());
+  const candidates = (shouldUseRelativeAutomationApi() ? [""] : []).concat(buildApiBases());
   for(const base of candidates){
     const url = `${base}${path}`;
     try{
@@ -485,7 +501,7 @@ function missingColumnError(error){
 
 async function loadRazorpayConfig(){
   try{
-    const res = await fetch("/api/payment/config", { cache:"no-store" });
+    const res = await fetch(automationApiUrl("/api/payment/config"), { cache:"no-store" });
     const payload = await res.json().catch(()=>null);
     if(res.ok && payload?.ok && payload?.ready && payload?.key_id){
       razorpayKeyId = String(payload.key_id || "").trim();
@@ -581,7 +597,7 @@ async function createPaymentOrder(amountInr, plan, baseAmount, baseCurrency){
     "User"
   );
 
-  const res = await fetch("/api/payment/razorpay/order", {
+  const res = await fetch(automationApiUrl("/api/payment/razorpay/order"), {
     method:"POST",
     headers:{ "Content-Type":"application/json" },
     body: JSON.stringify({
@@ -608,7 +624,7 @@ async function createPaymentOrder(amountInr, plan, baseAmount, baseCurrency){
 }
 
 async function verifyPayment(razorpayResponse){
-  const res = await fetch("/api/payment/razorpay/verify", {
+  const res = await fetch(automationApiUrl("/api/payment/razorpay/verify"), {
     method:"POST",
     headers:{ "Content-Type":"application/json" },
     body: JSON.stringify({
