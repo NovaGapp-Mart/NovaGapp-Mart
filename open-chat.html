@@ -300,10 +300,12 @@
   </header>
 
   <div id="chatHeaderMenu" class="header-menu">
-    <button type="button" onclick="showStarredMessages()">Starred Messages</button>
-    <button type="button" onclick="clearAllChat()">Clear All Chat</button>
-    <button type="button" onclick="blockCurrentUser()">Block User</button>
-    <button type="button" onclick="openProfile()">Info</button>
+    <button id="menuStarredBtn" type="button" onclick="showStarredMessages()">Starred Messages</button>
+    <button id="menuClearChatBtn" type="button" onclick="clearAllChat()">Clear All Chat</button>
+    <button id="menuBlockUserBtn" type="button" onclick="blockCurrentUser()">Block User</button>
+    <button id="menuLeaveGroupBtn" class="hidden" type="button" onclick="leaveCurrentGroup()">Leave Group</button>
+    <button id="menuDeleteGroupBtn" class="hidden" type="button" onclick="deleteCurrentGroup()">Delete Group</button>
+    <button id="menuInfoBtn" type="button" onclick="openProfile()">Info</button>
   </div>
 
   <div id="blockedBanner" class="blocked-banner">You blocked this user. Messaging and calls are disabled.</div>

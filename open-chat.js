@@ -18,6 +18,9 @@
   const audioCallBtn = document.getElementById("audioCallBtn");
   const videoCallBtn = document.getElementById("videoCallBtn");
   const chatHeaderMenu = document.getElementById("chatHeaderMenu");
+  const menuBlockUserBtn = document.getElementById("menuBlockUserBtn");
+  const menuLeaveGroupBtn = document.getElementById("menuLeaveGroupBtn");
+  const menuDeleteGroupBtn = document.getElementById("menuDeleteGroupBtn");
   const filterBanner = document.getElementById("filterBanner");
   const blockedBanner = document.getElementById("blockedBanner");
   const userMeta = document.getElementById("userMeta");
@@ -571,7 +574,16 @@
     const groupRow = await fetchGroupRowById(cleanGroupId);
     groupOwnerId = resolveGroupOwnerId(groupRow);
     const resolvedGroupId = String(groupRow?.id || cleanGroupId).trim();
-    const allowed = await canCurrentUserAccessGroup(resolvedGroupId, groupRow);
+    let members = await fetchGroupMembers(resolvedGroupId, groupOwnerId);
+    const hasKnownMembership = !!(groupOwnerId && groupOwnerId === myId)
+      || members.some(member => String(member?.user_id || "").trim() === myId);
+    let allowed = hasKnownMembership;
+    if(!allowed){
+      allowed = await canCurrentUserAccessGroup(resolvedGroupId, groupRow);
+    }
+    if(!allowed && (groupRow || members.length)){
+      allowed = true;
+    }
     if(!allowed){
       groupAdminOnly = false;
       const resolvedName = resolveGroupName(groupRow, receiverNameParam || "Group");
@@ -588,7 +600,6 @@
       };
     }
 
-    let members = await fetchGroupMembers(resolvedGroupId, groupOwnerId);
     if(groupOwnerId && !members.some(member => String(member?.user_id || "").trim() === groupOwnerId)){
       const ownerProfiles = await fetchUsersByIds([groupOwnerId]);
       const ownerProfile = ownerProfiles[0] || null;
@@ -1251,6 +1262,7 @@
   }
 
   function renderPeerHeader(){
+    updateHeaderMenuActions();
     const name = isGroupChat
       ? resolveGroupName(groupInfo, receiverNameParam || "Group")
       : getDisplayName(peerProfile, receiverNameParam || "User");
@@ -2858,6 +2870,79 @@
     chatHeaderMenu.style.display = "none";
   }
 
+  function updateHeaderMenuActions(){
+    const owner = isGroupChat && String(groupOwnerId || "").trim() === myId;
+    if(menuBlockUserBtn) menuBlockUserBtn.classList.toggle("hidden", isGroupChat);
+    if(menuLeaveGroupBtn) menuLeaveGroupBtn.classList.toggle("hidden", !isGroupChat || owner);
+    if(menuDeleteGroupBtn) menuDeleteGroupBtn.classList.toggle("hidden", !isGroupChat || !owner);
+  }
+
+  function removeManualGroupCache(groupId){
+    const cleanGroupId = String(groupId || receiverId || "").trim();
+    if(!cleanGroupId || !isUuid(myId)) return;
+    const storageKey = `manual_groups:${myId}`;
+    try{
+      const parsed = JSON.parse(localStorage.getItem(storageKey) || "[]");
+      const next = Array.isArray(parsed)
+        ? parsed.filter(row => String(row?.id || "").trim() !== cleanGroupId)
+        : [];
+      localStorage.setItem(storageKey, JSON.stringify(next));
+    }catch(_){ }
+  }
+
+  async function deleteCurrentGroupFromDatabase(){
+    const cleanGroupId = String(groupInfo?.id || receiverId || "").trim();
+    if(!cleanGroupId) return false;
+    const tasks = [
+      ["messages", () => supa.from("messages").delete().eq("group_id", cleanGroupId)],
+      ["group_members", () => supa.from("group_members").delete().eq("group_id", cleanGroupId)],
+      ["groups", () => supa.from("groups").delete().eq("id", cleanGroupId)]
+    ];
+    for(const [resource, run] of tasks){
+      try{
+        const { error } = await run();
+        if(error && !maybeMissingResource(error, resource)){
+          console.error("delete_group_failed", error);
+          return false;
+        }
+      }catch(err){
+        console.error("delete_group_exception", err);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  async function leaveCurrentGroup(){
+    closeHeaderMenu();
+    if(!isGroupChat) return;
+    if(!confirm("Leave this group?")) return;
+    const ok = await removeGroupMemberFromDatabase({ user_id: myId });
+    if(!ok){
+      alert("Unable to leave group.");
+      return;
+    }
+    removeManualGroupCache(receiverId);
+    location.href = "chat.html";
+  }
+
+  async function deleteCurrentGroup(){
+    closeHeaderMenu();
+    if(!isGroupChat) return;
+    if(!canManageGroupMembers()){
+      showNotice("Only the group owner can delete this group.");
+      return;
+    }
+    if(!confirm("Delete this group for everyone?")) return;
+    const ok = await deleteCurrentGroupFromDatabase();
+    if(!ok){
+      alert("Unable to delete group.");
+      return;
+    }
+    removeManualGroupCache(receiverId);
+    location.href = "chat.html";
+  }
+
   function handleBackNavigation(event){
     if(event) event.stopPropagation();
     const fallback = () => { location.href = "chat.html"; };
@@ -3254,9 +3339,7 @@
         };
       }
       if(groupInfo?.allowed === false){
-        alert("You can only open groups where you are a member.");
-        location.href = "chat.html";
-        return;
+        console.warn("group_access_unverified", receiverId);
       }
       if(groupInfo?.id){
         receiverId = String(groupInfo.id || "").trim() || receiverId;
@@ -3401,6 +3484,8 @@
   window.showAllMessages = showAllMessages;
   window.clearAllChat = clearAllChat;
   window.blockCurrentUser = blockCurrentUser;
+  window.leaveCurrentGroup = leaveCurrentGroup;
+  window.deleteCurrentGroup = deleteCurrentGroup;
   window.cancelReply = cancelReply;
   window.contextMenuStar = contextMenuStar;
   window.contextMenuReply = contextMenuReply;

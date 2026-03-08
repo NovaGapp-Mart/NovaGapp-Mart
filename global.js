@@ -700,6 +700,82 @@ window.translateProductName = function(name){
 })();
 
 /* =====================================
+   SWIPE TAB NAVIGATION
+===================================== */
+(function(){
+  const order = ["chat.html", "post.html", "m-videos.html", "reel.html"];
+  const current = String((location.pathname || "").split("/").pop() || "").toLowerCase();
+  const currentIndex = order.indexOf(current);
+  if(currentIndex === -1) return;
+
+  let tracking = false;
+  let startX = 0;
+  let startY = 0;
+  let startAt = 0;
+
+  function isInteractiveTarget(target){
+    if(!(target instanceof Element)) return false;
+    return !!target.closest([
+      "input",
+      "textarea",
+      "button",
+      "a",
+      "select",
+      "label",
+      "video",
+      "audio",
+      "[contenteditable='true']",
+      ".nav",
+      ".bottom-nav",
+      ".mv-footer-nav",
+      ".comments-panel",
+      ".comments-backdrop",
+      "#profileOverlay",
+      "#chatHeaderMenu",
+      "[role='button']"
+    ].join(","));
+  }
+
+  function navigateBy(offset){
+    const target = order[currentIndex + offset];
+    if(!target) return;
+    location.href = target;
+  }
+
+  document.addEventListener("touchstart", (event) => {
+    if(event.touches.length !== 1) return;
+    if(isInteractiveTarget(event.target)) return;
+    const touch = event.touches[0];
+    tracking = true;
+    startX = Number(touch.clientX || 0);
+    startY = Number(touch.clientY || 0);
+    startAt = Date.now();
+  }, { passive:true });
+
+  document.addEventListener("touchcancel", () => {
+    tracking = false;
+  }, { passive:true });
+
+  document.addEventListener("touchend", (event) => {
+    if(!tracking) return;
+    tracking = false;
+    const touch = event.changedTouches && event.changedTouches[0];
+    if(!touch) return;
+    const dx = Number(touch.clientX || 0) - startX;
+    const dy = Number(touch.clientY || 0) - startY;
+    const elapsed = Date.now() - startAt;
+    if(elapsed > 900) return;
+    if(Math.abs(dx) < 72) return;
+    if(Math.abs(dy) > Math.abs(dx) * 0.65) return;
+    if(dx < 0){
+      navigateBy(1);
+      return;
+    }
+    navigateBy(-1);
+  }, { passive:true });
+})();
+
+/* =====================================
    FIREBASE PUSH BOOTSTRAP
 ===================================== */
 (function(){

@@ -284,9 +284,9 @@
         </div>
         <div class="top-tabs font-bold text-[11px] pb-2 uppercase">
             <div class="border-b-4 border-white pb-1 px-4 text-white">CHATS</div>
-            <div class="opacity-70 pb-1 px-4" onclick="location.href='posts.html'">POST</div>
-            <div class="opacity-70 pb-1 px-4" onclick="location.href='videos.html'">VIDEOS</div>
-            <div class="opacity-70 pb-1 px-4" onclick="location.href='reels.html'">REEL</div>
+            <div class="opacity-70 pb-1 px-4" onclick="location.href='post.html'">POST</div>
+            <div class="opacity-70 pb-1 px-4" onclick="location.href='m-videos.html'">VIDEOS</div>
+            <div class="opacity-70 pb-1 px-4" onclick="location.href='reel.html'">REEL</div>
         </div>
     </header>
 
@@ -338,6 +338,7 @@
         let realtimeListChannel = null;
         let chatCache = [];
         let dbUnreadByKey = new Map();
+        let conversationSummaryByKey = new Map();
         let selectedGroupMemberIds = new Set();
         let pendingReelShare = null;
         const manualChatTargets = new Map();
@@ -667,6 +668,149 @@
             return text.slice(0, limit).trim() + "...";
         }
 
+        function escapeHtml(value){
+            return String(value || "")
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#39;");
+        }
+
+        function toEpochMs(value){
+            const num = Number(value);
+            if(Number.isFinite(num) && num > 0) return num;
+            const ms = Date.parse(String(value || ""));
+            return Number.isFinite(ms) ? ms : 0;
+        }
+
+        function normalizePreviewText(value){
+            return String(value || "").replace(/\s+/g, " ").trim();
+        }
+
+        function parseAttachmentUrls(value){
+            if(Array.isArray(value)){
+                return value.map(item => String(item || "").trim()).filter(Boolean);
+            }
+            const raw = String(value || "").trim();
+            if(!raw) return [];
+            if(raw.startsWith("[")){
+                try{
+                    const parsed = JSON.parse(raw);
+                    if(Array.isArray(parsed)){
+                        return parsed.map(item => String(item || "").trim()).filter(Boolean);
+                    }
+                }catch(_){ }
+            }
+            return [raw];
+        }
+
+        function isVideoAttachmentUrl(value){
+            const text = String(value || "").trim().toLowerCase();
+            if(!text) return false;
+            if(/\.(mp4|mov|m4v|webm|ogg|avi|mkv|3gp)(\?|$)/i.test(text)) return true;
+            return /\/video\//i.test(text);
+        }
+
+        function formatConversationPreview(row){
+            const source = row && typeof row === "object" ? row : {};
+            if(source?.deleted_for_everyone === true){
+                const deleter = normalizePreviewText(source?.deleted_by_name);
+                return deleter ? `This message was deleted by ${deleter}` : "This message was deleted";
+            }
+
+            const attachments = parseAttachmentUrls(source?.attachment_urls);
+            const singleAttachment = normalizePreviewText(source?.attachment_url || source?.media_url || source?.file_url);
+            if(singleAttachment && !attachments.includes(singleAttachment)){
+                attachments.push(singleAttachment);
+            }
+            if(attachments.length > 1){
+                return `${attachments.length} attachments`;
+            }
+            if(attachments.length === 1){
+                const type = normalizePreviewText(source?.message_type || source?.media_type).toLowerCase();
+                if(type === "video" || isVideoAttachmentUrl(attachments[0])){
+                    return "Video attachment";
+                }
+                if(type === "image"){
+                    return "Photo attachment";
+                }
+                return "Attachment";
+            }
+
+            const content = normalizePreviewText(source?.content || source?.message || "");
+            if(content) return content;
+
+            const type = normalizePreviewText(source?.message_type || source?.media_type).toLowerCase();
+            if(type === "call_missed") return "Missed call";
+            if(type === "call_audio") return "Audio call";
+            if(type === "call_video") return "Video call";
+            if(type === "system") return "System message";
+            return "No messages yet";
+        }
+
+        function buildConversationSummaryFromRow(row){
+            return {
+                preview: truncateText(formatConversationPreview(row), 120) || "No messages yet",
+                sortTs: toEpochMs(row?.created_at),
+                createdAt: String(row?.created_at || "").trim()
+            };
+        }
+
+        function mergeConversationSummary(map, key, row){
+            const cleanKey = String(key || "").trim();
+            if(!cleanKey) return;
+            const next = buildConversationSummaryFromRow(row);
+            const prev = map.get(cleanKey);
+            if(prev && Number(prev.sortTs || 0) >= Number(next.sortTs || 0)) return;
+            map.set(cleanKey, next);
+        }
+
+        function chunkArray(items, size){
+            const out = [];
+            const list = Array.isArray(items) ? items : [];
+            const chunkSize = Math.max(1, Number(size) || 1);
+            for(let index = 0; index < list.length; index += chunkSize){
+                out.push(list.slice(index, index + chunkSize));
+            }
+            return out;
+        }
+
+        function getUnreadCountForItem(item){
+            const key = itemKey(item);
+            const localUnread = getLocalUnreadCountForKey(key);
+            const dbUnread = Number(dbUnreadByKey.get(key) || 0);
+            return Math.max(localUnread, dbUnread);
+        }
+
+        function compareChatItemsByPriority(a, b){
+            const aUnread = getUnreadCountForItem(a);
+            const bUnread = getUnreadCountForItem(b);
+            if((bUnread > 0) !== (aUnread > 0)){
+                return (bUnread > 0 ? 1 : 0) - (aUnread > 0 ? 1 : 0);
+            }
+            if(bUnread !== aUnread){
+                return bUnread - aUnread;
+            }
+            const diff = Number(b?.sortTs || 0) - Number(a?.sortTs || 0);
+            if(diff !== 0) return diff;
+            return String(a?.name || "").localeCompare(String(b?.name || ""));
+        }
+
+        function enrichItemsWithConversationSummaries(items){
+            return (Array.isArray(items) ? items : []).map(item => {
+                const row = item && typeof item === "object" ? item : {};
+                const summary = conversationSummaryByKey.get(itemKey(row)) || null;
+                const nextSortTs = Math.max(Number(row?.sortTs || 0), Number(summary?.sortTs || 0));
+                return {
+                    ...row,
+                    lastPreview: String(summary?.preview || row?.lastPreview || "No messages yet").trim() || "No messages yet",
+                    sortTs: nextSortTs,
+                    lastActivityAt: String(summary?.createdAt || row?.lastActivityAt || "").trim()
+                };
+            });
+        }
+
         function normalizePendingReelShare(raw){
             const row = raw && typeof raw === "object" ? raw : {};
             const url = String(row.url || "").trim();
@@ -965,6 +1109,151 @@
             return recent;
         }
 
+        async function fetchDeletedDirectChatMap(){
+            const deleted = new Map();
+            if(!isUuid(currentUserId)) return deleted;
+            try{
+                const { data, error } = await supa
+                    .from("chat_deletes")
+                    .select("other_id,deleted_at")
+                    .eq("user_id", currentUserId)
+                    .limit(2000);
+                if(error){
+                    if(!maybeMissingResource(error, "chat_deletes")){
+                        console.error("chat_deletes_fetch_failed", error);
+                    }
+                    return deleted;
+                }
+                (data || []).forEach(row => {
+                    const otherId = String(row?.other_id || "").trim();
+                    if(!isUuid(otherId)) return;
+                    deleted.set(otherId, Math.max(Number(deleted.get(otherId) || 0), toEpochMs(row?.deleted_at)));
+                });
+            }catch(err){
+                console.error("chat_deletes_fetch_exception", err);
+            }
+            return deleted;
+        }
+
+        async function fetchDirectConversationSummaries(deletedMap){
+            const deletedByUser = deletedMap instanceof Map ? deletedMap : new Map();
+            const summaries = new Map();
+            const directCondition = `sender_id.eq.${currentUserId},receiver_id.eq.${currentUserId}`;
+            const messageSelections = [
+                "sender_id,receiver_id,content,created_at,attachment_urls,attachment_url,message_type,deleted_for_everyone,deleted_by_name",
+                "sender_id,receiver_id,content,created_at,attachment_urls,attachment_url,message_type",
+                "sender_id,receiver_id,content,created_at,attachment_url,message_type",
+                "sender_id,receiver_id,content,created_at"
+            ];
+
+            for(const fields of messageSelections){
+                try{
+                    const { data, error } = await supa
+                        .from("messages")
+                        .select(fields)
+                        .or(directCondition)
+                        .order("created_at", { ascending: false })
+                        .limit(2500);
+                    if(error){
+                        if(maybeMissingColumn(error) || maybeMissingResource(error, "messages")){
+                            continue;
+                        }
+                        console.error("direct_summary_messages_failed", error);
+                    }else{
+                        (data || []).forEach(row => {
+                            const senderId = String(row?.sender_id || "").trim();
+                            const receiverId = String(row?.receiver_id || "").trim();
+                            const otherId = senderId === currentUserId ? receiverId : senderId;
+                            if(!isUuid(otherId) || otherId === currentUserId) return;
+                            const ts = toEpochMs(row?.created_at);
+                            if(ts <= Number(deletedByUser.get(otherId) || 0)) return;
+                            mergeConversationSummary(summaries, `user:${otherId}`, row);
+                        });
+                        break;
+                    }
+                }catch(err){
+                    console.error("direct_summary_messages_exception", err);
+                    break;
+                }
+            }
+
+            try{
+                const { data, error } = await supa
+                    .from("chats")
+                    .select("sender_id,receiver_id,message,media_url,media_type,created_at")
+                    .or(directCondition)
+                    .order("created_at", { ascending: false })
+                    .limit(1800);
+                if(error){
+                    if(!maybeMissingResource(error, "chats")){
+                        console.error("direct_summary_chats_failed", error);
+                    }
+                    return summaries;
+                }
+                (data || []).forEach(row => {
+                    const senderId = String(row?.sender_id || "").trim();
+                    const receiverId = String(row?.receiver_id || "").trim();
+                    const otherId = senderId === currentUserId ? receiverId : senderId;
+                    if(!isUuid(otherId) || otherId === currentUserId) return;
+                    const ts = toEpochMs(row?.created_at);
+                    if(ts <= Number(deletedByUser.get(otherId) || 0)) return;
+                    mergeConversationSummary(summaries, `user:${otherId}`, row);
+                });
+            }catch(err){
+                console.error("direct_summary_chats_exception", err);
+            }
+            return summaries;
+        }
+
+        async function fetchGroupConversationSummaries(groupIds){
+            const ids = Array.from(new Set(Array.from(groupIds || []).map(id => String(id || "").trim()).filter(id => isUuid(id))));
+            const summaries = new Map();
+            if(!ids.length) return summaries;
+
+            const selections = [
+                "group_id,content,created_at,attachment_urls,attachment_url,message_type,deleted_for_everyone,deleted_by_name",
+                "group_id,content,created_at,attachment_urls,attachment_url,message_type",
+                "group_id,content,created_at,attachment_url,message_type",
+                "group_id,content,created_at"
+            ];
+
+            for(const groupId of ids){
+                let matched = false;
+                for(const fields of selections){
+                    try{
+                        const { data, error } = await supa
+                            .from("messages")
+                            .select(fields)
+                            .eq("group_id", groupId)
+                            .order("created_at", { ascending: false })
+                            .limit(1);
+                        if(error){
+                            if(maybeMissingColumn(error) || maybeMissingResource(error, "messages")){
+                                continue;
+                            }
+                            console.error("group_summary_messages_failed", error);
+                            matched = true;
+                            break;
+                        }
+                        const row = Array.isArray(data) && data.length ? data[0] : null;
+                        if(row){
+                            mergeConversationSummary(summaries, `group:${groupId}`, row);
+                        }
+                        matched = true;
+                        break;
+                    }catch(err){
+                        console.error("group_summary_messages_exception", err);
+                        matched = true;
+                        break;
+                    }
+                }
+                if(!matched){
+                    continue;
+                }
+            }
+            return summaries;
+        }
+
         async function fetchFollowedUserIds(){
             const set = new Set();
             try{
@@ -991,7 +1280,8 @@
             return set;
         }
 
-        async function fetchPrivateUserRows(){
+        async function fetchPrivateUserRows(deletedMap){
+            const deletedByUser = deletedMap instanceof Map ? deletedMap : new Map();
             const [messageRecent, chatRecent, followedIds] = await Promise.all([
                 fetchRecentContactsFromMessages(),
                 fetchRecentContactsFromChats(),
@@ -1010,6 +1300,13 @@
                 const updated = Number(row?.updated_at || 0) || 0;
                 const prev = Number(recentByUser.get(id) || 0);
                 recentByUser.set(id, Math.max(prev, updated));
+            });
+
+            deletedByUser.forEach((deletedAt, id) => {
+                const lastTs = Number(recentByUser.get(id) || 0);
+                if(lastTs <= Number(deletedAt || 0)){
+                    recentByUser.delete(id);
+                }
             });
 
             const ids = new Set(recentByUser.keys());
@@ -1031,7 +1328,8 @@
                     name: String(name || "User").trim() || "User",
                     img: String(img || "").trim(),
                     isGroup: false,
-                    sortTs: Number(recentByUser.get(id) || 0)
+                    sortTs: Number(recentByUser.get(id) || 0),
+                    lastPreview: "No messages yet"
                 };
             }).filter(row => isUuid(row.id));
 
@@ -1432,6 +1730,8 @@
                     visibleItems.push(item);
                 }
             });
+            visibleItems.sort(compareChatItemsByPriority);
+            hiddenItems.sort(compareChatItemsByPriority);
             const hiddenLocked = hiddenItems.length > 0 && !isHiddenChatsUnlocked();
 
             const buildRow = (item, opts) => {
@@ -1474,7 +1774,7 @@
                             <span class="text-xs text-gray-400 chat-time-label">${options.hidden ? (lockedHiddenRow ? "Locked" : "Hidden") : "Realtime"}</span>
                         </div>
                         <div class="flex items-center">
-                            <div class="text-sm text-gray-500 truncate">${lockedHiddenRow ? "Tap Hidden Account section to unlock" : (options.hidden ? "Hidden account" : (isGroup ? "Group chat" : "Tap to chat..."))}</div>
+                            <div class="text-sm text-gray-500 truncate">${lockedHiddenRow ? "Tap Hidden Account section to unlock" : (options.hidden ? "Hidden account" : escapeHtml(item?.lastPreview || "No messages yet"))}</div>
                         </div>
                     </div>
                 `;
@@ -1613,12 +1913,19 @@
         async function renderChats(){
             const list = document.getElementById("chatList");
             list.innerHTML = "<p class='text-center p-10 text-gray-400 animate-pulse'>Loading NovaGapp Chats...</p>";
-            const [users, groups] = await Promise.all([
-                fetchPrivateUserRows(),
-                fetchMyGroups()
+            const deletedDirectMap = await fetchDeletedDirectChatMap();
+            const [users, groups, directSummaries] = await Promise.all([
+                fetchPrivateUserRows(deletedDirectMap),
+                fetchMyGroups(),
+                fetchDirectConversationSummaries(deletedDirectMap)
             ]);
+            const groupSummaries = await fetchGroupConversationSummaries((groups || []).map(group => group?.id));
             dbUnreadByKey = await fetchUnreadCountsFromDatabase();
-            chatCache = [...(groups || []), ...(users || [])];
+            conversationSummaryByKey = new Map([
+                ...directSummaries.entries(),
+                ...groupSummaries.entries()
+            ]);
+            chatCache = enrichItemsWithConversationSummaries([...(groups || []), ...(users || [])]);
             renderChatRows(chatCache);
         }
 
@@ -1642,7 +1949,122 @@
             applySelectionUiState();
         }
 
-        function handleQuickAction(action){
+        function removeManualChatTargetById(userId){
+            const cleanId = String(userId || "").trim();
+            if(!cleanId) return;
+            manualChatTargets.delete(cleanId);
+            saveManualChatTargets();
+        }
+
+        function removeManualGroupById(groupId){
+            const cleanId = String(groupId || "").trim();
+            if(!cleanId) return;
+            manualGroups.delete(cleanId);
+            saveManualGroups();
+        }
+
+        function clearItemListState(item){
+            const row = item && typeof item === "object" ? item : {};
+            const key = itemKey(row);
+            const hidden = getStoredSet(HIDDEN_CHATS_KEY);
+            if(hidden.has(key)){
+                hidden.delete(key);
+                saveStoredSet(HIDDEN_CHATS_KEY, hidden);
+            }
+            setChatClearedLocally(row);
+            conversationSummaryByKey.delete(key);
+        }
+
+        async function persistDirectChatDelete(otherUserId){
+            const otherId = String(otherUserId || "").trim();
+            if(!isUuid(currentUserId) || !isUuid(otherId)) return false;
+            const payload = {
+                user_id: currentUserId,
+                other_id: otherId,
+                deleted_at: new Date().toISOString()
+            };
+            try{
+                const { error: upsertError } = await supa
+                    .from("chat_deletes")
+                    .upsert(payload, { onConflict: "user_id,other_id" });
+                if(!upsertError) return true;
+                if(maybeMissingColumn(upsertError) || maybeMissingResource(upsertError, "chat_deletes")){
+                    const { error: insertError } = await supa.from("chat_deletes").insert(payload);
+                    return !insertError;
+                }
+                console.error("chat_delete_upsert_failed", upsertError);
+            }catch(err){
+                console.error("chat_delete_upsert_exception", err);
+            }
+            return false;
+        }
+
+        async function leaveGroupFromDatabase(groupId){
+            const cleanGroupId = String(groupId || "").trim();
+            if(!cleanGroupId || !isUuid(currentUserId)) return false;
+            try{
+                const { error } = await supa
+                    .from("group_members")
+                    .delete()
+                    .eq("group_id", cleanGroupId)
+                    .eq("user_id", currentUserId);
+                if(error && !maybeMissingResource(error, "group_members")){
+                    console.error("leave_group_failed", error);
+                    return false;
+                }
+                return true;
+            }catch(err){
+                console.error("leave_group_exception", err);
+                return false;
+            }
+        }
+
+        async function deleteGroupFromDatabase(groupId){
+            const cleanGroupId = String(groupId || "").trim();
+            if(!cleanGroupId) return false;
+            const tasks = [
+                ["messages", () => supa.from("messages").delete().eq("group_id", cleanGroupId)],
+                ["group_members", () => supa.from("group_members").delete().eq("group_id", cleanGroupId)],
+                ["groups", () => supa.from("groups").delete().eq("id", cleanGroupId)]
+            ];
+            for(const [resource, run] of tasks){
+                try{
+                    const { error } = await run();
+                    if(error && !maybeMissingResource(error, resource)){
+                        console.error("delete_group_failed", error);
+                        return false;
+                    }
+                }catch(err){
+                    console.error("delete_group_exception", err);
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        async function deleteSelectedChatItem(item){
+            const row = item && typeof item === "object" ? item : {};
+            const id = String(row?.id || "").trim();
+            if(!id) return false;
+            if(row?.isGroup){
+                const ownerId = String(row?.owner_id || "").trim();
+                const ok = ownerId && ownerId === currentUserId
+                    ? await deleteGroupFromDatabase(id)
+                    : await leaveGroupFromDatabase(id);
+                if(!ok) return false;
+                removeManualGroupById(id);
+                clearItemListState(row);
+                return true;
+            }
+            if(!isUuid(id)) return false;
+            const ok = await persistDirectChatDelete(id);
+            if(!ok) return false;
+            removeManualChatTargetById(id);
+            clearItemListState(row);
+            return true;
+        }
+
+        async function handleQuickAction(action){
             if(action === "cancel"){
                 cancelSelection();
                 return;
@@ -1661,11 +2083,22 @@
             }
 
             if(action === "deleteChat"){
-                selectedItems.forEach(item => setChatClearedLocally(item));
+                const proceed = confirm(selectedItems.length > 1
+                    ? "Delete or leave selected chats?"
+                    : "Delete this chat?");
+                if(!proceed) return;
+                let failed = 0;
+                for(const item of selectedItems){
+                    const ok = await deleteSelectedChatItem(item);
+                    if(!ok) failed += 1;
+                }
+                if(failed){
+                    alert("One or more chats could not be deleted.");
+                }
             }
 
             cancelSelection();
-            renderChatRows(chatCache);
+            await renderChats();
         }
 
         function previewImage(input){
