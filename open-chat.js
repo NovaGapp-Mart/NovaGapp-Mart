@@ -109,8 +109,11 @@
   const CALL_RING_TIMEOUT_MS = 30000;
   const CALL_SIGNAL_BROADCAST_EVENT = "call-signal";
   const CALL_RINGTONE_URL = String(window.CALL_RINGTONE_URL || "").trim();
+  const CALL_ANSWER_HANDOFF_KEY = "nova_pending_answer_offer";
+  const LAST_CALL_INTERACTION_KEY = "nova_last_call_interaction_at";
   const URL_PATTERN = /(https?:\/\/[^\s]+)/ig;
   const DEFAULT_GROUP_ICON = "Images/no-image.png";
+  let lastCallInteractionAt = 0;
 
   function getConfiguredSupabaseUrl(){
     return String(window.NOVA_PUBLIC_CONFIG?.supabaseUrl || window.__NOVA_PUBLIC_CONFIG__?.supabaseUrl || "").trim().replace(/\/+$/g, "");
@@ -136,6 +139,50 @@
     return resolved || DEFAULT_GROUP_ICON;
   }
 
+  function markCallInteraction(){
+    lastCallInteractionAt = Date.now();
+    try{ sessionStorage.setItem(LAST_CALL_INTERACTION_KEY, String(lastCallInteractionAt)); }catch(_){ }
+  }
+
+  function readLastCallInteractionAt(){
+    let stored = 0;
+    try{ stored = Number(sessionStorage.getItem(LAST_CALL_INTERACTION_KEY) || 0); }catch(_){ }
+    return Math.max(Number(lastCallInteractionAt || 0), stored || 0);
+  }
+
+  function safeCallVibrate(pattern){
+    const lastInteraction = readLastCallInteractionAt();
+    if(!lastInteraction || (Date.now() - lastInteraction) > 15000) return false;
+    try{
+      if(typeof navigator.vibrate === "function") return navigator.vibrate(pattern) !== false;
+    }catch(_){ }
+    return false;
+  }
+
+  function consumeAnswerHandoffOffer(expectedPeerId, expectedCallId){
+    try{
+      const raw = sessionStorage.getItem(CALL_ANSWER_HANDOFF_KEY);
+      if(!raw) return null;
+      const parsed = JSON.parse(raw);
+      const storedAt = Number(parsed?.stored_at || 0);
+      if(storedAt && (Date.now() - storedAt) > (CALL_RING_TIMEOUT_MS + 15000)){
+        sessionStorage.removeItem(CALL_ANSWER_HANDOFF_KEY);
+        return null;
+      }
+      const signal = normalizeSignal(parsed);
+      if(!signal) return null;
+      if(expectedCallId && signal.call_id !== expectedCallId) return null;
+      if(expectedPeerId && signal.from_user_id !== expectedPeerId) return null;
+      sessionStorage.removeItem(CALL_ANSWER_HANDOFF_KEY);
+      return signal;
+    }catch(_){
+      return null;
+    }
+  }
+
+  document.addEventListener("pointerdown", markCallInteraction, { passive:true });
+  document.addEventListener("touchstart", markCallInteraction, { passive:true });
+  document.addEventListener("keydown", markCallInteraction, { passive:true });
 
   function handledCallKey(callId){
     const clean = String(callId || "").trim();
@@ -2383,7 +2430,7 @@
     incomingCallBar.style.display = "flex";
     clearIncomingOfferTimer();
     startRingTone("incoming");
-    try{ if(navigator.vibrate) navigator.vibrate([200, 120, 240, 120, 200]); }catch(_){ }
+    safeCallVibrate([200, 120, 240, 120, 200]);
     incomingOfferTimer = setTimeout(() => { declineIncomingCall("not_answered").catch(() => {}); }, CALL_RING_TIMEOUT_MS);
   }
 
@@ -2500,6 +2547,10 @@
     call.pc = pc;
     localVideo.srcObject = localStream;
     remoteVideo.srcObject = call.remoteStream;
+    if(mediaType === "video"){
+      localVideo.play().catch(() => {});
+      remoteVideo.play().catch(() => {});
+    }
     localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
     pc.onicecandidate = (event) => {
@@ -2527,6 +2578,7 @@
       if(activeCall && activeCall.callId === call.callId){
         clearOutgoingOfferTimer();
         stopRingTone();
+        remoteVideo.play().catch(() => {});
         setCallStatus("Connected");
       }
     };
@@ -2630,6 +2682,7 @@
   async function answerIncomingCall(){
     const offer = pendingIncomingOffer;
     if(!offer) return;
+    markCallInteraction();
     markHandledCall(offer.call_id);
     hideIncomingOffer();
     if(activeCall){
@@ -2642,6 +2695,7 @@
       });
       return;
     }
+    setCallStatus(offer.media_type === "video" ? "Starting video..." : "Starting audio...");
     const localStream = await getLocalStream(offer.media_type);
     if(!localStream){
       await sendCallSignal({
@@ -2659,7 +2713,7 @@
     setMyOnCallStatus(true).catch(() => {});
     trackCallPresence().catch(() => {});
     showCallOverlay(call);
-    setCallStatus("Connecting...");
+    setCallStatus(call.mediaType === "video" ? "Starting video..." : "Starting audio...");
     try{
       if(!offer.sdp) throw new Error("missing_offer_sdp");
       await call.pc.setRemoteDescription(new RTCSessionDescription(offer.sdp));
@@ -2674,7 +2728,11 @@
         media_type: call.mediaType,
         sdp: call.pc.localDescription
       });
-      if(!ok) await endActiveCall(false, "Signaling failed");
+      if(ok){
+        setCallStatus(call.mediaType === "video" ? "Joining video call..." : "Joining call...");
+      }else{
+        await endActiveCall(false, "Signaling failed");
+      }
     }catch(err){
       console.error("call_answer_failed", err);
       await endActiveCall(false, "Call failed");
@@ -3234,7 +3292,6 @@
         return;
       }
       const uploaded = [];
-      const mediaKinds = [];
       let invalidCount = 0;
       let permissionDenied = false;
       for(let i = 0; i < files.length; i += 1){
@@ -3256,8 +3313,7 @@
           continue;
         }
         if(!fileUrl) continue;
-        uploaded.push(fileUrl);
-        mediaKinds.push(mediaKind);
+        uploaded.push({ url: fileUrl, mediaKind });
       }
       if(!uploaded.length){
         if(permissionDenied){
@@ -3271,23 +3327,27 @@
         showNotice("Upload failed.");
         return;
       }
-      const allVideos = mediaKinds.length > 0 && mediaKinds.every(t => t === "video");
-      const allImages = mediaKinds.length > 0 && mediaKinds.every(t => t === "image");
-      const content = uploaded.length > 1
-        ? `${uploaded.length} attachments`
-        : (allVideos ? "Video attachment" : (allImages ? "Image attachment" : "Attachment"));
-      const payload = {
-        sender_id: myId,
-        ...buildThreadPayload(),
-        content,
-        attachment_urls: uploaded,
-        attachment_url: uploaded[0],
-        message_type: allVideos ? "video" : (allImages ? "image" : "file"),
-        is_read: false,
-        ...getReplyPayload()
-      };
-      const ok = await sendMessageWithPayload(payload, "");
-      if(ok) clearReplyState();
+      const replyPayload = getReplyPayload();
+      let sentCount = 0;
+      for(let i = 0; i < uploaded.length; i += 1){
+        const entry = uploaded[i];
+        const payload = {
+          sender_id: myId,
+          ...buildThreadPayload(),
+          content: entry.mediaKind === "video" ? "Video attachment" : "Image attachment",
+          attachment_urls: [entry.url],
+          attachment_url: entry.url,
+          message_type: entry.mediaKind === "video" ? "video" : "image",
+          is_read: false,
+          ...(i === 0 ? replyPayload : {})
+        };
+        const ok = await sendMessageWithPayload(payload, "");
+        if(ok) sentCount += 1;
+      }
+      if(sentCount > 0) clearReplyState();
+      if(sentCount !== uploaded.length){
+        showNotice("Some files could not be sent.");
+      }
     }finally{
       el.value = "";
     }
@@ -3385,6 +3445,12 @@
     renderPeerHeader();
     applyBlockedUi();
     updateFilterUi();
+    const answerHandoffOffer = autoAnswer.enabled ? consumeAnswerHandoffOffer(receiverId, autoAnswer.callId) : null;
+    if(answerHandoffOffer){
+      pendingIncomingOffer = answerHandoffOffer;
+      autoAnswer.enabled = false;
+      answerIncomingCall().catch(() => {});
+    }
     await loadMessages();
     subscribeToMessages();
     startMessageSync();

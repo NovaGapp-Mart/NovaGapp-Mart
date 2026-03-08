@@ -899,16 +899,9 @@ window.translateProductName = function(name){
 })();
 
 /* =====================================
-   GLOBAL INCOMING CALL LISTENER (NON-CHAT PAGES)
+   GLOBAL INCOMING CALL LISTENER
 ===================================== */
 (function(){
-  try{
-    const path = String(location.pathname || "");
-    if(/\/chat\.html$/i.test(path) || /\/open-chat\.html$/i.test(path)){
-      return;
-    }
-  }catch(_){ }
-
   const POLL_MS = 2200;
   let pollTimer = null;
   let activeOffer = null;
@@ -919,6 +912,12 @@ window.translateProductName = function(name){
   let ringAudioCtx = null;
   let ringAudioElement = null;
   const CALL_RINGTONE_URL = String(window.CALL_RINGTONE_URL || "").trim();
+  const ANSWER_HANDOFF_KEY = "nova_pending_answer_offer";
+  const LAST_CALL_INTERACTION_KEY = "nova_last_call_interaction_at";
+  let callSignalBus = null;
+  try{
+    if(typeof BroadcastChannel === "function") callSignalBus = new BroadcastChannel("nova-call-signal");
+  }catch(_){ }
 
   function getCurrentUserId(){
     try{
@@ -1051,8 +1050,41 @@ window.translateProductName = function(name){
       to_user_id: toUserId,
       from_user_id: fromUserId,
       media_type: String(payload.media_type || payload.mediaType || src.media_type || src.mediaType || "").trim().toLowerCase() === "video" ? "video" : "audio",
-      reason: String(payload.reason || src.reason || "").trim().slice(0, 120)
+      reason: String(payload.reason || src.reason || "").trim().slice(0, 120),
+      sdp: payload.sdp && typeof payload.sdp === "object" ? payload.sdp : (src.sdp && typeof src.sdp === "object" ? src.sdp : null),
+      candidate: payload.candidate && typeof payload.candidate === "object" ? payload.candidate : (src.candidate && typeof src.candidate === "object" ? src.candidate : null)
     };
+  }
+
+  function rememberCallInteraction(){
+    try{ sessionStorage.setItem(LAST_CALL_INTERACTION_KEY, String(Date.now())); }catch(_){ }
+  }
+
+  function storeAnswerHandoffOffer(offer){
+    const payload = offer && typeof offer === "object" ? { ...offer, stored_at: Date.now() } : null;
+    if(!payload) return;
+    try{ sessionStorage.setItem(ANSWER_HANDOFF_KEY, JSON.stringify(payload)); }catch(_){ }
+    rememberCallInteraction();
+  }
+
+  function broadcastSignal(signal){
+    if(!callSignalBus || !signal) return;
+    try{ callSignalBus.postMessage(signal); }catch(_){ }
+  }
+
+  if(callSignalBus){
+    callSignalBus.addEventListener("message", (event) => {
+      const myUid = getCurrentUserId();
+      if(!myUid) return;
+      const signal = normalizeSignalRow(event?.data);
+      if(!signal) return;
+      const signalId = String(signal?.id || "").trim();
+      if(signalId){
+        if(seenSignalIds.has(signalId)) return;
+        rememberSignalId(signalId);
+      }
+      handleSignal(signal, myUid);
+    });
   }
 
   async function sendCallSignal(payload){
@@ -1122,6 +1154,7 @@ window.translateProductName = function(name){
     answer.addEventListener("click", () => {
       if(!activeOffer) return;
       const offer = activeOffer;
+      storeAnswerHandoffOffer(offer);
       markHandledCall(offer.call_id);
       hideIncomingCallUi();
       location.href = buildAnswerTarget(offer);
@@ -1220,7 +1253,6 @@ window.translateProductName = function(name){
   async function pollSignals(force){
     const myUid = getCurrentUserId();
     if(!myUid) return;
-    if(document.hidden && !force && !activeOffer) return;
 
     const params = new URLSearchParams();
     params.set("user_id", myUid);
@@ -1243,6 +1275,7 @@ window.translateProductName = function(name){
           const signal = normalizeSignalRow(row);
           if(signal){
             handleSignal(signal, myUid);
+            broadcastSignal(signal);
           }
         });
         return;
