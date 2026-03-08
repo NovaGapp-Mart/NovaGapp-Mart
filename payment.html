@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -469,13 +469,13 @@ async function continuePayment(){
           razorpay_payment_id: paymentId,
           razorpay_signature: signature
         });
-        if(!verifyResult?.verified){
-          alert("Payment verification failed.");
+        if(!verifyResult?.verified || !verifyResult?.order_payment?.id){
+          alert("Payment persistence failed.");
           return;
         }
-        if(verifyResult?.order_payment?.id){
-          ORDER = verifyResult.order_payment;
-        }
+        ORDER = verifyResult.order_payment;
+        localStorage.setItem("lastOrder", JSON.stringify(ORDER));
+        localStorage.removeItem("cart");
       }catch(err){
         console.error(err);
         alert("Payment verification failed.");
@@ -505,6 +505,7 @@ async function payCOD(){
       headers: { "Content-Type":"application/json" },
       body: JSON.stringify({ order_id: ORDER?.id || "" })
     });
+    localStorage.removeItem("cart");
     alert("Order placed with Cash on Delivery.");
     location.href = "orders.html";
   }catch(err){

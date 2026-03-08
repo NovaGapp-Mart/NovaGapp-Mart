@@ -1,4 +1,4 @@
-﻿/* =====================================
+/* =====================================
    GLOBAL USER SETTINGS
 ===================================== */
 window.USER_LANG = localStorage.getItem("lang") || "en";
@@ -824,19 +824,44 @@ window.translateProductName = function(name){
     return out;
   }
 
+  async function getPushAuthContext(userIdHint){
+    let userId = String(userIdHint || getCurrentUserId()).trim();
+    let accessToken = "";
+    try{
+      const client = window.supa ||
+        (typeof window.ensureNovaSupabaseClient === "function"
+          ? window.ensureNovaSupabaseClient()
+          : (typeof window.novaCreateSupabaseClient === "function" ? window.novaCreateSupabaseClient() : null));
+      if(client?.auth?.getSession){
+        const { data } = await client.auth.getSession();
+        const session = data?.session || null;
+        const sessionUserId = String(session?.user?.id || "").trim();
+        if(sessionUserId) userId = sessionUserId;
+        accessToken = String(session?.access_token || "").trim();
+      }
+    }catch(_){ }
+    return { userId, accessToken };
+  }
+
   async function postRegisterToken(userId, token){
+    const auth = await getPushAuthContext(userId);
     const payload = {
-      user_id: userId,
+      user_id: auth.userId || String(userId || "").trim(),
       token,
       platform: "web",
       user_agent: navigator.userAgent || ""
     };
+    if(!payload.user_id) return false;
     const bases = buildApiBases();
     for(const base of bases){
       try{
+        const headers = { "Content-Type":"application/json" };
+        if(auth.accessToken){
+          headers.Authorization = `Bearer ${auth.accessToken}`;
+        }
         const res = await fetch(`${base}/api/push/register`, {
           method: "POST",
-          headers: { "Content-Type":"application/json" },
+          headers,
           body: JSON.stringify(payload)
         });
         if(res.ok) return true;

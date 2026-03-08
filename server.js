@@ -484,6 +484,317 @@ function compactText(value, maxLen){
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, cap);
 }
 
+function sanitizeUuid(value){
+  const raw = String(value || "").trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(raw)
+    ? raw
+    : "";
+}
+
+function readBearerToken(req){
+  const header = String(req.headers?.authorization || "").trim();
+  if(!/^Bearer\s+/i.test(header)) return "";
+  return header.replace(/^Bearer\s+/i, "").trim();
+}
+
+function isAppSupabaseConfigured(){
+  return Boolean(APP_SUPABASE_URL && APP_SUPABASE_SERVICE_ROLE_KEY);
+}
+
+function buildSupabaseQueryString(query){
+  if(!query) return "";
+  if(typeof query === "string"){
+    return String(query || "").replace(/^\?+/, "").trim();
+  }
+  if(query instanceof URLSearchParams){
+    return query.toString();
+  }
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if(value === undefined || value === null || value === "") return;
+    if(Array.isArray(value)){
+      value.forEach((entry) => {
+        if(entry === undefined || entry === null || entry === "") return;
+        params.append(key, String(entry));
+      });
+      return;
+    }
+    params.set(key, String(value));
+  });
+  return params.toString();
+}
+
+function extractSupabaseError(payload, fallbackText, statusCode){
+  if(payload && typeof payload === "object"){
+    const message = compactText(
+      payload.message ||
+      payload.error_description ||
+      payload.error ||
+      payload.hint ||
+      payload.details,
+      220
+    );
+    if(message) return message;
+  }
+  const fallback = compactText(fallbackText, 220);
+  if(fallback) return fallback;
+  return `supabase_request_failed_${statusCode || 500}`;
+}
+
+function isMissingColumnMessage(message){
+  const text = String(message || "").toLowerCase();
+  return text.includes("column") && text.includes("does not exist");
+}
+
+async function appSupabaseFetch(pathname, options){
+  if(!isAppSupabaseConfigured()){
+    throw new Error("supabase_service_unavailable");
+  }
+
+  const cfg = options && typeof options === "object" ? options : {};
+  const authToken = String(cfg.authToken || "").trim();
+  const apiKey = String(
+    cfg.apiKey ||
+    (authToken ? (APP_SUPABASE_PUBLISHABLE_KEY || APP_SUPABASE_SERVICE_ROLE_KEY) : APP_SUPABASE_SERVICE_ROLE_KEY)
+  ).trim();
+  const headers = {
+    ...(cfg.headers || {})
+  };
+  if(apiKey && !headers.apikey){
+    headers.apikey = apiKey;
+  }
+  if(!headers.Authorization){
+    headers.Authorization = `Bearer ${authToken || APP_SUPABASE_SERVICE_ROLE_KEY}`;
+  }
+  if(cfg.prefer && !headers.Prefer){
+    headers.Prefer = cfg.prefer;
+  }
+  if(cfg.body !== undefined && cfg.body !== null && !headers["Content-Type"]){
+    headers["Content-Type"] = "application/json";
+  }
+
+  const response = await fetch(`${APP_SUPABASE_URL}${pathname}`, {
+    method: cfg.method || "GET",
+    headers,
+    body: cfg.body === undefined || cfg.body === null
+      ? undefined
+      : (typeof cfg.body === "string" ? cfg.body : JSON.stringify(cfg.body)),
+    cache: "no-store"
+  });
+  const text = await response.text().catch(() => "");
+  let payload = null;
+  try{
+    payload = text ? JSON.parse(text) : null;
+  }catch(_){
+    payload = null;
+  }
+
+  if(!response.ok){
+    const err = new Error(extractSupabaseError(payload, text, response.status));
+    err.status = response.status;
+    err.payload = payload;
+    throw err;
+  }
+
+  return payload;
+}
+
+async function appSupabaseRest(method, tableName, query, options){
+  const qs = buildSupabaseQueryString(query);
+  return appSupabaseFetch(`/rest/v1/${tableName}${qs ? `?${qs}` : ""}`, {
+    method,
+    body: options?.body,
+    authToken: options?.authToken,
+    apiKey: options?.apiKey,
+    headers: options?.headers,
+    prefer: options?.prefer
+  });
+}
+
+async function appSupabaseRpc(fnName, payload, options){
+  return appSupabaseFetch(`/rest/v1/rpc/${fnName}`, {
+    method: "POST",
+    body: payload || {},
+    authToken: options?.authToken,
+    apiKey: options?.apiKey,
+    headers: options?.headers,
+    prefer: options?.prefer || "return=representation"
+  });
+}
+
+async function resolveSupabaseUser(accessToken){
+  const token = String(accessToken || "").trim();
+  if(!token) return null;
+  const payload = await appSupabaseFetch("/auth/v1/user", {
+    method: "GET",
+    authToken: token,
+    apiKey: APP_SUPABASE_PUBLISHABLE_KEY || APP_SUPABASE_SERVICE_ROLE_KEY
+  });
+  return payload && typeof payload === "object" ? payload : null;
+}
+
+async function requireSupabaseUser(req, res){
+  if(!isAppSupabaseConfigured()){
+    res.status(503).json({
+      ok: false,
+      error: "supabase_service_unavailable",
+      message: "Supabase server configuration is missing."
+    });
+    return null;
+  }
+
+  const accessToken = readBearerToken(req);
+  if(!accessToken){
+    res.status(401).json({ ok: false, error: "auth_required" });
+    return null;
+  }
+
+  try{
+    const user = await resolveSupabaseUser(accessToken);
+    const userId = sanitizeUserId(user?.id);
+    if(!user || !userId){
+      res.status(401).json({ ok: false, error: "auth_invalid" });
+      return null;
+    }
+    return { user, userId, accessToken };
+  }catch(err){
+    console.error("supabase_auth_error:", err?.stack || err);
+    res.status(401).json({
+      ok: false,
+      error: "auth_invalid",
+      message: String(err?.message || "Unable to validate session.")
+    });
+    return null;
+  }
+}
+
+function normalizeBackendPlan(planInput){
+  const raw = String(planInput || "").trim().toUpperCase();
+  const digits = raw.replace(/[^0-9]/g, "");
+  if(
+    raw === "4000" ||
+    raw === "BUSINESS" ||
+    raw === "ENTERPRISE" ||
+    raw === "ENTERPRISE_4000" ||
+    digits === "4000"
+  ){
+    return "4000";
+  }
+  if(
+    raw === "40" ||
+    raw === "PRO" ||
+    raw === "PLUS" ||
+    raw === "CREATOR" ||
+    raw === "PRO_40" ||
+    digits === "40"
+  ){
+    return "40";
+  }
+  return "free";
+}
+
+function addDaysIso(baseDate, days){
+  const ts = baseDate instanceof Date ? baseDate.getTime() : Date.parse(String(baseDate || "")) || Date.now();
+  const extraMs = Math.max(0, Number(days) || 0) * 24 * 60 * 60 * 1000;
+  return new Date(ts + extraMs).toISOString();
+}
+
+function buildSubscriptionView(row){
+  const source = row && typeof row === "object" ? row : {};
+  const nowMs = Date.now();
+  const expiresAt = String(source.expires_at || "").trim();
+  const expiresMs = Date.parse(expiresAt);
+  const isExpired = Number.isFinite(expiresMs) && expiresMs <= nowMs;
+  const normalizedPlan = isExpired ? "free" : normalizeBackendPlan(source.plan || source.status || "free");
+  const planActive = normalizedPlan !== "free";
+  return {
+    user_id: sanitizeUserId(source.user_id),
+    plan: normalizedPlan,
+    status: planActive ? "active" : (isExpired ? "expired" : "free"),
+    plan_active: planActive,
+    premium_badge: planActive,
+    tryon_lane: normalizedPlan === "4000" ? "priority" : "standard",
+    started_at: source.started_at || null,
+    expires_at: planActive ? (expiresAt || null) : null,
+    source: compactText(source.source, 80),
+    payment_id: compactText(source.payment_id, 120),
+    order_id: compactText(source.order_id, 120),
+    amount_paise: Math.round(safeNumber(source.amount_paise)),
+    currency: String(source.currency || "INR").trim().toUpperCase() || "INR",
+    item_purchased: compactText(source.item_purchased || (planActive ? `Subscription ${normalizedPlan}` : ""), 220),
+    paid_at: source.paid_at || source.updated_at || source.created_at || null,
+    metadata: source.metadata && typeof source.metadata === "object" ? source.metadata : {},
+    auto_activation_message: planActive
+      ? "Payment verified and subscription auto activated."
+      : "No active paid subscription."
+  };
+}
+
+function buildOrderItemPurchased(orderLike){
+  const items = Array.isArray(orderLike?.items) ? orderLike.items : [];
+  const joined = items
+    .map((item) => {
+      const name = compactText(item?.name || item?.title || "Item", 80);
+      const qty = Math.max(1, Math.floor(safeNumber(item?.qty) || 1));
+      return `${name} x${qty}`;
+    })
+    .filter(Boolean)
+    .join(", ");
+  return compactText(joined || "Order purchase", 500);
+}
+
+async function fetchSingleOrderById(orderId){
+  const cleanId = sanitizeUuid(orderId);
+  if(!cleanId) return null;
+  const rows = await appSupabaseRest("GET", "orders", {
+    select: "*",
+    id: `eq.${cleanId}`,
+    limit: "1"
+  });
+  return Array.isArray(rows) && rows[0] ? rows[0] : null;
+}
+
+async function patchOrderRecord(orderId, fields){
+  const cleanId = sanitizeUuid(orderId);
+  if(!cleanId) return null;
+  const rows = await appSupabaseRest("PATCH", "orders", {
+    id: `eq.${cleanId}`,
+    select: "*"
+  }, {
+    body: fields,
+    prefer: "return=representation"
+  });
+  return Array.isArray(rows) && rows[0] ? rows[0] : null;
+}
+
+async function patchOrderRecordWithFallback(orderId, primaryFields, fallbackFields){
+  try{
+    const order = await patchOrderRecord(orderId, primaryFields);
+    return { order, degraded: false, warning: "" };
+  }catch(err){
+    if(!fallbackFields || !isMissingColumnMessage(err?.message)){
+      throw err;
+    }
+    const order = await patchOrderRecord(orderId, fallbackFields);
+    return {
+      order,
+      degraded: true,
+      warning: String(err?.message || "")
+    };
+  }
+}
+
+function normalizeOrderAction(value){
+  const raw = String(value || "").trim().toLowerCase().replace(/[^a-z_]/g, "");
+  if(raw === "approve") return "approved";
+  if(raw === "reject") return "rejected";
+  if(raw === "ship") return "shipped";
+  if(raw === "deliver") return "delivered";
+  if(raw === "complete") return "completed";
+  if(raw === "cancel") return "cancelled";
+  return "";
+}
+
 function buildAbsoluteServerUrl(req, relativePath){
   const rel = String(relativePath || "").trim();
   if(!rel) return "";
@@ -924,43 +1235,89 @@ app.options("/api/push/register", (req, res) => {
 app.post("/api/push/register", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   try{
+    if(!isAppSupabaseConfigured()){
+      return res.status(503).json({ ok:false, error:"supabase_service_unavailable" });
+    }
+
     const body = req.body && typeof req.body === "object" ? req.body : {};
-    const userId = sanitizeCallUserId(body.user_id || body.userId);
+    let userId = sanitizeUserId(body.user_id || body.userId);
     const token = sanitizePushToken(body.token);
     if(!userId || !token){
       return res.status(400).json({ ok:false, error:"user_id_and_token_required" });
     }
 
-    const platform = sanitizePushPlatform(body.platform || "web");
-    const userAgent = compactText(body.user_agent || body.userAgent, 300);
-    const updatedAt = new Date().toISOString();
-    const tokenMap = pushTokenStore.get(userId) || new Map();
-    tokenMap.set(token, {
-      token,
-      platform,
-      user_agent: userAgent,
-      updated_at: updatedAt
-    });
-
-    if(tokenMap.size > PUSH_TOKEN_PER_USER_LIMIT){
-      const rows = Array.from(tokenMap.values()).sort((a, b) => Date.parse(a.updated_at || "") - Date.parse(b.updated_at || ""));
-      while(rows.length > PUSH_TOKEN_PER_USER_LIMIT){
-        const oldest = rows.shift();
-        if(oldest && oldest.token){
-          tokenMap.delete(oldest.token);
+    const accessToken = readBearerToken(req);
+    if(accessToken){
+      try{
+        const user = await resolveSupabaseUser(accessToken);
+        const authUserId = sanitizeUserId(user?.id);
+        if(!authUserId){
+          return res.status(401).json({ ok:false, error:"auth_invalid" });
         }
+        if(userId && userId !== authUserId){
+          return res.status(403).json({ ok:false, error:"push_user_mismatch" });
+        }
+        userId = authUserId;
+      }catch(err){
+        console.error("push_register_auth_error:", err?.stack || err);
+        return res.status(401).json({ ok:false, error:"auth_invalid" });
       }
     }
 
-    pushTokenStore.set(userId, tokenMap);
+    const platform = sanitizePushPlatform(body.platform || "web");
+    const userAgent = compactText(body.user_agent || body.userAgent, 300);
+    const updatedAt = new Date().toISOString();
+
+    await appSupabaseRest("POST", "user_push_tokens", {
+      on_conflict: "user_id,token",
+      select: "id"
+    }, {
+      body: [{
+        user_id: userId,
+        token,
+        platform,
+        user_agent: userAgent,
+        is_active: true,
+        last_seen_at: updatedAt,
+        updated_at: updatedAt
+      }],
+      prefer: "resolution=merge-duplicates,return=representation"
+    });
+
+    const activeRows = await appSupabaseRest("GET", "user_push_tokens", {
+      select: "id,updated_at",
+      user_id: `eq.${userId}`,
+      is_active: "eq.true",
+      order: "updated_at.desc",
+      limit: String(PUSH_TOKEN_PER_USER_LIMIT + 20)
+    });
+    const rows = Array.isArray(activeRows) ? activeRows : [];
+    const overflow = rows.slice(PUSH_TOKEN_PER_USER_LIMIT);
+    for(const row of overflow){
+      if(!row?.id) continue;
+      await appSupabaseRest("PATCH", "user_push_tokens", {
+        id: `eq.${row.id}`
+      }, {
+        body: {
+          is_active: false,
+          updated_at: updatedAt
+        },
+        prefer: "return=minimal"
+      });
+    }
+
     return res.json({
       ok:true,
       registered:true,
-      tokens: tokenMap.size
+      tokens: Math.min(rows.length, PUSH_TOKEN_PER_USER_LIMIT)
     });
   }catch(err){
     console.error("push_register_error:", err?.stack || err);
-    return res.status(500).json({ ok:false, error:"push_register_failed" });
+    return res.status(500).json({
+      ok:false,
+      error:"push_register_failed",
+      message:String(err?.message || "push_register_failed")
+    });
   }
 });
 
@@ -974,8 +1331,15 @@ app.options("/api/push/notify", (req, res) => {
 app.post("/api/push/notify", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   try{
+    if(!isAppSupabaseConfigured()){
+      return res.status(503).json({ ok:false, error:"supabase_service_unavailable" });
+    }
+    if(!FIREBASE_SERVER_KEY){
+      return res.status(503).json({ ok:false, error:"firebase_server_key_missing" });
+    }
+
     const body = req.body && typeof req.body === "object" ? req.body : {};
-    const toUserId = sanitizeCallUserId(body.to_user_id || body.toUserId);
+    const toUserId = sanitizeUserId(body.to_user_id || body.toUserId);
     const title = compactText(body.title, 120);
     const messageBody = compactText(body.body, 300);
     const data = normalizePushDataPayload(body.data);
@@ -983,17 +1347,19 @@ app.post("/api/push/notify", async (req, res) => {
       return res.status(400).json({ ok:false, error:"to_user_id_and_title_required" });
     }
 
-    const tokenMap = pushTokenStore.get(toUserId);
-    const tokenRows = tokenMap ? Array.from(tokenMap.values()) : [];
+    const tokenRowsRaw = await appSupabaseRest("GET", "user_push_tokens", {
+      select: "id,token",
+      user_id: `eq.${toUserId}`,
+      is_active: "eq.true",
+      order: "updated_at.desc",
+      limit: String(PUSH_TOKEN_PER_USER_LIMIT)
+    });
+    const tokenRows = Array.isArray(tokenRowsRaw) ? tokenRowsRaw : [];
     if(!tokenRows.length){
       return res.json({ ok:true, delivered:0, attempted:0, reason:"no_registered_tokens" });
     }
-    if(!FIREBASE_SERVER_KEY){
-      return res.status(503).json({ ok:false, error:"firebase_server_key_missing" });
-    }
 
     let delivered = 0;
-    const invalidTokens = [];
     for(const row of tokenRows){
       const token = sanitizePushToken(row?.token);
       if(!token) continue;
@@ -1002,19 +1368,18 @@ app.post("/api/push/notify", async (req, res) => {
         if(sent.ok){
           delivered += 1;
         }
-        if(sent.invalid){
-          invalidTokens.push(token);
+        if(sent.invalid && row?.id){
+          await appSupabaseRest("PATCH", "user_push_tokens", {
+            id: `eq.${row.id}`
+          }, {
+            body: {
+              is_active: false,
+              updated_at: new Date().toISOString()
+            },
+            prefer: "return=minimal"
+          });
         }
       }catch(_){ }
-    }
-
-    if(invalidTokens.length && tokenMap){
-      invalidTokens.forEach(token => tokenMap.delete(token));
-      if(tokenMap.size){
-        pushTokenStore.set(toUserId, tokenMap);
-      }else{
-        pushTokenStore.delete(toUserId);
-      }
     }
 
     return res.json({
@@ -1024,7 +1389,11 @@ app.post("/api/push/notify", async (req, res) => {
     });
   }catch(err){
     console.error("push_notify_error:", err?.stack || err);
-    return res.status(500).json({ ok:false, error:"push_notify_failed" });
+    return res.status(500).json({
+      ok:false,
+      error:"push_notify_failed",
+      message:String(err?.message || "push_notify_failed")
+    });
   }
 });
 
@@ -1517,6 +1886,15 @@ const CONTEST_SUPABASE_SERVICE_ROLE_KEY = String(
   process.env.CONTEST_SUPABASE_KEY ||
   process.env.SUPABASE_KEY ||
   ""
+).trim();
+const APP_SUPABASE_URL = String(
+  CONTEST_SUPABASE_URL || PUBLIC_SUPABASE_URL || ""
+).trim().replace(/\/+$/g, "");
+const APP_SUPABASE_SERVICE_ROLE_KEY = String(
+  CONTEST_SUPABASE_SERVICE_ROLE_KEY || VIDEO_ASSET_SUPABASE_KEY || ""
+).trim();
+const APP_SUPABASE_PUBLISHABLE_KEY = String(
+  PUBLIC_SUPABASE_ANON_KEY || APP_SUPABASE_SERVICE_ROLE_KEY || ""
 ).trim();
 const CONTEST_ACCOUNT_COUNT_CACHE_TTL_MS = 60 * 1000;
 const contestAccountCountCache = {
@@ -2661,6 +3039,67 @@ app.post("/api/payment/razorpay/verify", async (req, res) => {
       });
     }
 
+    const appOrderId = sanitizeUuid(req.body?.order_id || req.body?.app_order_id);
+    let orderPayment = null;
+    let settlement = null;
+    let persistenceWarning = "";
+
+    if(appOrderId){
+      const auth = await requireSupabaseUser(req, res);
+      if(!auth) return;
+
+      const orderRow = await fetchSingleOrderById(appOrderId);
+      if(!orderRow){
+        return res.status(404).json({ ok:false, error:"order_not_found" });
+      }
+      if(sanitizeUserId(orderRow.user_id) !== auth.userId){
+        return res.status(403).json({ ok:false, error:"order_access_forbidden" });
+      }
+
+      const paidAt = new Date().toISOString();
+      const itemPurchased = buildOrderItemPurchased(orderRow);
+      const primaryPatch = {
+        payment_status: "paid",
+        payment_method: "Online Payment",
+        payment_id: paymentId,
+        paid: true,
+        paid_at: paidAt,
+        item_purchased: itemPurchased,
+        updated_at: paidAt
+      };
+      const fallbackPatch = {
+        payment_status: "paid",
+        payment_method: "Online Payment",
+        payment_id: paymentId,
+        updated_at: paidAt
+      };
+      const persisted = await patchOrderRecordWithFallback(appOrderId, primaryPatch, fallbackPatch);
+      orderPayment = persisted?.order || null;
+      persistenceWarning = persisted?.warning || "";
+
+      try{
+        const orderCurrency = String(orderPayment?.currency || orderRow?.currency || "USD").trim().toUpperCase() || "USD";
+        const usdInrRate = orderCurrency === "INR" ? 1 : await getUsdInrRateSafe();
+        settlement = await appSupabaseRpc("settle_paid_order", {
+          p_order_id: appOrderId,
+          p_payment_id: paymentId,
+          p_payment_method: "Online Payment",
+          p_usd_inr_rate: usdInrRate
+        }, {
+          authToken: auth.accessToken
+        });
+      }catch(settleErr){
+        console.error("order_settlement_error:", settleErr?.stack || settleErr);
+        if(!persistenceWarning){
+          persistenceWarning = String(settleErr?.message || "order_settlement_failed");
+        }
+      }
+
+      if(!orderPayment){
+        orderPayment = await fetchSingleOrderById(appOrderId);
+      }
+    }
+
     return res.json({
       ok: true,
       verified: true,
@@ -2668,7 +3107,10 @@ app.post("/api/payment/razorpay/verify", async (req, res) => {
       razorpay_payment_id: paymentId,
       payment_status: paymentStatus || "verified",
       payment_currency: paymentCurrency || "INR",
-      payment_amount_paise: paymentAmountPaise
+      payment_amount_paise: paymentAmountPaise,
+      order_payment: orderPayment,
+      settlement,
+      persistence_warning: persistenceWarning || undefined
     });
   }catch(err){
     console.error("shop_order_verify_error:", err?.stack || err);
@@ -2680,6 +3122,380 @@ app.post("/api/payment/razorpay/verify", async (req, res) => {
   }
 });
 
+app.options("/api/orders/create", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key");
+  res.sendStatus(204);
+});
+
+app.post("/api/orders/create", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const auth = await requireSupabaseUser(req, res);
+  if(!auth) return;
+
+  try{
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const rawItems = Array.isArray(body.items) ? body.items : [];
+    const items = rawItems
+      .map((item) => ({
+        product_id: sanitizeUuid(item?.product_id || item?.id),
+        qty: Math.max(1, Math.floor(safeNumber(item?.qty || 1)))
+      }))
+      .filter((item) => item.product_id);
+    if(!items.length){
+      return res.status(400).json({ ok:false, error:"order_items_required" });
+    }
+
+    const buyerAddress = body.buyer_address && typeof body.buyer_address === "object"
+      ? body.buyer_address
+      : (body.address && typeof body.address === "object" ? body.address : {});
+    const buyerPhone = compactText(
+      buyerAddress?.phone || body.buyer_phone || body.phone,
+      30
+    );
+    const idempotencyKey = compactText(
+      req.headers["idempotency-key"] || body.idempotency_key,
+      120
+    );
+
+    const result = await appSupabaseRpc("create_pending_order_secure", {
+      p_user_id: auth.userId,
+      p_email: normalizeEmail(auth.user?.email || body.email || buyerAddress?.email),
+      p_buyer_name: compactText(body.buyer_name || buyerAddress?.name || auth.user?.email || "Buyer", 120),
+      p_buyer_phone: buyerPhone,
+      p_buyer_address: buyerAddress && typeof buyerAddress === "object" ? buyerAddress : {},
+      p_items: items,
+      p_payment_method: compactText(body.payment_method || "Pending Payment", 60) || "Pending Payment",
+      p_payment_status: compactText(body.payment_status || "pending", 40) || "pending",
+      p_idempotency_key: idempotencyKey || null
+    }, {
+      authToken: auth.accessToken
+    });
+
+    const order = result?.order && typeof result.order === "object"
+      ? result.order
+      : (result && typeof result === "object" ? result : null);
+
+    return res.json({
+      ok:true,
+      order,
+      idempotent: !!result?.idempotent
+    });
+  }catch(err){
+    console.error("order_create_error:", err?.stack || err);
+    return res.status(400).json({
+      ok:false,
+      error:"order_create_failed",
+      message:String(err?.message || "Unable to create order.")
+    });
+  }
+});
+
+app.get("/api/orders/for-buyer", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const auth = await requireSupabaseUser(req, res);
+  if(!auth) return;
+
+  try{
+    const orders = await appSupabaseRest("GET", "orders", {
+      select: "*",
+      user_id: `eq.${auth.userId}`,
+      order: "created_at.desc",
+      limit: "200"
+    });
+    return res.json({ ok:true, orders:Array.isArray(orders) ? orders : [] });
+  }catch(err){
+    console.error("orders_for_buyer_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"orders_for_buyer_failed", message:String(err?.message || "Unable to load orders.") });
+  }
+});
+
+app.get("/api/orders/for-seller", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const auth = await requireSupabaseUser(req, res);
+  if(!auth) return;
+
+  try{
+    const orders = await appSupabaseRest("GET", "orders", {
+      select: "*",
+      seller_id: `eq.${auth.userId}`,
+      order: "created_at.desc",
+      limit: "200"
+    });
+    return res.json({ ok:true, orders:Array.isArray(orders) ? orders : [] });
+  }catch(err){
+    console.error("orders_for_seller_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"orders_for_seller_failed", message:String(err?.message || "Unable to load seller orders.") });
+  }
+});
+
+app.get("/api/orders/detail", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const auth = await requireSupabaseUser(req, res);
+  if(!auth) return;
+
+  try{
+    const orderId = sanitizeUuid(req.query?.order_id || req.query?.orderId);
+    if(!orderId){
+      return res.status(400).json({ ok:false, error:"order_id_required" });
+    }
+    const order = await fetchSingleOrderById(orderId);
+    if(!order){
+      return res.status(404).json({ ok:false, error:"order_not_found" });
+    }
+    const buyerId = sanitizeUserId(order.user_id);
+    const sellerId = sanitizeUserId(order.seller_id);
+    if(auth.userId !== buyerId && auth.userId !== sellerId){
+      return res.status(403).json({ ok:false, error:"order_access_forbidden" });
+    }
+    return res.json({ ok:true, order });
+  }catch(err){
+    console.error("order_detail_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"order_detail_failed", message:String(err?.message || "Unable to load order.") });
+  }
+});
+
+app.post("/api/orders/status", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const auth = await requireSupabaseUser(req, res);
+  if(!auth) return;
+
+  try{
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const orderId = sanitizeUuid(body.order_id || body.orderId);
+    const nextStatus = normalizeOrderAction(body.action || body.status);
+    if(!orderId || !nextStatus){
+      return res.status(400).json({ ok:false, error:"order_status_payload_invalid" });
+    }
+
+    const order = await fetchSingleOrderById(orderId);
+    if(!order){
+      return res.status(404).json({ ok:false, error:"order_not_found" });
+    }
+    const role = sanitizeUserId(order.seller_id) === auth.userId ? "seller" : "buyer";
+    if(role === "buyer" && sanitizeUserId(order.user_id) !== auth.userId){
+      return res.status(403).json({ ok:false, error:"order_access_forbidden" });
+    }
+
+    const result = await appSupabaseRpc("transition_order_status_secure", {
+      p_order_id: orderId,
+      p_actor_user_id: auth.userId,
+      p_actor_role: role,
+      p_next_status: nextStatus,
+      p_courier_name: compactText(body.courier_name || body.courierName, 120) || null,
+      p_tracking_number: compactText(body.tracking_number || body.trackingNumber, 120) || null,
+      p_reject_reason: compactText(body.reject_reason || body.rejectReason, 220) || null
+    }, {
+      authToken: auth.accessToken
+    });
+
+    return res.json({
+      ok:true,
+      order: result?.order || order,
+      status: nextStatus
+    });
+  }catch(err){
+    console.error("order_status_error:", err?.stack || err);
+    return res.status(400).json({
+      ok:false,
+      error:"order_status_failed",
+      message:String(err?.message || "Unable to update order status.")
+    });
+  }
+});
+
+app.post("/api/orders/payment/cod", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const auth = await requireSupabaseUser(req, res);
+  if(!auth) return;
+
+  try{
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const orderId = sanitizeUuid(body.order_id || body.orderId);
+    if(!orderId){
+      return res.status(400).json({ ok:false, error:"order_id_required" });
+    }
+
+    const order = await fetchSingleOrderById(orderId);
+    if(!order){
+      return res.status(404).json({ ok:false, error:"order_not_found" });
+    }
+    if(sanitizeUserId(order.user_id) !== auth.userId){
+      return res.status(403).json({ ok:false, error:"order_access_forbidden" });
+    }
+
+    const nowIso = new Date().toISOString();
+    const updated = await patchOrderRecordWithFallback(orderId, {
+      payment_method: "Cash on Delivery",
+      payment_status: "cod_pending",
+      paid: false,
+      paid_at: null,
+      item_purchased: buildOrderItemPurchased(order),
+      updated_at: nowIso
+    }, {
+      payment_method: "Cash on Delivery",
+      payment_status: "cod_pending",
+      updated_at: nowIso
+    });
+
+    return res.json({ ok:true, order: updated?.order || order, persistence_warning: updated?.warning || undefined });
+  }catch(err){
+    console.error("order_cod_error:", err?.stack || err);
+    return res.status(400).json({ ok:false, error:"order_cod_failed", message:String(err?.message || "Unable to mark COD order.") });
+  }
+});
+
+app.options("/api/subscription/activate", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.sendStatus(204);
+});
+
+app.get("/api/subscription/status", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  try{
+    const userId = sanitizeUserId(req.query?.user_id || req.query?.userId);
+    if(!userId){
+      return res.status(400).json({ ok:false, error:"user_id_required" });
+    }
+
+    const rows = await appSupabaseRest("GET", "subscription_state", {
+      select: "*",
+      user_id: `eq.${userId}`,
+      limit: "1"
+    });
+    const row = Array.isArray(rows) && rows[0]
+      ? rows[0]
+      : { user_id:userId, plan:"free", status:"free" };
+
+    return res.json({ ok:true, subscription: buildSubscriptionView(row) });
+  }catch(err){
+    console.error("subscription_status_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"subscription_status_failed", message:String(err?.message || "Unable to load subscription.") });
+  }
+});
+
+app.post("/api/subscription/activate", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const auth = await requireSupabaseUser(req, res);
+  if(!auth) return;
+
+  try{
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const requestedUserId = sanitizeUserId(body.user_id || body.userId);
+    if(requestedUserId && requestedUserId !== auth.userId){
+      return res.status(403).json({ ok:false, error:"subscription_user_mismatch" });
+    }
+
+    const plan = normalizeBackendPlan(body.plan);
+    if(plan === "free"){
+      return res.status(400).json({ ok:false, error:"paid_plan_required" });
+    }
+
+    const paymentId = compactText(body.payment_id || body.paymentId, 120);
+    const razorpayOrderId = compactText(body.order_id || body.orderId, 120);
+    const requestedAmountPaise = Math.round(safeNumber(body.amount_paise));
+    if(!paymentId || !razorpayOrderId){
+      return res.status(400).json({ ok:false, error:"payment_fields_required" });
+    }
+
+    const paymentSnapshot = await fetchRazorpayPaymentSnapshot(paymentId);
+    if(String(paymentSnapshot?.order_id || "").trim() !== razorpayOrderId){
+      return res.status(400).json({ ok:false, error:"order_payment_mismatch" });
+    }
+    const paymentStatus = String(paymentSnapshot?.status || "").trim().toLowerCase();
+    const paymentCurrency = String(paymentSnapshot?.currency || body.currency || "INR").trim().toUpperCase() || "INR";
+    const paymentAmountPaise = Math.round(safeNumber(paymentSnapshot?.amount));
+    const paymentCaptured = Boolean(paymentSnapshot?.captured) || paymentStatus === "captured";
+    if(!paymentStatus || !isRazorpayPaymentStatusAcceptable(paymentStatus) || !paymentCaptured){
+      return res.status(409).json({ ok:false, error:"invalid_payment_status", payment_status:paymentStatus });
+    }
+    if(requestedAmountPaise > 0 && paymentAmountPaise < requestedAmountPaise){
+      return res.status(400).json({
+        ok:false,
+        error:"payment_amount_mismatch",
+        expected_amount_paise: requestedAmountPaise,
+        payment_amount_paise: paymentAmountPaise
+      });
+    }
+
+    const nowIso = new Date().toISOString();
+    const baseRow = {
+      user_id: auth.userId,
+      plan,
+      status: "active",
+      started_at: nowIso,
+      expires_at: addDaysIso(nowIso, 30),
+      source: compactText(body.source || "subscription_checkout", 80) || "subscription_checkout",
+      payment_id: paymentId,
+      order_id: razorpayOrderId,
+      amount_paise: paymentAmountPaise || requestedAmountPaise,
+      currency: paymentCurrency,
+      item_purchased: `Subscription ${plan}`,
+      paid_at: nowIso,
+      metadata: {
+        ...(body.metadata && typeof body.metadata === "object" ? body.metadata : {}),
+        razorpay_payment_status: paymentStatus || "captured"
+      },
+      updated_at: nowIso
+    };
+
+    let savedRows = null;
+    let persistenceWarning = "";
+    try{
+      savedRows = await appSupabaseRest("POST", "subscription_state", {
+        on_conflict: "user_id",
+        select: "*"
+      }, {
+        body: [baseRow],
+        prefer: "resolution=merge-duplicates,return=representation"
+      });
+    }catch(err){
+      if(!isMissingColumnMessage(err?.message)) throw err;
+      persistenceWarning = String(err?.message || "");
+      const fallbackRow = {
+        user_id: auth.userId,
+        plan,
+        status: "active",
+        started_at: nowIso,
+        expires_at: addDaysIso(nowIso, 30),
+        source: compactText(body.source || "subscription_checkout", 80) || "subscription_checkout",
+        payment_id: paymentId,
+        order_id: razorpayOrderId,
+        amount_paise: paymentAmountPaise || requestedAmountPaise,
+        currency: paymentCurrency,
+        metadata: {
+          ...(body.metadata && typeof body.metadata === "object" ? body.metadata : {}),
+          razorpay_payment_status: paymentStatus || "captured"
+        },
+        updated_at: nowIso
+      };
+      savedRows = await appSupabaseRest("POST", "subscription_state", {
+        on_conflict: "user_id",
+        select: "*"
+      }, {
+        body: [fallbackRow],
+        prefer: "resolution=merge-duplicates,return=representation"
+      });
+    }
+
+    const savedRow = Array.isArray(savedRows) && savedRows[0] ? savedRows[0] : baseRow;
+    return res.json({
+      ok:true,
+      subscription: buildSubscriptionView(savedRow),
+      persistence_warning: persistenceWarning || undefined
+    });
+  }catch(err){
+    console.error("subscription_activate_error:", err?.stack || err);
+    return res.status(400).json({
+      ok:false,
+      error:"subscription_activate_failed",
+      message:String(err?.message || "Unable to activate subscription.")
+    });
+  }
+});
 app.options("/api/videos/monetization/status", (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
@@ -3875,33 +4691,78 @@ app.get("/api/users/discover", async (req, res) => {
   }
 });
 
-// --- YE CODE ADD KARO (SUMMARY API KE LIYE) ---
 app.get("/api/users/summary", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  const { ids } = req.query;
-  // Abhi ke liye hum dummy data bhej rahe hain taaki 404 na aaye
-  return res.json({
-    ok: true,
-    users: {
-      [ids]: {
-        display_name: "User",
-        verified: true,
-        plan: "pro"
-      }
+  try{
+    const ids = String(req.query?.ids || "")
+      .split(",")
+      .map((value) => sanitizeUserId(value))
+      .filter(Boolean)
+      .slice(0, 25);
+
+    const users = {};
+    for(const userId of ids){
+      let userRow = null;
+      let profileRow = null;
+      let subscriptionRow = null;
+
+      try{
+        const found = await appSupabaseRest("GET", "users", {
+          select: "user_id,display_name,full_name,username,photo,email",
+          user_id: `eq.${userId}`,
+          limit: "1"
+        });
+        userRow = Array.isArray(found) && found[0] ? found[0] : null;
+      }catch(_){ }
+
+      try{
+        const found = await appSupabaseRest("GET", "profiles", {
+          select: "id,full_name,username,avatar_url",
+          id: `eq.${userId}`,
+          limit: "1"
+        });
+        profileRow = Array.isArray(found) && found[0] ? found[0] : null;
+      }catch(_){ }
+
+      try{
+        const found = await appSupabaseRest("GET", "subscription_state", {
+          select: "*",
+          user_id: `eq.${userId}`,
+          limit: "1"
+        });
+        subscriptionRow = Array.isArray(found) && found[0] ? found[0] : null;
+      }catch(_){ }
+
+      const subscription = buildSubscriptionView(subscriptionRow || { user_id:userId, plan:"free", status:"free" });
+      const displayName = compactText(
+        userRow?.display_name ||
+        userRow?.full_name ||
+        profileRow?.full_name ||
+        userRow?.username ||
+        profileRow?.username ||
+        "User",
+        120
+      ) || "User";
+
+      users[userId] = {
+        display_name: displayName,
+        verified: !!subscription.plan_active,
+        plan: subscription.plan,
+        avatar_url: compactText(userRow?.photo || profileRow?.avatar_url, 700),
+        email: normalizeEmail(userRow?.email || "")
+      };
     }
-  });
+
+    return res.json({ ok:true, users });
+  }catch(err){
+    console.error("users_summary_error:", err?.stack || err);
+    return res.status(500).json({ ok:false, error:"users_summary_failed" });
+  }
 });
 
-// --- VERIFICATION STATUS KE LIYE ---
 app.get("/api/verification/status", (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   return res.json({ ok: true, verified: true });
-});
-
-// --- SUBSCRIPTION STATUS KE LIYE ---
-app.get("/api/subscription/status", (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  return res.json({ ok: true, plan: "pro", active: true });
 });
 
 function startServer(){

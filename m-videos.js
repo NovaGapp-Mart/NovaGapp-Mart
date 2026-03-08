@@ -1763,10 +1763,34 @@
     return rows.slice(0, 6).map(row => ({ kind:"video", video:row }));
   };
 
+  function mergeVideoRowForUpsert(row){
+    if(!row || !row.id) return row;
+    const previous = state.videos.get(row.id);
+    if(!previous) return row;
+
+    const next = {
+      ...previous,
+      ...row
+    };
+    const nextVideoRaw = util.safe(row?.video_url_raw || row?.video_url);
+    if(!nextVideoRaw){
+      next.video_url = previous.video_url_raw || previous.video_url;
+      next.video_url_raw = previous.video_url_raw || previous.video_url;
+    }
+
+    const nextThumbCandidate = util.safe(row?.thumbnail_url_raw || row?.thumbnail_url);
+    if(!nextThumbCandidate || isFallbackThumbnailUrl(nextThumbCandidate)){
+      next.thumbnail_url = previous.thumbnail_url_raw || previous.thumbnail_url;
+      next.thumbnail_url_raw = previous.thumbnail_url_raw || previous.thumbnail_url;
+    }
+
+    return next;
+  }
+
   function upsertVideos(rows){
     (Array.isArray(rows) ? rows : []).forEach(row => {
       if(!row || !row.id) return;
-      state.videos.set(row.id, normalizeVideo(row));
+      state.videos.set(row.id, normalizeVideo(mergeVideoRowForUpsert(row)));
     });
   }
 

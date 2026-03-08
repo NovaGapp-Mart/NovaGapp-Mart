@@ -298,17 +298,31 @@ function buildApiBases(){
   return out;
 }
 
+async function getAutomationAccessToken(){
+  try{
+    const { data } = await supa.auth.getSession();
+    return String(data?.session?.access_token || "").trim();
+  }catch(_){
+    return "";
+  }
+}
+
 async function callAutomationApi(path, options){
   const req = options || {};
   const method = req.method || "GET";
   const body = req.body;
+  const accessToken = await getAutomationAccessToken();
   const candidates = [""].concat(buildApiBases());
   for(const base of candidates){
     const url = `${base}${path}`;
     try{
+      const headers = body ? { "Content-Type":"application/json" } : {};
+      if(accessToken){
+        headers.Authorization = `Bearer ${accessToken}`;
+      }
       const res = await fetch(url, {
         method,
-        headers: body ? { "Content-Type":"application/json" } : undefined,
+        headers: Object.keys(headers).length ? headers : undefined,
         body: body ? JSON.stringify(body) : undefined,
         cache: "no-store"
       });
