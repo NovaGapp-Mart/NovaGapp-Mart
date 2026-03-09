@@ -1041,6 +1041,375 @@ function buildAbsoluteServerUrl(req, relativePath){
   return `${proto}://${host}${rel.startsWith("/") ? rel : `/${rel}`}`;
 }
 
+function formatOrderAddressLine(addressLike){
+  if(typeof addressLike === "string"){
+    return compactText(addressLike, 220);
+  }
+  const row = addressLike && typeof addressLike === "object" ? addressLike : {};
+  return compactText(
+    [row.address, row.city, row.pincode, row.country].filter(Boolean).join(", "),
+    220
+  );
+}
+
+function buildOrderItemsSummary(orderLike, maxItems){
+  const limit = Math.max(1, Math.floor(Number(maxItems) || 3));
+  const items = Array.isArray(orderLike?.items) ? orderLike.items : [];
+  const summary = items
+    .slice(0, limit)
+    .map((item) => {
+      const name = compactText(item?.name || item?.title || "Item", 60);
+      const qty = Math.max(1, Math.floor(safeNumber(item?.qty) || 1));
+      return name ? `${name} x${qty}` : "";
+    })
+    .filter(Boolean)
+    .join(", ");
+  const extra = items.length > limit ? ` +${items.length - limit} more` : "";
+  return compactText(`${summary}${extra}` || "Order items", 220);
+}
+
+function humanizeOrderStatus(status){
+  const clean = String(status || "").trim().toLowerCase().replace(/[^a-z_]/g, "");
+  if(clean === "approved") return "Approved";
+  if(clean === "rejected") return "Rejected";
+  if(clean === "shipped") return "Shipped";
+  if(clean === "delivered") return "Delivered";
+  if(clean === "completed") return "Completed";
+  if(clean === "cancelled") return "Cancelled";
+  return compactText(clean.replace(/_/g, " "), 40) || "Updated";
+}
+
+async function fetchAppUserSummaryRow(userId){
+  const cleanUserId = sanitizeUserId(userId);
+  if(!cleanUserId || !isAppSupabaseConfigured()){
+    return null;
+  }
+
+  try{
+    const found = await appSupabaseRest("GET", "users", {
+      select: "user_id,display_name,full_name,username,photo,email,is_on_call",
+      user_id: `eq.${cleanUserId}`,
+      limit: "1"
+    });
+    if(Array.isArray(found) && found[0]){
+      return found[0];
+    }
+  }catch(_){ }
+
+  try{
+    const found = await appSupabaseRest("GET", "profiles", {
+      select: "id,full_name,username,avatar_url",
+      id: `eq.${cleanUserId}`,
+      limit: "1"
+    });
+    if(Array.isArray(found) && found[0]){
+      return found[0];
+    }
+  }catch(_){ }
+
+  return null;
+}
+
+function getAppUserDisplayName(userRow, fallback){
+  const email = compactText(userRow?.email, 120);
+  const emailLabel = email && email.includes("@")
+    ? compactText(email.split("@")[0], 80)
+    : "";
+  return compactText(
+    userRow?.display_name ||
+    userRow?.full_name ||
+    userRow?.username ||
+    emailLabel ||
+    fallback ||
+    "User",
+    80
+  ) || "User";
+}
+
+async function insertNotificationRows(rows){
+  const list = Array.isArray(rows)
+    ? rows.filter((row) => row && typeof row === "object")
+    : [];
+  if(!list.length || !isAppSupabaseConfigured()){
+    return [];
+  }
+
+  try{
+    const inserted = await appSupabaseRest("POST", "notifications", {
+      select: "id"
+    }, {
+      body: list,
+      prefer: "return=representation"
+    });
+    return Array.isArray(inserted) ? inserted : [];
+  }catch(err){
+    console.error("notification_insert_error:", err?.stack || err);
+    return [];
+  }
+}
+
+async function sendPushToUserId(toUserId, title, body, data){
+  const userId = sanitizeUserId(toUserId);
+  const pushTitle = compactText(title, 120);
+  const pushBody = compactText(body, 300);
+  if(!userId || !pushTitle || !isAppSupabaseConfigured() || !FIREBASE_SERVER_KEY){
+    return { ok:false, delivered:0, attempted:0 };
+  }
+
+  try{
+    const tokenRowsRaw = await appSupabaseRest("GET", "user_push_tokens", {
+      select: "id,token",
+      user_id: `eq.${userId}`,
+      is_active: "eq.true",
+      order: "updated_at.desc",
+      limit: String(PUSH_TOKEN_PER_USER_LIMIT)
+    });
+    const tokenRows = Array.isArray(tokenRowsRaw) ? tokenRowsRaw : [];
+    if(!tokenRows.length){
+      return { ok:true, delivered:0, attempted:0, reason:"no_registered_tokens" };
+    }
+
+    let delivered = 0;
+    for(const row of tokenRows){
+      const token = sanitizePushToken(row?.token);
+      if(!token) continue;
+      try{
+        const sent = await sendFcmLegacyMessage(token, {
+          title: pushTitle,
+          body: pushBody,
+          data: normalizePushDataPayload(data)
+        });
+        if(sent.ok){
+          delivered += 1;
+        }
+        if(sent.invalid && row?.id){
+          await appSupabaseRest("PATCH", "user_push_tokens", {
+            id: `eq.${row.id}`
+          }, {
+            body: {
+              is_active: false,
+              updated_at: new Date().toISOString()
+            },
+            prefer: "return=minimal"
+          });
+        }
+      }catch(_){ }
+    }
+
+    return {
+      ok:true,
+      delivered,
+      attempted: tokenRows.length
+    };
+  }catch(err){
+    console.error("push_user_delivery_error:", err?.stack || err);
+    return { ok:false, delivered:0, attempted:0, error:String(err?.message || "push_delivery_failed") };
+  }
+}
+
+async function notifySellerAboutNewOrder(req, orderLike){
+  const order = orderLike && typeof orderLike === "object" ? orderLike : null;
+  const sellerId = sanitizeUserId(order?.seller_id);
+  const orderId = sanitizeUuid(order?.id);
+  if(!order || !sellerId || !orderId){
+    return;
+  }
+
+  const items = Array.isArray(order.items) ? order.items : [];
+  const firstItem = items[0] || {};
+  const qty = items.reduce((sum, item) => sum + Math.max(1, Math.floor(safeNumber(item?.qty) || 1)), 0);
+  const buyerAddress = order.buyer_address && typeof order.buyer_address === "object"
+    ? order.buyer_address
+    : (order.address && typeof order.address === "object" ? order.address : {});
+  const buyerName = compactText(order.buyer_name || buyerAddress?.name || order.email || "Buyer", 80) || "Buyer";
+  const buyerAddressText = formatOrderAddressLine(buyerAddress) || "-";
+  const itemSummary = buildOrderItemsSummary(order, 3);
+  const paymentMethod = compactText(order.payment_method || "Pending Payment", 80) || "Pending Payment";
+  const totalAmount = Number(safeNumber(order.total || order.amount || 0).toFixed(2));
+  const currency = String(order.currency || "USD").trim().toUpperCase() || "USD";
+  const orderLink = buildAbsoluteServerUrl(req, `/order-details.html?order_id=${encodeURIComponent(orderId)}`);
+  const notifMessage = compactText(
+    `Buyer: ${buyerName} | Address: ${buyerAddressText} | Items: ${itemSummary} | Qty: ${qty} | Payment: ${paymentMethod}`,
+    600
+  );
+
+  await insertNotificationRows([{
+    receiver_user_id: sellerId,
+    seller_id: sellerId,
+    type: "new_order",
+    title: "New Order Received",
+    message: notifMessage,
+    order_id: orderId,
+    product_id: sanitizeUuid(firstItem?.id || firstItem?.product_id) || null,
+    product_name: compactText(firstItem?.name || "Product", 120),
+    qty,
+    buyer_name: buyerName,
+    buyer_address: buyerAddressText,
+    buyer_phone: compactText(buyerAddress?.phone, 40),
+    payment_method: paymentMethod,
+    total: totalAmount,
+    currency,
+    is_read: false,
+    is_deleted: false
+  }]);
+
+  await sendPushToUserId(
+    sellerId,
+    "New Order Received",
+    compactText(`${buyerName} placed an order for ${itemSummary}. Open order details to review it.`, 220),
+    {
+      type: "seller_new_order",
+      order_id: orderId,
+      link: orderLink,
+      seller_id: sellerId,
+      buyer_name: buyerName,
+      payment_method: paymentMethod,
+      total: String(totalAmount)
+    }
+  );
+}
+
+async function notifyBuyerAboutOrderStatus(req, orderLike, previousStatus, nextStatus){
+  const order = orderLike && typeof orderLike === "object" ? orderLike : null;
+  const buyerId = sanitizeUserId(order?.user_id);
+  const orderId = sanitizeUuid(order?.id);
+  const cleanStatus = String(nextStatus || "").trim().toLowerCase().replace(/[^a-z_]/g, "");
+  if(!order || !buyerId || !orderId || !cleanStatus){
+    return;
+  }
+
+  const statusLabel = humanizeOrderStatus(cleanStatus);
+  const prevLabel = humanizeOrderStatus(previousStatus);
+  const itemSummary = buildOrderItemsSummary(order, 2);
+  const trackBits = [];
+  if(cleanStatus === "shipped" && order?.courier_name){
+    trackBits.push(`via ${compactText(order.courier_name, 60)}`);
+  }
+  if(cleanStatus === "shipped" && order?.tracking_number){
+    trackBits.push(`Tracking ${compactText(order.tracking_number, 80)}`);
+  }
+  const detailSuffix = trackBits.length ? ` (${trackBits.join(" | ")})` : "";
+  const message = compactText(
+    cleanStatus === "delivered"
+      ? `${itemSummary} was delivered successfully. Check order details for the final timeline.`
+      : `${itemSummary} status changed from ${prevLabel} to ${statusLabel}.${detailSuffix}`,
+    320
+  );
+  const orderLink = buildAbsoluteServerUrl(req, `/order-details.html?order_id=${encodeURIComponent(orderId)}`);
+
+  await insertNotificationRows([{
+    receiver_user_id: buyerId,
+    type: "order_status_update",
+    title: `Order ${statusLabel}`,
+    message,
+    order_id: orderId,
+    product_name: compactText(itemSummary, 120),
+    is_read: false,
+    is_deleted: false
+  }]);
+
+  await sendPushToUserId(
+    buyerId,
+    `Order ${statusLabel}`,
+    message,
+    {
+      type: "order_status_update",
+      order_id: orderId,
+      status: cleanStatus,
+      link: orderLink
+    }
+  );
+}
+
+async function readUserOnCallStatus(userId){
+  const cleanUserId = sanitizeUserId(userId);
+  if(!cleanUserId || !isAppSupabaseConfigured()){
+    return false;
+  }
+  try{
+    const rows = await appSupabaseRest("GET", "users", {
+      select: "user_id,is_on_call",
+      user_id: `eq.${cleanUserId}`,
+      limit: "1"
+    });
+    const row = Array.isArray(rows) && rows[0] ? rows[0] : null;
+    return !!row?.is_on_call;
+  }catch(_){
+    return false;
+  }
+}
+
+async function notifyIncomingCallInvite(req, signal){
+  if(!signal || signal.type !== "call-offer"){
+    return;
+  }
+
+  const fromUserId = sanitizeUserId(signal.from_user_id);
+  const toUserId = sanitizeUserId(signal.to_user_id);
+  if(!fromUserId || !toUserId){
+    return;
+  }
+
+  const callerRow = await fetchAppUserSummaryRow(fromUserId);
+  const callerName = getAppUserDisplayName(callerRow, "Incoming call");
+  const mediaLabel = signal.media_type === "video" ? "video" : "audio";
+  const link = buildAbsoluteServerUrl(
+    req,
+    `/open-chat.html?id=${encodeURIComponent(fromUserId)}&call_id=${encodeURIComponent(signal.call_id)}`
+  );
+
+  await sendPushToUserId(
+    toUserId,
+    callerName,
+    `Incoming ${mediaLabel} call`,
+    {
+      type: "call_invite",
+      link,
+      call_id: signal.call_id,
+      from_user_id: fromUserId,
+      media_type: mediaLabel,
+      title: callerName,
+      body: `Incoming ${mediaLabel} call`
+    }
+  );
+}
+
+function createCallSignalRow(signal, nowMs){
+  const createdMs = Number(nowMs) || Date.now();
+  const ttlSec = clampInt(
+    signal?.ttl_sec,
+    CALL_SIGNAL_MIN_TTL_SEC,
+    CALL_SIGNAL_MAX_TTL_SEC,
+    signal?.type === "call-offer" ? 90 : CALL_SIGNAL_DEFAULT_TTL_SEC
+  );
+  const id = signal?.signal_id || (typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${createdMs}_${crypto.randomBytes(4).toString("hex")}`);
+  const createdAt = new Date(createdMs).toISOString();
+  const expiresAt = new Date(createdMs + (ttlSec * 1000)).toISOString();
+  return {
+    id,
+    to_user_id: signal?.to_user_id || "",
+    from_user_id: signal?.from_user_id || "",
+    call_id: signal?.call_id || "",
+    type: signal?.type || "",
+    media_type: signal?.media_type || "audio",
+    reason: signal?.reason || "",
+    sdp: signal?.sdp || null,
+    candidate: signal?.candidate || null,
+    created_at: createdAt,
+    expires_at: expiresAt
+  };
+}
+
+function storeCallSignalRow(row){
+  if(!row || typeof row !== "object") return;
+  callSignalStore.push(row);
+  if(callSignalStore.length > CALL_SIGNAL_MAX_ITEMS){
+    callSignalStore.splice(0, callSignalStore.length - CALL_SIGNAL_MAX_ITEMS);
+  }
+}
+
 function isVideoAssetSupabaseConfigured(){
   return Boolean(VIDEO_ASSET_SUPABASE_URL && VIDEO_ASSET_SUPABASE_KEY);
 }
@@ -1681,32 +2050,50 @@ app.post("/api/call/signal", async (req, res) => {
       });
     }
 
-    const id = signal.signal_id || (typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : `${nowMs}_${crypto.randomBytes(4).toString("hex")}`);
-    const createdAt = new Date(nowMs).toISOString();
-    const expiresAt = new Date(nowMs + (signal.ttl_sec * 1000)).toISOString();
-    const row = {
-      id,
-      to_user_id: signal.to_user_id,
-      from_user_id: signal.from_user_id,
-      call_id: signal.call_id,
-      type: signal.type,
-      media_type: signal.media_type,
-      reason: signal.reason,
-      sdp: signal.sdp,
-      candidate: signal.candidate,
-      created_at: createdAt,
-      expires_at: expiresAt
-    };
-    callSignalStore.push(row);
-    if(callSignalStore.length > CALL_SIGNAL_MAX_ITEMS){
-      callSignalStore.splice(0, callSignalStore.length - CALL_SIGNAL_MAX_ITEMS);
+    if(signal.type === "call-offer"){
+      const receiverBusy = await readUserOnCallStatus(signal.to_user_id);
+      if(receiverBusy){
+        const existingBusy = callSignalStore.find((row) => {
+          const createdMs = Date.parse(String(row.created_at || ""));
+          return row.type === "call-busy"
+            && row.call_id === signal.call_id
+            && row.to_user_id === signal.from_user_id
+            && row.from_user_id === signal.to_user_id
+            && Number.isFinite(createdMs)
+            && createdMs >= (nowMs - 6000);
+        });
+        const busyRow = existingBusy || createCallSignalRow({
+          type: "call-busy",
+          to_user_id: signal.from_user_id,
+          from_user_id: signal.to_user_id,
+          call_id: signal.call_id,
+          media_type: signal.media_type,
+          reason: "busy",
+          ttl_sec: 45
+        }, nowMs);
+        if(!existingBusy){
+          storeCallSignalRow(busyRow);
+        }
+        return res.json({
+          ok:true,
+          busy:true,
+          id: busyRow.id,
+          expires_at: busyRow.expires_at
+        });
+      }
+    }
+
+    const row = createCallSignalRow(signal, nowMs);
+    storeCallSignalRow(row);
+    if(signal.type === "call-offer"){
+      notifyIncomingCallInvite(req, signal).catch((notifyErr) => {
+        console.error("call_invite_push_error:", notifyErr?.stack || notifyErr);
+      });
     }
     return res.json({
       ok:true,
-      id,
-      expires_at: expiresAt
+      id: row.id,
+      expires_at: row.expires_at
     });
   }catch(err){
     console.error("call_signal_post_error:", err?.stack || err);
@@ -3437,11 +3824,18 @@ app.post("/api/orders/create", async (req, res) => {
     const order = result?.order && typeof result.order === "object"
       ? result.order
       : (result && typeof result === "object" ? result : null);
+    const idempotent = !!result?.idempotent;
+
+    if(order?.id && !idempotent){
+      notifySellerAboutNewOrder(req, order).catch((notifyErr) => {
+        console.error("order_create_notify_seller_error:", notifyErr?.stack || notifyErr);
+      });
+    }
 
     return res.json({
       ok:true,
       order,
-      idempotent: !!result?.idempotent
+      idempotent
     });
   }catch(err){
     console.error("order_create_error:", err?.stack || err);
@@ -3551,10 +3945,19 @@ app.post("/api/orders/status", async (req, res) => {
       authToken: auth.accessToken
     });
 
+    const updatedOrder = result?.order || order;
+    const updatedStatus = String(updatedOrder?.status || nextStatus).trim().toLowerCase().replace(/[^a-z_]/g, "");
+    const previousStatus = String(order?.status || "").trim().toLowerCase().replace(/[^a-z_]/g, "");
+    if(role === "seller" && updatedOrder?.id && previousStatus !== updatedStatus && ["approved", "rejected", "shipped", "delivered"].includes(updatedStatus)){
+      notifyBuyerAboutOrderStatus(req, updatedOrder, previousStatus, updatedStatus).catch((notifyErr) => {
+        console.error("order_status_notify_buyer_error:", notifyErr?.stack || notifyErr);
+      });
+    }
+
     return res.json({
       ok:true,
-      order: result?.order || order,
-      status: nextStatus
+      order: updatedOrder,
+      status: updatedStatus || nextStatus
     });
   }catch(err){
     console.error("order_status_error:", err?.stack || err);

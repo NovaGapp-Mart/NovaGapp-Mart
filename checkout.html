@@ -16,10 +16,18 @@
 <script src="global.js"></script>
 
 <style>
-body{
+:root{
+  --checkout-keyboard-offset:0px;
+}
+html,body{
   margin:0;
+  min-height:100dvh;
+}
+body{
   font-family: Arial, sans-serif;
   background:#f2f2f2;
+  padding-bottom:calc(112px + var(--checkout-keyboard-offset) + env(safe-area-inset-bottom,0px));
+  scroll-padding-bottom:calc(140px + var(--checkout-keyboard-offset) + env(safe-area-inset-bottom,0px));
 }
 .header{
   background:#fff;
@@ -36,6 +44,7 @@ body{
   margin:10px;
   padding:15px;
   border-radius:8px;
+  scroll-margin-bottom:calc(150px + var(--checkout-keyboard-offset) + env(safe-area-inset-bottom,0px));
 }
 .step{
   display:flex;
@@ -97,12 +106,13 @@ body{
 }
 .footer{
   position:fixed;
-  bottom:0;
+  bottom:var(--checkout-keyboard-offset);
   left:0;
   right:0;
   background:#fff;
-  padding:10px;
+  padding:10px 10px calc(10px + env(safe-area-inset-bottom,0px));
   border-top:1px solid #ddd;
+  box-shadow:0 -8px 24px rgba(0,0,0,.08);
 }
 .footer button{
   width:100%;
@@ -183,6 +193,44 @@ let itemsBox = document.getElementById("items");
 let total = 0;
 let isPlacingOrder = false;
 const countryInput = document.getElementById("country");
+
+function applyCheckoutKeyboardOffset(){
+  const vv = window.visualViewport;
+  let offset = 0;
+  if(vv){
+    const layoutHeight = Math.max(window.innerHeight || 0, document.documentElement.clientHeight || 0);
+    offset = Math.max(0, Math.round(layoutHeight - vv.height - vv.offsetTop));
+    if(offset < 60) offset = 0;
+  }
+  document.documentElement.style.setProperty("--checkout-keyboard-offset", `${offset}px`);
+}
+
+function keepCheckoutFieldVisible(target){
+  if(!(target instanceof HTMLElement)) return;
+  if(!target.matches("input, select, textarea")) return;
+  setTimeout(() => {
+    try{
+      target.scrollIntoView({ block:"center", behavior:"smooth" });
+    }catch(_){
+      target.scrollIntoView();
+    }
+  }, 180);
+}
+
+if(window.visualViewport){
+  window.visualViewport.addEventListener("resize", applyCheckoutKeyboardOffset, { passive:true });
+  window.visualViewport.addEventListener("scroll", applyCheckoutKeyboardOffset, { passive:true });
+}
+window.addEventListener("resize", () => setTimeout(applyCheckoutKeyboardOffset, 0), { passive:true });
+window.addEventListener("orientationchange", () => setTimeout(applyCheckoutKeyboardOffset, 120), { passive:true });
+document.addEventListener("focusin", (event) => {
+  applyCheckoutKeyboardOffset();
+  keepCheckoutFieldVisible(event.target);
+});
+document.addEventListener("focusout", () => {
+  setTimeout(applyCheckoutKeyboardOffset, 120);
+});
+applyCheckoutKeyboardOffset();
 const ALL_COUNTRY_NAMES = [
   "Afghanistan",
   "Albania",

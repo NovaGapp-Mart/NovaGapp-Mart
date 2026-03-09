@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -15,7 +15,8 @@
   --danger:#ef4444;
 }
 *{box-sizing:border-box}
-body{margin:0;font-family:Arial,sans-serif;background:#f4f6f8;color:var(--ink)}
+html,body{min-height:100dvh}
+body{margin:0;font-family:Arial,sans-serif;background:#f4f6f8;color:var(--ink);padding-bottom:env(safe-area-inset-bottom,0px)}
 .header{
   position:sticky;top:0;z-index:20;
   background:linear-gradient(135deg,#ff7a00,#ff5a00);
@@ -28,7 +29,7 @@ body{margin:0;font-family:Arial,sans-serif;background:#f4f6f8;color:var(--ink)}
   min-width:56px;height:34px;border-radius:10px;cursor:pointer;font-size:13px;padding:0 10px
 }
 .header .id{font-size:12px;opacity:.9;margin-top:4px;word-break:break-all}
-.wrap{padding:12px 12px 80px;max-width:820px;margin:0 auto}
+.wrap{padding:12px 12px calc(92px + env(safe-area-inset-bottom,0px));max-width:820px;margin:0 auto}
 .card{
   background:#fff;border-radius:14px;padding:14px;
   box-shadow:0 4px 14px rgba(0,0,0,.06);
@@ -603,12 +604,18 @@ function renderActions(){
   sellerActions.innerHTML = "";
   const status = String(ORDER.status || "pending").toLowerCase();
 
-  if(isBuyer() && ["pending"].includes(status)){
+  if(isBuyer() && status === "pending"){
     const btn = document.createElement("button");
     btn.className = "action-btn danger";
     btn.innerText = "Cancel Request";
     btn.onclick = ()=>updateStatus("cancelled");
     buyerActions.appendChild(btn);
+  }else if(isBuyer() && status === "delivered"){
+    const completeBtn = document.createElement("button");
+    completeBtn.className = "action-btn";
+    completeBtn.innerText = "Mark Completed";
+    completeBtn.onclick = ()=>updateStatus("completed");
+    buyerActions.appendChild(completeBtn);
   }
 
   if(isSeller()){
@@ -636,12 +643,6 @@ function renderActions(){
       deliveredBtn.innerText = "Mark Delivered";
       deliveredBtn.onclick = ()=>updateStatus("delivered");
       sellerActions.appendChild(deliveredBtn);
-    }else if(status === "delivered"){
-      const completeBtn = document.createElement("button");
-      completeBtn.className = "action-btn";
-      completeBtn.innerText = "Mark Completed";
-      completeBtn.onclick = ()=>updateStatus("completed");
-      sellerActions.appendChild(completeBtn);
     }
   }
 }
