@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -185,84 +185,7 @@
       font-size:11px;
       font-weight:bold
     }
-    .contest-poster-overlay{
-      position:fixed;
-      inset:0;
-      background:rgba(0,0,0,.68);
-      display:none;
-      align-items:center;
-      justify-content:center;
-      z-index:3000;
-      padding:16px
-    }
-    .contest-poster-overlay.active{
-      display:flex
-    }
-    .contest-poster-card{
-      width:min(92vw, 920px);
-      background:#fff;
-      border-radius:14px;
-      padding:14px;
-      position:relative;
-      box-shadow:0 16px 32px rgba(0,0,0,.28)
-    }
-    .contest-poster-close{
-      position:absolute;
-      top:10px;
-      right:10px;
-      width:30px;
-      height:30px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      border:none;
-      border-radius:50%;
-      background:#111;
-      color:#fff;
-      font-size:17px;
-      line-height:1;
-      font-weight:700;
-      cursor:pointer
-    }
-    .contest-poster-image{
-      width:100%;
-      aspect-ratio:1280 / 720;
-      object-fit:cover;
-      border-radius:12px;
-      background:#f2f2f2;
-      display:block
-    }
-    .contest-poster-dots{
-      margin-top:10px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      gap:8px
-    }
-    .contest-poster-dot{
-      width:8px;
-      height:8px;
-      border-radius:50%;
-      background:#d4d4d4;
-      border:none;
-      padding:0;
-      cursor:pointer
-    }
-    .contest-poster-dot.active{
-      background:#ff6a00
-    }
-    .contest-poster-vote{
-      margin-top:12px;
-      width:100%;
-      border:none;
-      border-radius:10px;
-      padding:12px;
-      background:#ff6a00;
-      color:#fff;
-      font-weight:bold;
-      font-size:15px;
-      cursor:pointer
-    }
+
   </style>
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9977276800228616"
      crossorigin="anonymous"></script>
@@ -300,15 +223,6 @@
   <button onclick="location.href='subscription.html'">Upgrade &#128640;</button>
 </div>
 
-<div class="contest-poster-overlay" id="contestPosterOverlay" aria-hidden="true">
-  <div class="contest-poster-card">
-    <button type="button" class="contest-poster-close" id="contestPosterClose" aria-label="Close">&times;</button>
-    <img class="contest-poster-image" id="contestPosterImage" src="Images/rolls-royce.png" alt="Contest Poster">
-    <div class="contest-poster-dots" id="contestPosterDots"></div>
-    <button type="button" class="contest-poster-vote" id="contestPosterVoteBtn">Vote Now</button>
-  </div>
-</div>
-
 <div class="bottom-nav">
   <div class="nav-item active" onclick="go('index.html')">
     <img src="https://img.icons8.com/ios-filled/24/ff6a00/home.png"/>
@@ -339,13 +253,6 @@
 <script>
 /* ? SUPABASE CLIENT */
 const supa = window.supa;
-const CONTEST_POSTER_IMAGES = [
-  "Images/rolls-royce.png",
-  "Images/bmw.jpg",
-  "Images/many.jpg",
-  "Images/main.jpg"
-];
-let contestPosterIndex = 0;
 
 /* UI TEXT (safe) */
 if (window.t) {
@@ -356,79 +263,6 @@ if (window.t) {
 
 /* NAV */
 function go(p){ location.href = p }
-
-function renderContestPoster(){
-  const overlay = document.getElementById("contestPosterOverlay");
-  const image = document.getElementById("contestPosterImage");
-  const dotsWrap = document.getElementById("contestPosterDots");
-  if(!overlay || !image || !dotsWrap) return;
-  if(!Array.isArray(CONTEST_POSTER_IMAGES) || !CONTEST_POSTER_IMAGES.length) return;
-
-  const safeIndex = ((contestPosterIndex % CONTEST_POSTER_IMAGES.length) + CONTEST_POSTER_IMAGES.length) % CONTEST_POSTER_IMAGES.length;
-  contestPosterIndex = safeIndex;
-  image.src = CONTEST_POSTER_IMAGES[safeIndex];
-
-  dotsWrap.innerHTML = "";
-  CONTEST_POSTER_IMAGES.forEach((_, idx) => {
-    const dot = document.createElement("button");
-    dot.type = "button";
-    dot.className = "contest-poster-dot" + (idx === safeIndex ? " active" : "");
-    dot.setAttribute("aria-label", "Poster " + (idx + 1));
-    dot.addEventListener("click", () => {
-      contestPosterIndex = idx;
-      renderContestPoster();
-    });
-    dotsWrap.appendChild(dot);
-  });
-}
-
-function openContestPosterPopup(){
-  const overlay = document.getElementById("contestPosterOverlay");
-  if(!overlay) return;
-  if(!Array.isArray(CONTEST_POSTER_IMAGES) || !CONTEST_POSTER_IMAGES.length) return;
-  contestPosterIndex = 0;
-  renderContestPoster();
-  overlay.classList.add("active");
-  overlay.setAttribute("aria-hidden", "false");
-}
-
-function closeContestPosterPopup(){
-  const overlay = document.getElementById("contestPosterOverlay");
-  if(!overlay) return;
-  overlay.classList.remove("active");
-  overlay.setAttribute("aria-hidden", "true");
-}
-
-function advanceContestPoster(){
-  if(!Array.isArray(CONTEST_POSTER_IMAGES) || !CONTEST_POSTER_IMAGES.length){
-    closeContestPosterPopup();
-    return;
-  }
-  if(contestPosterIndex < CONTEST_POSTER_IMAGES.length - 1){
-    contestPosterIndex += 1;
-    renderContestPoster();
-    return;
-  }
-  closeContestPosterPopup();
-}
-
-function initContestPosterPopup(){
-  const overlay = document.getElementById("contestPosterOverlay");
-  const closeBtn = document.getElementById("contestPosterClose");
-  const voteBtn = document.getElementById("contestPosterVoteBtn");
-  if(!overlay || !closeBtn || !voteBtn) return;
-
-  closeBtn.addEventListener("click", advanceContestPoster);
-  overlay.addEventListener("click", (e) => {
-    if(e.target === overlay){
-      advanceContestPoster();
-    }
-  });
-  voteBtn.addEventListener("click", () => {
-    location.href = "contest.html";
-  });
-  openContestPosterPopup();
-}
 
 /* ?? REAL E-COMMERCE PRODUCT LOADER */
 async function renderProducts(searchText = ""){
@@ -845,7 +679,6 @@ async function initHomeNotificationSystem(){
 document.addEventListener("DOMContentLoaded", ()=>{
   bindProductEvents();
   renderProducts();
-  initContestPosterPopup();
   initHomeNotificationSystem();
   document.getElementById("searchBtn").addEventListener("click", () => {
     renderProducts(document.getElementById("searchInput").value);
